@@ -1,0 +1,263 @@
+{
+  "id": "diabetes",
+  "version": "1.0.0",
+  "name": "Đái Tháo Đường Type 2",
+  "short": "ĐTĐ",
+  "description": "Đánh giá nguy cơ mắc đái tháo đường type 2 dựa trên các chỉ số đường huyết, BMI, tiền sử gia đình và lối sống.",
+  "icd10_code": "E11",
+  "max_score": 24,
+  "fields": [
+    {
+      "key": "fasting_glucose",
+      "label": "Đường huyết lúc đói",
+      "type": "number",
+      "unit": "mg/dL",
+      "default": 95,
+      "min": 50,
+      "max": 400,
+      "step": 1,
+      "shared": false,
+      "required": true,
+      "tooltip": "Đo sau khi nhịn ăn ít nhất 8 tiếng"
+    },
+    {
+      "key": "hba1c",
+      "label": "HbA1c",
+      "type": "number",
+      "unit": "%",
+      "default": 5.4,
+      "min": 4.0,
+      "max": 15.0,
+      "step": 0.1,
+      "shared": false,
+      "required": false,
+      "tooltip": "Chỉ số đường huyết trung bình 3 tháng gần nhất. Để trống nếu chưa xét nghiệm."
+    },
+    {
+      "key": "waist",
+      "label": "Vòng bụng",
+      "type": "number",
+      "unit": "cm",
+      "default": 85,
+      "min": 50,
+      "max": 200,
+      "step": 1,
+      "shared": false,
+      "required": true,
+      "tooltip": "Đo ngang rốn khi thở ra nhẹ"
+    },
+    {
+      "key": "family_diabetes",
+      "label": "Gia đình có người bị đái tháo đường",
+      "type": "boolean",
+      "unit": null,
+      "default": false,
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": null,
+      "shared": false,
+      "required": true,
+      "tooltip": "Bố, mẹ, anh chị em ruột bị đái tháo đường type 2"
+    },
+    {
+      "key": "hypertension",
+      "label": "Tăng huyết áp",
+      "type": "boolean",
+      "unit": null,
+      "default": false,
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": null,
+      "shared": false,
+      "required": true,
+      "tooltip": "Đang được chẩn đoán hoặc điều trị tăng huyết áp"
+    }
+  ],
+  "scoring_rules": [
+    {
+      "rule_id": "r_age_45",
+      "description": "Tuổi ≥ 45",
+      "points": 2,
+      "conditions": [
+        {
+          "field": "age",
+          "op": "gte",
+          "value": 45
+        }
+      ]
+    },
+    {
+      "rule_id": "r_bmi_obese",
+      "description": "BMI ≥ 30 (Béo phì)",
+      "points": 2,
+      "conditions": [
+        {
+          "field": "bmi",
+          "op": "gte",
+          "value": 30
+        }
+      ]
+    },
+    {
+      "rule_id": "r_bmi_overweight",
+      "description": "BMI 25–29.9 (Thừa cân)",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "bmi",
+          "op": "gte",
+          "value": 25
+        },
+        {
+          "field": "bmi",
+          "op": "lt",
+          "value": 30
+        }
+      ]
+    },
+    {
+      "rule_id": "r_glucose_diabetic",
+      "description": "Đường huyết lúc đói ≥ 126 mg/dL",
+      "points": 4,
+      "conditions": [
+        {
+          "field": "fasting_glucose",
+          "op": "gte",
+          "value": 126
+        }
+      ]
+    },
+    {
+      "rule_id": "r_glucose_prediabetic",
+      "description": "Đường huyết lúc đói 100–125 mg/dL (Tiền ĐTĐ)",
+      "points": 2,
+      "conditions": [
+        {
+          "field": "fasting_glucose",
+          "op": "gte",
+          "value": 100
+        },
+        {
+          "field": "fasting_glucose",
+          "op": "lt",
+          "value": 126
+        }
+      ]
+    },
+    {
+      "rule_id": "r_hba1c_diabetic",
+      "description": "HbA1c ≥ 6.5%",
+      "points": 4,
+      "conditions": [
+        {
+          "field": "hba1c",
+          "op": "gte",
+          "value": 6.5
+        }
+      ]
+    },
+    {
+      "rule_id": "r_hba1c_prediabetic",
+      "description": "HbA1c 5.7–6.4% (Tiền ĐTĐ)",
+      "points": 2,
+      "conditions": [
+        {
+          "field": "hba1c",
+          "op": "gte",
+          "value": 5.7
+        },
+        {
+          "field": "hba1c",
+          "op": "lt",
+          "value": 6.5
+        }
+      ]
+    },
+    {
+      "rule_id": "r_family_diabetes",
+      "description": "Tiền sử gia đình bị đái tháo đường",
+      "points": 2,
+      "conditions": [
+        {
+          "field": "family_diabetes",
+          "op": "bool_true",
+          "value": null
+        }
+      ]
+    },
+    {
+      "rule_id": "r_hypertension",
+      "description": "Tăng huyết áp",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "hypertension",
+          "op": "bool_true",
+          "value": null
+        }
+      ]
+    },
+    {
+      "rule_id": "r_no_exercise",
+      "description": "Ít vận động thể chất",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "exercise",
+          "op": "bool_false",
+          "value": null
+        }
+      ]
+    },
+    {
+      "rule_id": "r_smoke",
+      "description": "Hút thuốc lá",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "smoke",
+          "op": "bool_true",
+          "value": null
+        }
+      ]
+    },
+    {
+      "rule_id": "r_waist",
+      "description": "Vòng bụng lớn (nguy cơ tích mỡ tạng)",
+      "points": 2,
+      "conditions": [
+        {
+          "field": "waist",
+          "op": "gte",
+          "value": "waist_threshold"
+        }
+      ]
+    }
+  ],
+  "risk_thresholds": {
+    "low": {
+      "max_percent": 33
+    },
+    "medium": {
+      "max_percent": 66
+    },
+    "high": {
+      "max_percent": 100
+    }
+  },
+  "ml_model": {
+    "enabled": false,
+    "_note": "ML dùng chung 1 model tổng (screening_best_model.pkl) quản lý ở cấp framework, không phải plugin"
+  },
+  "diet_keys": [
+    "diab"
+  ],
+  "guideline_tags": [
+    "diabetes",
+    "duong_huyet",
+    "hba1c"
+  ],
+  "advice_context": "Bệnh nhân có nguy cơ đái tháo đường type 2. Ưu tiên tư vấn kiểm soát đường huyết, giảm tinh bột tinh chế, tăng cường vận động và giảm cân nếu thừa cân."
+}

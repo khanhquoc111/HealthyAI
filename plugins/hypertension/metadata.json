@@ -1,0 +1,250 @@
+{
+  "id": "hypertension",
+  "version": "1.0.0",
+  "name": "Tăng Huyết Áp",
+  "short": "THA",
+  "description": "Đánh giá nguy cơ tăng huyết áp dựa trên chỉ số huyết áp đo được, BMI, thói quen ăn mặn, uống rượu và tiền sử gia đình.",
+  "icd10_code": "I10",
+  "max_score": 22,
+  "fields": [
+    {
+      "key": "systolic",
+      "label": "Huyết áp tâm thu",
+      "type": "number",
+      "unit": "mmHg",
+      "default": 120,
+      "min": 60,
+      "max": 250,
+      "step": 1,
+      "shared": false,
+      "required": true,
+      "tooltip": "Số trên trong kết quả đo huyết áp (vd: 120/80 → nhập 120)"
+    },
+    {
+      "key": "diastolic",
+      "label": "Huyết áp tâm trương",
+      "type": "number",
+      "unit": "mmHg",
+      "default": 80,
+      "min": 40,
+      "max": 150,
+      "step": 1,
+      "shared": false,
+      "required": true,
+      "tooltip": "Số dưới trong kết quả đo huyết áp (vd: 120/80 → nhập 80)"
+    },
+    {
+      "key": "sodium_intake",
+      "label": "Lượng muối/natri tiêu thụ mỗi ngày",
+      "type": "number",
+      "unit": "mg/ngày",
+      "default": 2000,
+      "min": 0,
+      "max": 8000,
+      "step": 100,
+      "shared": false,
+      "required": false,
+      "tooltip": "Ước tính: người ăn nhạt ~1500mg, bình thường ~2300mg, ăn mặn >3000mg"
+    },
+    {
+      "key": "alcohol",
+      "label": "Số đơn vị rượu/bia mỗi ngày",
+      "type": "number",
+      "unit": "đơn vị",
+      "default": 0,
+      "min": 0,
+      "max": 20,
+      "step": 1,
+      "shared": true,
+      "required": false,
+      "tooltip": "1 đơn vị = 1 lon bia 330ml hoặc 30ml rượu mạnh"
+    },
+    {
+      "key": "family_hypertension",
+      "label": "Gia đình có người bị tăng huyết áp",
+      "type": "boolean",
+      "unit": null,
+      "default": false,
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": null,
+      "shared": false,
+      "required": true,
+      "tooltip": "Bố, mẹ, anh chị em ruột bị tăng huyết áp"
+    }
+  ],
+  "scoring_rules": [
+    {
+      "rule_id": "r_bp_stage2",
+      "description": "Huyết áp cao độ 2+ (≥ 140/90 mmHg)",
+      "points": 4,
+      "conditions": [
+        {
+          "field": "systolic",
+          "op": "gte",
+          "value": 140
+        }
+      ]
+    },
+    {
+      "rule_id": "r_bp_stage2_dia",
+      "description": "Huyết áp tâm trương cao độ 2 (≥ 90 mmHg)",
+      "points": 4,
+      "conditions": [
+        {
+          "field": "diastolic",
+          "op": "gte",
+          "value": 90
+        },
+        {
+          "field": "systolic",
+          "op": "lt",
+          "value": 140
+        }
+      ]
+    },
+    {
+      "rule_id": "r_bp_stage1",
+      "description": "Huyết áp cao độ 1 (130–139 / 80–89 mmHg)",
+      "points": 2,
+      "conditions": [
+        {
+          "field": "systolic",
+          "op": "gte",
+          "value": 130
+        },
+        {
+          "field": "systolic",
+          "op": "lt",
+          "value": 140
+        }
+      ]
+    },
+    {
+      "rule_id": "r_bmi_obese",
+      "description": "Béo phì (BMI ≥ 30)",
+      "points": 2,
+      "conditions": [
+        {
+          "field": "bmi",
+          "op": "gte",
+          "value": 30
+        }
+      ]
+    },
+    {
+      "rule_id": "r_age_55",
+      "description": "Tuổi ≥ 55",
+      "points": 2,
+      "conditions": [
+        {
+          "field": "age",
+          "op": "gte",
+          "value": 55
+        }
+      ]
+    },
+    {
+      "rule_id": "r_age_40",
+      "description": "Tuổi 40–54",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "age",
+          "op": "gte",
+          "value": 40
+        },
+        {
+          "field": "age",
+          "op": "lt",
+          "value": 55
+        }
+      ]
+    },
+    {
+      "rule_id": "r_sodium",
+      "description": "Ăn mặn nhiều (Na > 2300 mg/ngày)",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "sodium_intake",
+          "op": "gt",
+          "value": 2300
+        }
+      ]
+    },
+    {
+      "rule_id": "r_smoke",
+      "description": "Hút thuốc lá",
+      "points": 2,
+      "conditions": [
+        {
+          "field": "smoke",
+          "op": "bool_true",
+          "value": null
+        }
+      ]
+    },
+    {
+      "rule_id": "r_family_htn",
+      "description": "Tiền sử gia đình bị tăng huyết áp",
+      "points": 2,
+      "conditions": [
+        {
+          "field": "family_hypertension",
+          "op": "bool_true",
+          "value": null
+        }
+      ]
+    },
+    {
+      "rule_id": "r_no_exercise",
+      "description": "Ít vận động",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "exercise",
+          "op": "bool_false",
+          "value": null
+        }
+      ]
+    },
+    {
+      "rule_id": "r_alcohol",
+      "description": "Uống rượu bia nhiều (> 2 đơn vị/ngày)",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "alcohol",
+          "op": "gt",
+          "value": 2
+        }
+      ]
+    }
+  ],
+  "risk_thresholds": {
+    "low": {
+      "max_percent": 33
+    },
+    "medium": {
+      "max_percent": 66
+    },
+    "high": {
+      "max_percent": 100
+    }
+  },
+  "ml_model": {
+    "enabled": false,
+    "_note": "ML dùng chung 1 model tổng (screening_best_model.pkl) quản lý ở cấp framework, không phải plugin"
+  },
+  "diet_keys": [
+    "htn"
+  ],
+  "guideline_tags": [
+    "hypertension",
+    "huyet_ap",
+    "sodium"
+  ],
+  "advice_context": "Bệnh nhân có nguy cơ tăng huyết áp. Ưu tiên tư vấn giảm muối, hạn chế rượu bia, tập thể dục đều đặn và theo dõi huyết áp tại nhà."
+}

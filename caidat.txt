@@ -1,0 +1,4 @@
+python api_server.py --host 127.0.0.1 --port 8000
+cd frontend
+npm install
+npm run dev

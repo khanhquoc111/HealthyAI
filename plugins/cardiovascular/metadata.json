@@ -1,0 +1,264 @@
+{
+  "id": "cardiovascular",
+  "version": "1.0.0",
+  "name": "Bệnh Tim Mạch",
+  "short": "Tim mạch",
+  "description": "Đánh giá nguy cơ bệnh tim mạch vành dựa trên mỡ máu, huyết áp, thói quen hút thuốc và tiền sử gia đình.",
+  "icd10_code": "I25",
+  "max_score": 21,
+  "fields": [
+    {
+      "key": "total_cholesterol",
+      "label": "Cholesterol toàn phần",
+      "type": "number",
+      "unit": "mg/dL",
+      "default": 185,
+      "min": 50,
+      "max": 500,
+      "step": 1,
+      "shared": false,
+      "required": true,
+      "tooltip": "Chỉ số cholesterol tổng trong xét nghiệm mỡ máu"
+    },
+    {
+      "key": "ldl",
+      "label": "LDL-Cholesterol (mỡ xấu)",
+      "type": "number",
+      "unit": "mg/dL",
+      "default": 110,
+      "min": 30,
+      "max": 400,
+      "step": 1,
+      "shared": false,
+      "required": true,
+      "tooltip": "Chỉ số LDL trong xét nghiệm mỡ máu. Mức lý tưởng < 100 mg/dL"
+    },
+    {
+      "key": "fasting_glucose",
+      "label": "Đường huyết lúc đói",
+      "type": "number",
+      "unit": "mg/dL",
+      "default": 95,
+      "min": 50,
+      "max": 400,
+      "step": 1,
+      "shared": false,
+      "required": false,
+      "tooltip": "Dùng để đánh giá nguy cơ từ tiền đái tháo đường"
+    },
+    {
+      "key": "hypertension",
+      "label": "Tăng huyết áp",
+      "type": "boolean",
+      "unit": null,
+      "default": false,
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": null,
+      "shared": false,
+      "required": true,
+      "tooltip": "Đang được chẩn đoán hoặc điều trị tăng huyết áp"
+    },
+    {
+      "key": "family_cardiovascular",
+      "label": "Gia đình có người bị bệnh tim mạch sớm",
+      "type": "boolean",
+      "unit": null,
+      "default": false,
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": null,
+      "shared": false,
+      "required": true,
+      "tooltip": "Nam thân nhân bị bệnh tim trước 55 tuổi, hoặc nữ trước 65 tuổi"
+    }
+  ],
+  "scoring_rules": [
+    {
+      "rule_id": "r_chol_high",
+      "description": "Cholesterol toàn phần cao (≥ 240 mg/dL)",
+      "points": 3,
+      "conditions": [
+        {
+          "field": "total_cholesterol",
+          "op": "gte",
+          "value": 240
+        }
+      ]
+    },
+    {
+      "rule_id": "r_chol_borderline",
+      "description": "Cholesterol giới hạn cao (200–239 mg/dL)",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "total_cholesterol",
+          "op": "gte",
+          "value": 200
+        },
+        {
+          "field": "total_cholesterol",
+          "op": "lt",
+          "value": 240
+        }
+      ]
+    },
+    {
+      "rule_id": "r_ldl_high",
+      "description": "LDL-Cholesterol cao (≥ 160 mg/dL)",
+      "points": 3,
+      "conditions": [
+        {
+          "field": "ldl",
+          "op": "gte",
+          "value": 160
+        }
+      ]
+    },
+    {
+      "rule_id": "r_ldl_borderline",
+      "description": "LDL cao trung bình (130–159 mg/dL)",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "ldl",
+          "op": "gte",
+          "value": 130
+        },
+        {
+          "field": "ldl",
+          "op": "lt",
+          "value": 160
+        }
+      ]
+    },
+    {
+      "rule_id": "r_smoke",
+      "description": "Hút thuốc lá — yếu tố nguy cơ tim mạch cao",
+      "points": 3,
+      "conditions": [
+        {
+          "field": "smoke",
+          "op": "bool_true",
+          "value": null
+        }
+      ]
+    },
+    {
+      "rule_id": "r_hypertension",
+      "description": "Tăng huyết áp",
+      "points": 2,
+      "conditions": [
+        {
+          "field": "hypertension",
+          "op": "bool_true",
+          "value": null
+        }
+      ]
+    },
+    {
+      "rule_id": "r_bmi_obese",
+      "description": "Béo phì (BMI ≥ 30)",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "bmi",
+          "op": "gte",
+          "value": 30
+        }
+      ]
+    },
+    {
+      "rule_id": "r_age_65",
+      "description": "Tuổi ≥ 65",
+      "points": 2,
+      "conditions": [
+        {
+          "field": "age",
+          "op": "gte",
+          "value": 65
+        }
+      ]
+    },
+    {
+      "rule_id": "r_age_50",
+      "description": "Tuổi 50–64",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "age",
+          "op": "gte",
+          "value": 50
+        },
+        {
+          "field": "age",
+          "op": "lt",
+          "value": 65
+        }
+      ]
+    },
+    {
+      "rule_id": "r_prediabetes",
+      "description": "Đường huyết cao (tiền đái tháo đường)",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "fasting_glucose",
+          "op": "gte",
+          "value": 100
+        }
+      ]
+    },
+    {
+      "rule_id": "r_family_cvd",
+      "description": "Tiền sử gia đình bệnh tim mạch sớm",
+      "points": 2,
+      "conditions": [
+        {
+          "field": "family_cardiovascular",
+          "op": "bool_true",
+          "value": null
+        }
+      ]
+    },
+    {
+      "rule_id": "r_no_exercise",
+      "description": "Ít vận động thể chất",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "exercise",
+          "op": "bool_false",
+          "value": null
+        }
+      ]
+    }
+  ],
+  "risk_thresholds": {
+    "low": {
+      "max_percent": 33
+    },
+    "medium": {
+      "max_percent": 66
+    },
+    "high": {
+      "max_percent": 100
+    }
+  },
+  "ml_model": {
+    "enabled": false,
+    "_note": "ML dùng chung 1 model tổng (screening_best_model.pkl) quản lý ở cấp framework, không phải plugin"
+  },
+  "diet_keys": [
+    "cvd"
+  ],
+  "guideline_tags": [
+    "cardiovascular",
+    "cholesterol",
+    "tim_mach",
+    "mo_mau"
+  ],
+  "advice_context": "Bệnh nhân có nguy cơ bệnh tim mạch. Ưu tiên tư vấn giảm mỡ bão hòa, tăng Omega-3, ngừng hút thuốc và kiểm soát huyết áp."
+}

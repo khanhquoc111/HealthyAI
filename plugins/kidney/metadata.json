@@ -1,0 +1,192 @@
+{
+  "id": "kidney",
+  "version": "1.0.0",
+  "name": "Bệnh Thận Mạn Tính",
+  "short": "Thận",
+  "description": "Đánh giá nguy cơ bệnh thận mạn dựa trên creatinine máu, đái tháo đường, tăng huyết áp và các yếu tố nguy cơ khác.",
+  "icd10_code": "N18",
+  "max_score": 13,
+  "_note": "Plugin này sử dụng custom_scorer.py để tính điểm creatinine theo giới tính. JSON scoring_rules chỉ dùng làm fallback nếu file custom_scorer.py bị thiếu.",
+  "fields": [
+    {
+      "key": "creatinine",
+      "label": "Creatinine máu",
+      "type": "number",
+      "unit": "mg/dL",
+      "default": 0.9,
+      "min": 0.3,
+      "max": 15.0,
+      "step": 0.1,
+      "shared": false,
+      "required": true,
+      "tooltip": "Chỉ số creatinine trong xét nghiệm máu. Giá trị bình thường: Nam < 1.2, Nữ < 1.1 mg/dL"
+    },
+    {
+      "key": "fasting_glucose",
+      "label": "Đường huyết lúc đói",
+      "type": "number",
+      "unit": "mg/dL",
+      "default": 95,
+      "min": 50,
+      "max": 400,
+      "step": 1,
+      "shared": false,
+      "required": false,
+      "tooltip": "Đái tháo đường là nguyên nhân hàng đầu gây bệnh thận mạn"
+    },
+    {
+      "key": "hypertension",
+      "label": "Tăng huyết áp",
+      "type": "boolean",
+      "unit": null,
+      "default": false,
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": null,
+      "shared": false,
+      "required": true,
+      "tooltip": "Tăng huyết áp là yếu tố hàng đầu gây bệnh thận mạn"
+    },
+    {
+      "key": "nsaid_use",
+      "label": "Thường xuyên dùng thuốc giảm đau NSAID",
+      "type": "boolean",
+      "unit": null,
+      "default": false,
+      "min": null,
+      "max": null,
+      "step": null,
+      "options": null,
+      "shared": false,
+      "required": false,
+      "tooltip": "Ibuprofen, Naproxen, Diclofenac... dùng thường xuyên có thể làm tổn thương thận"
+    }
+  ],
+  "scoring_rules": [
+    {
+      "rule_id": "r_creatinine_male",
+      "description": "Creatinine máu cao (Nam > 1.2 mg/dL)",
+      "points": 3,
+      "conditions": [
+        {
+          "field": "creatinine",
+          "op": "gt",
+          "value": 1.2
+        },
+        {
+          "field": "gender",
+          "op": "eq",
+          "value": "Nam"
+        }
+      ]
+    },
+    {
+      "rule_id": "r_creatinine_female",
+      "description": "Creatinine máu cao (Nữ > 1.1 mg/dL)",
+      "points": 3,
+      "conditions": [
+        {
+          "field": "creatinine",
+          "op": "gt",
+          "value": 1.1
+        },
+        {
+          "field": "gender",
+          "op": "eq",
+          "value": "Nữ"
+        }
+      ]
+    },
+    {
+      "rule_id": "r_diabetes",
+      "description": "Đái tháo đường (nguy cơ bệnh thận)",
+      "points": 2,
+      "conditions": [
+        {
+          "field": "fasting_glucose",
+          "op": "gte",
+          "value": 126
+        }
+      ]
+    },
+    {
+      "rule_id": "r_hypertension",
+      "description": "Tăng huyết áp — yếu tố hàng đầu gây bệnh thận",
+      "points": 2,
+      "conditions": [
+        {
+          "field": "hypertension",
+          "op": "bool_true",
+          "value": null
+        }
+      ]
+    },
+    {
+      "rule_id": "r_age_60",
+      "description": "Tuổi cao ≥ 60",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "age",
+          "op": "gte",
+          "value": 60
+        }
+      ]
+    },
+    {
+      "rule_id": "r_smoke",
+      "description": "Hút thuốc lá",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "smoke",
+          "op": "bool_true",
+          "value": null
+        }
+      ]
+    },
+    {
+      "rule_id": "r_nsaid",
+      "description": "Sử dụng thuốc giảm đau NSAID thường xuyên",
+      "points": 1,
+      "conditions": [
+        {
+          "field": "nsaid_use",
+          "op": "bool_true",
+          "value": null
+        }
+      ]
+    }
+  ],
+  "custom_scorer": {
+    "enabled": true,
+    "file": "custom_scorer.py",
+    "description": "Tính điểm creatinine theo giới tính và có thể mở rộng tính eGFR (CKD-EPI formula) trong tương lai"
+  },
+  "risk_thresholds": {
+    "low": {
+      "max_percent": 33
+    },
+    "medium": {
+      "max_percent": 66
+    },
+    "high": {
+      "max_percent": 100
+    }
+  },
+  "ml_model": {
+    "enabled": false,
+    "_note": "ML dùng chung 1 model tổng (screening_best_model.pkl) quản lý ở cấp framework, không phải plugin"
+  },
+  "diet_keys": [
+    "kid"
+  ],
+  "guideline_tags": [
+    "kidney",
+    "than_man",
+    "creatinine",
+    "egfr"
+  ],
+  "advice_context": "Bệnh nhân có nguy cơ bệnh thận mạn. Ưu tiên tư vấn kiểm soát huyết áp, đường huyết, hạn chế protein động vật và tránh dùng thuốc gây độc thận."
+}

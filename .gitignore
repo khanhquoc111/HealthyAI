@@ -1,0 +1,19 @@
+# Môi trường ảo Python
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.pyc
+
+# Thư viện Frontend (Cực kỳ nặng, không được up lên)
+frontend/node_modules/
+frontend/dist/
+
+# Cấu hình môi trường chứa thông tin bảo mật (như GEMINI_API_KEY)
+.env
+
+# Các file dữ liệu lớn hoặc model nặng (tùy chọn)
+data/*.csv
+models/*.pkl
+models_v1/*.pkl
