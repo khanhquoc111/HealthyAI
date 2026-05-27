@@ -6,6 +6,7 @@ import mimetypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from modules.plugin_manager import get_all_plugins, get_plugin
 
 from healthyai_service import (
     DEFAULT_PROFILE,
@@ -64,6 +65,28 @@ class HealthyAIHandler(BaseHTTPRequestHandler):
             search = params.get("search", [""])[0]
             limit = int(params.get("limit", ["100"])[0])
             self._send_json(200, search_drugs(search=search, limit=limit))
+            return
+        
+        # Trả về danh sách rút gọn các bệnh để Frontend làm Menu thả xuống
+        if path == "/api/plugins":
+            plugins = get_all_plugins()
+            plugin_list = [
+                {"disease_id": pid, "disease_name": pdata.get("name", "Chưa đặt tên")}
+                for pid, pdata in plugins.items()
+            ]
+            self._send_json(200, plugin_list)
+            return
+
+        # Trả về toàn bộ file cấu hình JSON của một bệnh cụ thể
+        if path.startswith("/api/plugins/"):
+            # Lấy mã bệnh từ URL (ví dụ: /api/plugins/diabetes -> diabetes)
+            plugin_id = path.split("/")[-1]
+            plugin_data = get_plugin(plugin_id)
+            
+            if plugin_data:
+                self._send_json(200, plugin_data)
+            else:
+                self._send_json(404, {"error": f"Không tìm thấy cấu hình cho bệnh: {plugin_id}"})
             return
 
         self._serve_static(parsed.path)
