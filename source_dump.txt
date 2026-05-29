@@ -10,6 +10,12 @@ HealthyAI/
 ├── .venv/
 ├── __pycache__/
 ├── data/
+│   ├── demographic.csv
+│   ├── diet.csv
+│   ├── examination.csv
+│   ├── labs.csv
+│   ├── medications.csv
+│   └── questionnaire.csv
 ├── frontend/
 │   ├── dist/
 │   ├── node_modules/
@@ -42,7 +48,9 @@ HealthyAI/
 ├── modules/
 │   ├── __pycache__/
 │   ├── diet_advisor.py
+│   ├── dynamic_scorer.py
 │   ├── medication_checker.py
+│   ├── plugin_manager.py
 │   └── risk_engine.py
 ├── plugins/
 │   ├── cardiovascular/
@@ -86,6 +94,7 @@ import mimetypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from modules.plugin_manager import get_all_plugins, get_plugin
 
 from healthyai_service import (
     DEFAULT_PROFILE,
@@ -144,6 +153,28 @@ class HealthyAIHandler(BaseHTTPRequestHandler):
             search = params.get("search", [""])[0]
             limit = int(params.get("limit", ["100"])[0])
             self._send_json(200, search_drugs(search=search, limit=limit))
+            return
+        
+        # Trả về danh sách rút gọn các bệnh để Frontend làm Menu thả xuống
+        if path == "/api/plugins":
+            plugins = get_all_plugins()
+            plugin_list = [
+                {"disease_id": pid, "disease_name": pdata.get("name", "Chưa đặt tên")}
+                for pid, pdata in plugins.items()
+            ]
+            self._send_json(200, plugin_list)
+            return
+
+        # Trả về toàn bộ file cấu hình JSON của một bệnh cụ thể
+        if path.startswith("/api/plugins/"):
+            # Lấy mã bệnh từ URL (ví dụ: /api/plugins/diabetes -> diabetes)
+            plugin_id = path.split("/")[-1]
+            plugin_data = get_plugin(plugin_id)
+            
+            if plugin_data:
+                self._send_json(200, plugin_data)
+            else:
+                self._send_json(404, {"error": f"Không tìm thấy cấu hình cho bệnh: {plugin_id}"})
             return
 
         self._serve_static(parsed.path)
@@ -3020,6 +3051,101 @@ def _default_benchmark(user_data: dict, risk_keys: list) -> dict:
     }
 ```
 
+### modules\dynamic_scorer.py
+```py
+import sys
+from pathlib import Path
+
+# Thêm thư mục gốc vào Python path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from modules.plugin_manager import get_plugin
+
+def evaluate_condition(user_data: dict, condition: dict) -> bool:
+    """Đọc hiểu và dịch các toán tử logic từ file JSON sang code Python."""
+    field = condition.get("field")
+    op = condition.get("op")
+    val = condition.get("value")
+
+    # Lấy giá trị người dùng đã nhập, nếu chưa nhập thì mặc định là None
+    user_val = user_data.get(field)
+    
+    if user_val is None:
+        return False
+
+    # Dịch các toán tử (operator) thành phép toán tương ứng
+    if op == "gte": return user_val >= val        # Lớn hơn hoặc bằng
+    if op == "lte": return user_val <= val        # Nhỏ hơn hoặc bằng
+    if op == "gt":  return user_val > val         # Lớn hơn
+    if op == "lt":  return user_val < val         # Nhỏ hơn
+    if op == "eq":  return user_val == val        # Bằng nhau
+    if op == "neq": return user_val != val        # Khác nhau
+    if op == "bool_true":  return bool(user_val) is True   # Checkbox chọn Có
+    if op == "bool_false": return bool(user_val) is False  # Checkbox chọn Không
+    
+    return False
+
+def compute_dynamic_score(plugin_id: str, user_data: dict) -> tuple[int, list]:
+    """Tính tổng điểm nguy cơ dựa trên cấu hình JSON của bệnh."""
+    plugin = get_plugin(plugin_id)
+    if not plugin:
+        return 0, ["Lỗi: Không tìm thấy cấu hình bệnh lý."]
+
+    score = 0
+    reasons = []
+    
+    # Lấy danh sách luật tính điểm và điểm tối đa từ JSON
+    rules = plugin.get("scoring_rules", [])
+    max_score = plugin.get("max_score", 100)
+
+    for rule in rules:
+        # Giả định ban đầu là luật này đúng
+        conditions_met = True 
+        
+        # Kiểm tra tất cả các điều kiện trong 1 luật (AND logic)
+        for cond in rule.get("conditions", []):
+            if not evaluate_condition(user_data, cond):
+                conditions_met = False
+                break # Chỉ cần 1 điều kiện sai, bỏ qua luật này
+        
+        # Nếu tất cả điều kiện đều thỏa mãn -> Cộng điểm và ghi nhận lý do
+        if conditions_met:
+            score += rule.get("points", 0)
+            reasons.append(rule.get("description", "Có yếu tố nguy cơ"))
+
+    # Đảm bảo điểm không vượt quá điểm tối đa
+    final_score = min(score, max_score)
+    return final_score, reasons
+
+# # --- ĐOẠN CODE TEST TRỰC TIẾP ---
+# if __name__ == "__main__":
+#     from modules.plugin_manager import load_all_plugins
+    
+#     # Giả lập dữ liệu một bệnh nhân (ví dụ: nam, 50 tuổi, béo phì, đường huyết cao)
+#     mock_user_data = {
+#         "age": 50,
+#         "bmi": 31.5,
+#         "fasting_glucose": 130,
+#         "exercise": False,
+#         "smoke": True
+#     }
+    
+#     print("Khởi chạy bộ tính điểm động...")
+#     print(f"Dữ liệu bệnh nhân: {mock_user_data}\n")
+    
+#     # Nạp tất cả plugins trước
+#     load_all_plugins()
+    
+#     # Test tính điểm cho bệnh tiểu đường
+#     score, reasons = compute_dynamic_score("diabetes", mock_user_data)
+    
+#     print(f"✅ Bệnh lý: Đái Tháo Đường")
+#     print(f"👉 Tổng điểm nguy cơ: {score}")
+#     print("👉 Lý do chi tiết:")
+#     for r in reasons:
+#         print(f"  - {r}")
+```
+
 ### modules\medication_checker.py
 ```py
 # modules/medication_checker.py
@@ -3588,6 +3714,73 @@ def get_drug_disease_stats(drug_name: str) -> dict:
     counts = subset["RXDRSD1"].dropna().value_counts().head(5)
     # Dịch tên bệnh sang tiếng Việt
     return {_translate_disease(k): v for k, v in counts.to_dict().items()}
+```
+
+### modules\plugin_manager.py
+```py
+import json
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).parent.parent
+PLUGINS_DIR = PROJECT_ROOT / "plugins"
+
+_PLUGINS_CACHE = {}
+
+def load_all_plugins():
+    """Quét thư mục và nạp tất cả metadata.json vào bộ nhớ."""
+    global _PLUGINS_CACHE
+    _PLUGINS_CACHE.clear()
+    
+    # Kiểm tra xem thư mục plugins có tồn tại không
+    if not PLUGINS_DIR.exists():
+        print(f"Lỗi: Không tìm thấy thư mục {PLUGINS_DIR}")
+        return _PLUGINS_CACHE
+
+    for plugin_path in PLUGINS_DIR.iterdir():
+        if plugin_path.is_dir():
+            meta_file = plugin_path / "metadata.json"
+            if meta_file.exists():
+                with open(meta_file, encoding="utf-8") as f:
+                    data = json.load(f)
+                    _PLUGINS_CACHE[data["id"]] = data
+    return _PLUGINS_CACHE
+
+def get_plugin(plugin_id: str):
+    # Nạp plugin nếu cache trống
+    if not _PLUGINS_CACHE:
+        load_all_plugins()
+    return _PLUGINS_CACHE.get(plugin_id)
+
+def get_all_plugins():
+    if not _PLUGINS_CACHE:
+        load_all_plugins()
+    return _PLUGINS_CACHE
+
+# # --- CODE TEST ---
+# if __name__ == "__main__":
+#     print("Đang quét thư mục plugins...")
+    
+#     # 1. Gọi hàm nạp tất cả plugin
+#     all_plugins = load_all_plugins()
+    
+#     # 2. In ra kết quả tổng quan
+#     print(f"✅ Đã tải thành công {len(all_plugins)} bệnh lý vào hệ thống:")
+    
+#     # 3. Duyệt qua và in chi tiết từng bệnh
+#     for plugin_id, plugin_data in all_plugins.items():
+#         name = plugin_data.get("name", "Không rõ tên")
+#         fields_count = len(plugin_data.get("fields", []))
+#         rules_count = len(plugin_data.get("scoring_rules", []))
+        
+#         print(f"  - [{plugin_id}] {name} (Fields: {fields_count}, Rules: {rules_count})")
+        
+#     # 4. Test hàm lấy một bệnh cụ thể
+#     print("\nTest thử lấy bệnh 'diabetes':")
+#     diab = get_plugin("diabetes")
+#     if diab:
+#         print(f"  Tìm thấy! Tên bệnh: {diab['name']}")
+#     else:
+#         print("  ❌ Không tìm thấy bệnh diabetes.")
 ```
 
 ### modules\risk_engine.py
