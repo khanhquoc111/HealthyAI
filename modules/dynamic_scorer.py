@@ -35,6 +35,17 @@ def compute_dynamic_score(plugin_id: str, user_data: dict) -> tuple[int, list]:
     plugin = get_plugin(plugin_id)
     if not plugin:
         return 0, ["Lỗi: Không tìm thấy cấu hình bệnh lý."]
+    
+    # Ưu tiên custom_scorer.py nếu plugin có khai báo và file tồn tại
+    custom_cfg = plugin.get("custom_scorer", {})
+    if custom_cfg.get("enabled"):
+        scorer_path = Path(__file__).parent.parent / "plugins" / plugin_id / custom_cfg.get("file", "custom_scorer.py")
+        if scorer_path.exists():
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("custom_scorer", scorer_path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod.compute_score(user_data)
 
     score = 0
     reasons = []

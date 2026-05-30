@@ -6,7 +6,8 @@ import mimetypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-from modules.plugin_manager import get_all_plugins, get_plugin
+from modules.plugin_manager import get_all_plugins, get_plugin, load_all_plugins
+from modules.plugin_trainer import train_plugin_model
 
 from healthyai_service import (
     DEFAULT_PROFILE,
@@ -113,6 +114,29 @@ class HealthyAIHandler(BaseHTTPRequestHandler):
 
             if path == "/api/advice":
                 self._send_json(200, ai_advice(payload.get("profile", payload)))
+                return
+
+            if path.startswith("/api/plugins/") and path.endswith("/train"):
+                plugin_id = path.split("/")[-2]  # /api/plugins/diabetes/train → diabetes
+                plugin = get_plugin(plugin_id)
+                if not plugin:
+                    self._send_json(404, {"error": f"Không tìm thấy plugin: {plugin_id}"})
+                    return
+
+                # Đọc CSV từ request body dạng raw bytes
+                length = int(self.headers.get("Content-Length", "0"))
+                if length == 0:
+                    self._send_json(400, {"error": "Thiếu file CSV trong request body"})
+                    return
+
+                csv_bytes = self.rfile.read(length)
+                result = train_plugin_model(plugin_id, plugin, csv_bytes)
+
+                if result["ok"]:
+                    load_all_plugins()  # Reload cache để ml_model.enabled = true có hiệu lực ngay
+                    self._send_json(200, result)
+                else:
+                    self._send_json(500, result)
                 return
 
             self._send_json(404, {"error": "Không tìm thấy endpoint"})

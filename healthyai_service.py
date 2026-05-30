@@ -4,7 +4,6 @@ import pandas as pd
 from pathlib import Path
 from typing import Any
 
-# Import cấu phần mã nguồn động mới tạo
 from modules.plugin_manager import get_all_plugins, get_plugin
 from modules.dynamic_scorer import compute_dynamic_score
 from gemini_api import call_gemini
@@ -13,7 +12,6 @@ from modules.diet_advisor import get_diet_benchmark, NUTRITION_COLS
 from modules.medication_checker import check_medications, get_available_drugs, get_drug_disease_stats
 from modules.risk_engine import bmi_category, bp_category, glucose_category, hba1c_category, cholesterol_category, ldl_category
 
-# SỬA LỖI 1: Sửa 'false' thành 'False' chuẩn cú pháp Python
 DEFAULT_PROFILE: dict[str, Any] = {
     "age": 40, "gender": "Nam", "height": 165, "weight": 65.0, "waist": 85,
     "systolic": 120, "diastolic": 80, "fasting_glucose": 95, "hba1c": 5.4,
@@ -31,7 +29,6 @@ def build_user_data(profile: dict[str, Any] | None = None) -> dict[str, Any]:
     data["hypertension"] = int(data.get("systolic", 120)) >= 130 or int(data.get("diastolic", 80)) >= 80
     return data
 
-# SỬA LỖI 3: Khôi phục hàm bốc tách phân loại chỉ số sinh hiệu để cứu tab Tổng Quan của Frontend
 def health_categories(user_data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     bmi_label, bmi_status = bmi_category(user_data["bmi"])
     bp_label, bp_status = bp_category(user_data["systolic"], user_data["diastolic"])
@@ -56,24 +53,14 @@ def health_categories(user_data: dict[str, Any]) -> dict[str, dict[str, Any]]:
         "smoke": {**_label_pair("Có" if user_data["smoke"] else "Không", "danger" if user_data["smoke"] else "good"), "value": user_data["smoke"]},
     }
 
-def dynamic_ml_screening(plugin_id: str, user_data: dict[str, Any]) -> dict[str, Any]:
-    plugin = get_plugin(plugin_id)
-    if not plugin or "ml_model" not in plugin or not plugin["ml_model"].get("enabled"):
-        return {"available": False, "probability": None, "level": "Không áp dụng"}
-
+def _run_plugin_ml(pid: str, plugin: dict, user_data: dict[str, Any]) -> tuple[str, list[str]]:
+    """Chạy model.pkl riêng của plugin, trả về (level_key, reasons)."""
     try:
-        ml_config = plugin["ml_model"]
-        plugin_dir = Path("plugins") / plugin_id
-        
-        model_path = plugin_dir / ml_config["model_file"]
-        thresh_path = plugin_dir / ml_config["threshold_file"]
-        
-        if not model_path.exists() or not thresh_path.exists():
-            return {"available": False, "error": "Thiếu file mô hình .pkl"}
+        plugin_dir = Path("plugins") / pid
+        model_path = plugin_dir / plugin["ml_model"]["model_file"]
+        feature_cols = plugin["ml_model"].get("feature_cols", [])
 
         model = joblib.load(model_path)
-        threshold = float(joblib.load(thresh_path))
-        feature_cols = ml_config.get("feature_cols", [])
 
         row = {}
         for col in feature_cols:
@@ -86,38 +73,50 @@ def dynamic_ml_screening(plugin_id: str, user_data: dict[str, Any]) -> dict[str,
 
         x_input = pd.DataFrame([row], columns=feature_cols)
         probability = float(model.predict_proba(x_input)[0, 1])
-        level = "Cao" if probability >= 0.65 else "Trung bình" if probability >= threshold else "Thấp"
-        
-        return {"available": True, "probability": probability, "level": level, "threshold": threshold}
+        level_key = "cao" if probability >= 0.65 else "medium" if probability >= 0.40 else "low"
+        reasons = [f"ML xác suất nguy cơ: {round(probability * 100, 1)}%"]
+        return level_key, reasons
     except Exception as e:
-        return {"available": False, "error": str(e)}
+        return None, []  # None = báo hiệu ML thất bại, fallback sang rule-based
 
 def analyze_profile(profile: dict[str, Any] | None = None) -> dict[str, Any]:
     user_data = build_user_data(profile)
     plugins = get_all_plugins()
-    
+
     items = []
     scores_dict, reasons_dict, keys_dict, labels_dict = {}, {}, {}, {}
     high_risks, medium_risks = [], []
 
     for pid, plugin in plugins.items():
-        rule_score, reasons = compute_dynamic_score(pid, user_data)
+        ml_config = plugin.get("ml_model", {})
+        ml_enabled = ml_config.get("enabled", False)
+        ml_path = Path("plugins") / pid / ml_config.get("model_file", "model.pkl")
         max_score = plugin.get("max_score", 10)
+
+        if ml_enabled and ml_path.exists():
+            # Có model riêng → ưu tiên ML
+            final_key, reasons = _run_plugin_ml(pid, plugin, user_data)
+            if final_key is None:
+                # ML lỗi runtime → fallback rule-based
+                rule_score, reasons = compute_dynamic_score(pid, user_data)
+                pct = rule_score / max_score
+                final_key = "cao" if pct >= 0.60 else "medium" if pct >= 0.30 else "low"
+            else:
+                # Ánh xạ level → score ước tính để hiển thị percent
+                rule_score = {"cao": max_score, "medium": max_score // 2, "low": 0}[final_key]
+        else:
+            # Không có model → rule-based (có thể có custom_scorer.py)
+            rule_score, reasons = compute_dynamic_score(pid, user_data)
+            pct = rule_score / max_score
+            final_key = "cao" if pct >= 0.60 else "medium" if pct >= 0.30 else "low"
+
         percent = round((rule_score / max_score) * 100, 1)
-        
-        ml_res = dynamic_ml_screening(pid, user_data)
-        
-        pct = rule_score / max_score
-        rule_level = "cao" if pct >= 0.60 else "medium" if pct >= 0.30 else "low"
-        
-        ml_level_str = ml_res.get("level", "Thấp").lower()
-        ml_level = "cao" if ml_level_str == "cao" else "medium" if ml_level_str == "trung bình" else "low"
-        
-        final_key = "cao" if (rule_level == "cao" or ml_level == "cao") else "medium" if (rule_level == "medium" or ml_level == "medium") else "low"
         final_label = "Cao" if final_key == "cao" else "Trung bình" if final_key == "medium" else "Thấp"
-        
-        if final_key == "cao": high_risks.append(plugin["name"])
-        elif final_key == "medium": medium_risks.append(plugin["name"])
+
+        if final_key == "cao":
+            high_risks.append(plugin["name"])
+        elif final_key == "medium":
+            medium_risks.append(plugin["name"])
 
         scores_dict[pid] = rule_score
         reasons_dict[pid] = reasons
@@ -134,21 +133,22 @@ def analyze_profile(profile: dict[str, Any] | None = None) -> dict[str, Any]:
             "max_score": max_score,
             "percent": percent,
             "reasons": reasons,
-            "ml_analysis": ml_res
+            "ml_used": ml_enabled and ml_path.exists(),  # Frontend biết kết quả từ nguồn nào
         })
 
     return {
         "user_data": user_data,
-        "categories": health_categories(user_data), # SỬA LỖI 3: Trả dữ liệu categories về cứu nguy Frontend
+        "categories": health_categories(user_data),
         "risks": {
-            "scores": scores_dict, "reasons": reasons_dict, "keys": keys_dict, "labels": labels_dict, "items": items,
+            "scores": scores_dict, "reasons": reasons_dict,
+            "keys": keys_dict, "labels": labels_dict, "items": items,
         },
         "conclusion": {
-            "high_risks": high_risks, "medium_risks": medium_risks, "status": "high" if high_risks else "medium" if medium_risks else "good",
+            "high_risks": high_risks, "medium_risks": medium_risks,
+            "status": "high" if high_risks else "medium" if medium_risks else "good",
         }
     }
 
-# SỬA LỖI 2: Chuyển hàm sample_menu trực tiếp vào file này để đập tan lỗi Circular Import
 def sample_menu(risk_keys: list[str]) -> dict[str, list[str]]:
     is_diab = "diab" in risk_keys
     is_htn = "htn" in risk_keys
@@ -206,7 +206,6 @@ def ai_advice(profile: dict[str, Any] | None = None) -> dict[str, Any]:
     prompt = build_gemini_prompt(analysis["user_data"], risk_results, None)
     return {"reply": call_gemini(prompt), "analysis": analysis}
 
-# SỬA LỖI 4: Trả lại 3 hàm tiện ích quản trị thuốc và bảng tham chiếu để api_server.py import không bị crash
 def search_drugs(search: str = "", limit: int = 100) -> dict[str, Any]:
     drugs = get_available_drugs()
     if search:

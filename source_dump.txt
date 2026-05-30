@@ -10,12 +10,6 @@ HealthyAI/
 ├── .venv/
 ├── __pycache__/
 ├── data/
-│   ├── demographic.csv
-│   ├── diet.csv
-│   ├── examination.csv
-│   ├── labs.csv
-│   ├── medications.csv
-│   └── questionnaire.csv
 ├── frontend/
 │   ├── dist/
 │   ├── node_modules/
@@ -51,6 +45,7 @@ HealthyAI/
 │   ├── dynamic_scorer.py
 │   ├── medication_checker.py
 │   ├── plugin_manager.py
+│   ├── plugin_trainer.py
 │   └── risk_engine.py
 ├── plugins/
 │   ├── cardiovascular/
@@ -94,7 +89,8 @@ import mimetypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-from modules.plugin_manager import get_all_plugins, get_plugin
+from modules.plugin_manager import get_all_plugins, get_plugin, load_all_plugins
+from modules.plugin_trainer import train_plugin_model
 
 from healthyai_service import (
     DEFAULT_PROFILE,
@@ -201,6 +197,29 @@ class HealthyAIHandler(BaseHTTPRequestHandler):
 
             if path == "/api/advice":
                 self._send_json(200, ai_advice(payload.get("profile", payload)))
+                return
+
+            if path.startswith("/api/plugins/") and path.endswith("/train"):
+                plugin_id = path.split("/")[-2]  # /api/plugins/diabetes/train → diabetes
+                plugin = get_plugin(plugin_id)
+                if not plugin:
+                    self._send_json(404, {"error": f"Không tìm thấy plugin: {plugin_id}"})
+                    return
+
+                # Đọc CSV từ request body dạng raw bytes
+                length = int(self.headers.get("Content-Length", "0"))
+                if length == 0:
+                    self._send_json(400, {"error": "Thiếu file CSV trong request body"})
+                    return
+
+                csv_bytes = self.rfile.read(length)
+                result = train_plugin_model(plugin_id, plugin, csv_bytes)
+
+                if result["ok"]:
+                    load_all_plugins()  # Reload cache để ml_model.enabled = true có hiệu lực ngay
+                    self._send_json(200, result)
+                else:
+                    self._send_json(500, result)
                 return
 
             self._send_json(404, {"error": "Không tìm thấy endpoint"})
@@ -415,99 +434,35 @@ def call_gemini(prompt: str, temperature: float = 0.3, max_tokens: int = 4000) -
 ### healthyai_service.py
 ```py
 from __future__ import annotations
-
-from functools import lru_cache
+import joblib
+import pandas as pd
 from pathlib import Path
 from typing import Any
 
+from modules.plugin_manager import get_all_plugins, get_plugin
+from modules.dynamic_scorer import compute_dynamic_score
 from gemini_api import call_gemini
 from prompt_builder import build_gemini_prompt
-from modules.diet_advisor import get_diet_benchmark
-from modules.medication_checker import (
-    check_medications,
-    get_available_drugs,
-    get_drug_disease_stats,
-)
-from modules.risk_engine import (
-    MAX_SCORES,
-    bmi_category,
-    bp_category,
-    cholesterol_category,
-    compute_all_risks,
-    glucose_category,
-    hba1c_category,
-    ldl_category,
-)
-
+from modules.diet_advisor import get_diet_benchmark, NUTRITION_COLS
+from modules.medication_checker import check_medications, get_available_drugs, get_drug_disease_stats
+from modules.risk_engine import bmi_category, bp_category, glucose_category, hba1c_category, cholesterol_category, ldl_category
 
 DEFAULT_PROFILE: dict[str, Any] = {
-    "age": 40,
-    "gender": "Nam",
-    "height": 165,
-    "weight": 65.0,
-    "waist": 85,
-    "systolic": 120,
-    "diastolic": 80,
-    "fasting_glucose": 95,
-    "hba1c": 5.4,
-    "total_cholesterol": 185,
-    "ldl": 110,
-    "creatinine": 0.9,
-    "smoke": False,
-    "exercise": True,
-    "alcohol": 0,
-    "sodium_intake": 2000,
-    "nsaid_use": False,
-    "family_diabetes": False,
-    "family_hypertension": False,
-    "family_cardiovascular": False,
+    "age": 40, "gender": "Nam", "height": 165, "weight": 65.0, "waist": 85,
+    "systolic": 120, "diastolic": 80, "fasting_glucose": 95, "hba1c": 5.4,
+    "total_cholesterol": 185, "ldl": 110, "creatinine": 0.9,
+    "smoke": False, "exercise": True, "alcohol": 0, "sodium_intake": 2000,
+    "nsaid_use": False, "family_diabetes": False, "family_hypertension": False, "family_cardiovascular": False
 }
-
-RISK_META = {
-    "diab": {"name": "Đái Tháo Đường (Type 2)", "short": "ĐTĐ", "max": MAX_SCORES["DTĐ"]},
-    "htn": {"name": "Tăng Huyết Áp", "short": "Huyết áp", "max": MAX_SCORES["THA"]},
-    "cvd": {"name": "Bệnh Tim Mạch", "short": "Tim mạch", "max": MAX_SCORES["Tim"]},
-    "kid": {"name": "Bệnh Thận Mạn Tính", "short": "Thận", "max": MAX_SCORES["Thận"]},
-}
-
 
 def build_user_data(profile: dict[str, Any] | None = None) -> dict[str, Any]:
     data = {**DEFAULT_PROFILE, **(profile or {})}
-    height = max(float(data.get("height", DEFAULT_PROFILE["height"])), 1.0)
-    weight = float(data.get("weight", DEFAULT_PROFILE["weight"]))
-    systolic = int(data.get("systolic", DEFAULT_PROFILE["systolic"]))
-    diastolic = int(data.get("diastolic", DEFAULT_PROFILE["diastolic"]))
-
-    normalized = {
-        "age": int(data.get("age", DEFAULT_PROFILE["age"])),
-        "gender": data.get("gender") if data.get("gender") in ("Nam", "Nữ") else "Nam",
-        "height": height,
-        "weight": weight,
-        "waist": int(data.get("waist", DEFAULT_PROFILE["waist"])),
-        "systolic": systolic,
-        "diastolic": diastolic,
-        "fasting_glucose": int(data.get("fasting_glucose", DEFAULT_PROFILE["fasting_glucose"])),
-        "hba1c": float(data.get("hba1c", DEFAULT_PROFILE["hba1c"])),
-        "total_cholesterol": int(data.get("total_cholesterol", DEFAULT_PROFILE["total_cholesterol"])),
-        "ldl": int(data.get("ldl", DEFAULT_PROFILE["ldl"])),
-        "creatinine": float(data.get("creatinine", DEFAULT_PROFILE["creatinine"])),
-        "smoke": bool(data.get("smoke", DEFAULT_PROFILE["smoke"])),
-        "exercise": bool(data.get("exercise", DEFAULT_PROFILE["exercise"])),
-        "alcohol": int(data.get("alcohol", DEFAULT_PROFILE["alcohol"])),
-        "sodium_intake": int(data.get("sodium_intake", DEFAULT_PROFILE["sodium_intake"])),
-        "nsaid_use": bool(data.get("nsaid_use", DEFAULT_PROFILE["nsaid_use"])),
-        "family_diabetes": bool(data.get("family_diabetes", DEFAULT_PROFILE["family_diabetes"])),
-        "family_hypertension": bool(data.get("family_hypertension", DEFAULT_PROFILE["family_hypertension"])),
-        "family_cardiovascular": bool(data.get("family_cardiovascular", DEFAULT_PROFILE["family_cardiovascular"])),
-    }
-    normalized["bmi"] = weight / ((height / 100) ** 2)
-    normalized["hypertension"] = systolic >= 130 or diastolic >= 80
-    return normalized
-
-
-def _label_pair(label: str, status: str) -> dict[str, str]:
-    return {"label": label, "status": status}
-
+    height = max(float(data.get("height", 165)), 1.0)
+    weight = float(data.get("weight", 65.0))
+    
+    data["bmi"] = weight / ((height / 100) ** 2)
+    data["hypertension"] = int(data.get("systolic", 120)) >= 130 or int(data.get("diastolic", 80)) >= 80
+    return data
 
 def health_categories(user_data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     bmi_label, bmi_status = bmi_category(user_data["bmi"])
@@ -516,143 +471,118 @@ def health_categories(user_data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     hba1c_label, hba1c_status = hba1c_category(user_data["hba1c"])
     cholesterol_label, cholesterol_status = cholesterol_category(user_data["total_cholesterol"])
     ldl_label, ldl_status = ldl_category(user_data["ldl"])
-    creatinine_high = (
-        user_data["creatinine"] > 1.2 and user_data["gender"] == "Nam"
-    ) or (
-        user_data["creatinine"] > 1.1 and user_data["gender"] == "Nữ"
-    )
+    creatinine_high = (user_data["creatinine"] > 1.2 and user_data["gender"] == "Nam") or (user_data["creatinine"] > 1.1 and user_data["gender"] == "Nữ")
+
+    def _label_pair(label: str, status: str) -> dict[str, str]:
+        return {"label": label, "status": status}
 
     return {
         "bmi": {**_label_pair(bmi_label, bmi_status), "value": round(user_data["bmi"], 1)},
-        "blood_pressure": {
-            **_label_pair(bp_label, bp_status),
-            "value": f"{user_data['systolic']}/{user_data['diastolic']}",
-        },
-        "fasting_glucose": {
-            **_label_pair(glucose_label, glucose_status),
-            "value": user_data["fasting_glucose"],
-        },
+        "blood_pressure": {**_label_pair(bp_label, bp_status), "value": f"{user_data['systolic']}/{user_data['diastolic']}"},
+        "fasting_glucose": {**_label_pair(glucose_label, glucose_status), "value": user_data["fasting_glucose"]},
         "hba1c": {**_label_pair(hba1c_label, hba1c_status), "value": round(user_data["hba1c"], 1)},
-        "total_cholesterol": {
-            **_label_pair(cholesterol_label, cholesterol_status),
-            "value": user_data["total_cholesterol"],
-        },
+        "total_cholesterol": {**_label_pair(cholesterol_label, cholesterol_status), "value": user_data["total_cholesterol"]},
         "ldl": {**_label_pair(ldl_label, ldl_status), "value": user_data["ldl"]},
-        "creatinine": {
-            **_label_pair("Cao" if creatinine_high else "Bình thường", "danger" if creatinine_high else "good"),
-            "value": user_data["creatinine"],
-        },
-        "exercise": {
-            **_label_pair("Thường xuyên" if user_data["exercise"] else "Ít vận động", "good" if user_data["exercise"] else "warn"),
-            "value": user_data["exercise"],
-        },
-        "smoke": {
-            **_label_pair("Có" if user_data["smoke"] else "Không", "danger" if user_data["smoke"] else "good"),
-            "value": user_data["smoke"],
-        },
+        "creatinine": {**_label_pair("Cao" if creatinine_high else "Bình thường", "danger" if creatinine_high else "good"), "value": user_data["creatinine"]},
+        "exercise": {**_label_pair("Thường xuyên" if user_data["exercise"] else "Ít vận động", "good" if user_data["exercise"] else "warn"), "value": user_data["exercise"]},
+        "smoke": {**_label_pair("Có" if user_data["smoke"] else "Không", "danger" if user_data["smoke"] else "good"), "value": user_data["smoke"]},
     }
 
-
-def _risk_items(risks: dict[str, Any]) -> list[dict[str, Any]]:
-    items = []
-    for key, meta in RISK_META.items():
-        score = risks["scores"][key]
-        max_score = meta["max"]
-        items.append(
-            {
-                "key": key,
-                "name": meta["name"],
-                "short": meta["short"],
-                "level_key": risks["keys"][key],
-                "level": risks["labels"][key],
-                "score": score,
-                "max_score": max_score,
-                "percent": round(score / max_score * 100, 1),
-                "reasons": risks["reasons"][key],
-            }
-        )
-    return items
-
-
-@lru_cache(maxsize=1)
-def _load_screening_model() -> tuple[Any | None, float | None]:
+def _run_plugin_ml(pid: str, plugin: dict, user_data: dict[str, Any]) -> tuple[str, list[str]]:
+    """Chạy model.pkl riêng của plugin, trả về (level_key, reasons)."""
     try:
-        import joblib
+        plugin_dir = Path("plugins") / pid
+        model_path = plugin_dir / plugin["ml_model"]["model_file"]
+        feature_cols = plugin["ml_model"].get("feature_cols", [])
 
-        model_path = Path("models/screening_best_model.pkl")
-        threshold_path = Path("models/screening_best_threshold.pkl")
-        if model_path.exists() and threshold_path.exists():
-            return joblib.load(model_path), float(joblib.load(threshold_path))
-    except Exception:
-        return None, None
-    return None, None
+        model = joblib.load(model_path)
 
+        row = {}
+        for col in feature_cols:
+            if col == "gender_code":
+                row[col] = 1 if user_data.get("gender") == "Nam" else 2
+            elif col in user_data:
+                row[col] = int(user_data[col]) if isinstance(user_data[col], bool) else user_data[col]
+            else:
+                row[col] = 0
 
-def ml_screening(user_data: dict[str, Any]) -> dict[str, Any]:
-    pipe, threshold = _load_screening_model()
-    if pipe is None or threshold is None:
-        return {"available": False, "probability": None, "level": None, "threshold": None}
-
-    try:
-        from train_model import build_user_input
-
-        x_input = build_user_input(user_data)
-        probability = float(pipe.predict_proba(x_input)[0, 1])
-        if probability >= threshold:
-            level = "Cao" if probability >= 0.65 else "Trung bình"
-        else:
-            level = "Thấp"
-        return {
-            "available": True,
-            "probability": probability,
-            "level": level,
-            "threshold": threshold,
-        }
-    except Exception as exc:
-        return {
-            "available": False,
-            "probability": None,
-            "level": None,
-            "threshold": threshold,
-            "error": str(exc),
-        }
-
+        x_input = pd.DataFrame([row], columns=feature_cols)
+        probability = float(model.predict_proba(x_input)[0, 1])
+        level_key = "cao" if probability >= 0.65 else "medium" if probability >= 0.40 else "low"
+        reasons = [f"ML xác suất nguy cơ: {round(probability * 100, 1)}%"]
+        return level_key, reasons
+    except Exception as e:
+        return None, []  # None = báo hiệu ML thất bại, fallback sang rule-based
 
 def analyze_profile(profile: dict[str, Any] | None = None) -> dict[str, Any]:
     user_data = build_user_data(profile)
-    risks = compute_all_risks(user_data)
-    items = _risk_items(risks)
-    high_risks = [item["name"] for item in items if item["level"] == "Cao"]
-    medium_risks = [item["name"] for item in items if item["level"] == "Trung bình"]
+    plugins = get_all_plugins()
+
+    items = []
+    scores_dict, reasons_dict, keys_dict, labels_dict = {}, {}, {}, {}
+    high_risks, medium_risks = [], []
+
+    for pid, plugin in plugins.items():
+        ml_config = plugin.get("ml_model", {})
+        ml_enabled = ml_config.get("enabled", False)
+        ml_path = Path("plugins") / pid / ml_config.get("model_file", "model.pkl")
+        max_score = plugin.get("max_score", 10)
+
+        if ml_enabled and ml_path.exists():
+            # Có model riêng → ưu tiên ML
+            final_key, reasons = _run_plugin_ml(pid, plugin, user_data)
+            if final_key is None:
+                # ML lỗi runtime → fallback rule-based
+                rule_score, reasons = compute_dynamic_score(pid, user_data)
+                pct = rule_score / max_score
+                final_key = "cao" if pct >= 0.60 else "medium" if pct >= 0.30 else "low"
+            else:
+                # Ánh xạ level → score ước tính để hiển thị percent
+                rule_score = {"cao": max_score, "medium": max_score // 2, "low": 0}[final_key]
+        else:
+            # Không có model → rule-based (có thể có custom_scorer.py)
+            rule_score, reasons = compute_dynamic_score(pid, user_data)
+            pct = rule_score / max_score
+            final_key = "cao" if pct >= 0.60 else "medium" if pct >= 0.30 else "low"
+
+        percent = round((rule_score / max_score) * 100, 1)
+        final_label = "Cao" if final_key == "cao" else "Trung bình" if final_key == "medium" else "Thấp"
+
+        if final_key == "cao":
+            high_risks.append(plugin["name"])
+        elif final_key == "medium":
+            medium_risks.append(plugin["name"])
+
+        scores_dict[pid] = rule_score
+        reasons_dict[pid] = reasons
+        keys_dict[pid] = final_key
+        labels_dict[pid] = final_label
+
+        items.append({
+            "key": pid,
+            "name": plugin["name"],
+            "short": plugin.get("short", pid),
+            "level_key": final_key,
+            "level": final_label,
+            "score": rule_score,
+            "max_score": max_score,
+            "percent": percent,
+            "reasons": reasons,
+            "ml_used": ml_enabled and ml_path.exists(),  # Frontend biết kết quả từ nguồn nào
+        })
 
     return {
         "user_data": user_data,
         "categories": health_categories(user_data),
         "risks": {
-            "scores": risks["scores"],
-            "reasons": risks["reasons"],
-            "keys": risks["keys"],
-            "labels": risks["labels"],
-            "items": items,
+            "scores": scores_dict, "reasons": reasons_dict,
+            "keys": keys_dict, "labels": labels_dict, "items": items,
         },
-        "ml": ml_screening(user_data),
         "conclusion": {
-            "high_risks": high_risks,
-            "medium_risks": medium_risks,
+            "high_risks": high_risks, "medium_risks": medium_risks,
             "status": "high" if high_risks else "medium" if medium_risks else "good",
-        },
+        }
     }
-
-
-def _risk_keys_for_diet(risks: dict[str, Any]) -> list[str]:
-    keys = risks.get("keys", {})
-    risk_keys = [
-        risk_key
-        for risk_key in ("diab", "htn", "cvd", "kid")
-        if keys.get(risk_key) in ("cao", "medium")
-    ]
-    return risk_keys or ["diab"]
-
 
 def sample_menu(risk_keys: list[str]) -> dict[str, list[str]]:
     is_diab = "diab" in risk_keys
@@ -683,21 +613,33 @@ def sample_menu(risk_keys: list[str]) -> dict[str, list[str]]:
         ],
     }
 
-
 def diet_recommendations(profile: dict[str, Any] | None = None) -> dict[str, Any]:
     analysis = analyze_profile(profile)
-    risk_keys = _risk_keys_for_diet(analysis["risks"])
-    result = get_diet_benchmark(analysis["user_data"], risk_keys)
+    
+    # ĐÃ ĐƯỢC LƯU Ý SỬA ĐỔI: Tự động ánh xạ từ plugin_id sang diet_keys chuẩn của NHANES
+    mapped_diet_keys = []
+    for pid, v in analysis["risks"]["keys"].items():
+        if v in ("cao", "medium"):
+            plugin = get_plugin(pid)
+            if plugin:
+                mapped_diet_keys.extend(plugin.get("diet_keys", []))
+                
+    result = get_diet_benchmark(analysis["user_data"], mapped_diet_keys or ["diab"])
     return {
-        "risk_keys": risk_keys,
+        "risk_keys": mapped_diet_keys,
         "risk_labels": analysis["risks"]["labels"],
         "benchmark": result["benchmark"],
         "tips": result["tips"],
         "n_similar": result["n_similar"],
         "source": result["source"],
-        "sample_menu": sample_menu(risk_keys),
+        "sample_menu": sample_menu(mapped_diet_keys),
     }
 
+def ai_advice(profile: dict[str, Any] | None = None) -> dict[str, Any]:
+    analysis = analyze_profile(profile)
+    risk_results = [(item["name"], item["level"], item["score"], item["max_score"]) for item in analysis["risks"]["items"]]
+    prompt = build_gemini_prompt(analysis["user_data"], risk_results, None)
+    return {"reply": call_gemini(prompt), "analysis": analysis}
 
 def search_drugs(search: str = "", limit: int = 100) -> dict[str, Any]:
     drugs = get_available_drugs()
@@ -706,155 +648,35 @@ def search_drugs(search: str = "", limit: int = 100) -> dict[str, Any]:
         drugs = [drug for drug in drugs if needle in drug.upper()]
     return {"items": drugs[:limit], "total": len(drugs)}
 
-
 def medication_report(profile: dict[str, Any] | None, selected_drugs: list[str]) -> dict[str, Any]:
     user_data = build_user_data(profile)
     result = check_medications(selected_drugs, user_data)
     affected = sorted(result.get("affected_metrics", []))
-    stats = {
-        drug: get_drug_disease_stats(drug)
-        for drug in selected_drugs[:3]
-    }
-    return {
-        **result,
-        "affected_metrics": affected,
-        "drug_stats": stats,
-        "selected_drugs": selected_drugs,
-    }
-
-
-def ai_advice(profile: dict[str, Any] | None = None) -> dict[str, Any]:
-    analysis = analyze_profile(profile)
-    risk_results = [
-        (
-            item["name"],
-            item["level"],
-            item["score"],
-            item["max_score"],
-        )
-        for item in analysis["risks"]["items"]
-    ]
-    ml = analysis["ml"]
-    fallback_probability = risk_results[0][2] / risk_results[0][3]
-    ml_results = {
-        "screening_prob": ml["probability"] if ml["probability"] is not None else fallback_probability,
-        "screening_risk_level": ml["level"] or risk_results[0][1],
-        "screening_threshold": ml["threshold"] or 0.5,
-    }
-    prompt = build_gemini_prompt(analysis["user_data"], risk_results, ml_results)
-    return {"reply": call_gemini(prompt), "analysis": analysis}
-
+    stats = {drug: get_drug_disease_stats(drug) for drug in selected_drugs[:3]}
+    return {**result, "affected_metrics": affected, "drug_stats": stats, "selected_drugs": selected_drugs}
 
 def reference_payload() -> dict[str, Any]:
     return {
         "reference_rows": [
-            {
-                "metric": "BMI (Châu Á)",
-                "normal": "18,5 - 22,9",
-                "watch": "23 - 24,9",
-                "high": ">= 25",
-            },
-            {
-                "metric": "Huyết áp tâm thu",
-                "normal": "< 120 mmHg",
-                "watch": "120 - 129 mmHg",
-                "high": ">= 130 mmHg",
-            },
-            {
-                "metric": "Huyết áp tâm trương",
-                "normal": "< 80 mmHg",
-                "watch": "-",
-                "high": ">= 80 mmHg",
-            },
-            {
-                "metric": "Đường huyết lúc đói",
-                "normal": "< 100 mg/dL",
-                "watch": "100 - 125 mg/dL",
-                "high": ">= 126 mg/dL",
-            },
+            {"metric": "BMI (Châu Á)", "normal": "18,5 - 22,9", "watch": "23 - 24,9", "high": ">= 25"},
+            {"metric": "Huyết áp tâm thu", "normal": "< 120 mmHg", "watch": "120 - 129 mmHg", "high": ">= 130 mmHg"},
+            {"metric": "Huyết áp tâm trương", "normal": "< 80 mmHg", "watch": "-", "high": ">= 80 mmHg"},
+            {"metric": "Đường huyết lúc đói", "normal": "< 100 mg/dL", "watch": "100 - 125 mg/dL", "high": ">= 126 mg/dL"},
             {"metric": "HbA1c", "normal": "< 5,7%", "watch": "5,7 - 6,4%", "high": ">= 6,5%"},
-            {
-                "metric": "Cholesterol toàn phần",
-                "normal": "< 200 mg/dL",
-                "watch": "200 - 239 mg/dL",
-                "high": ">= 240 mg/dL",
-            },
-            {
-                "metric": "LDL-Cholesterol",
-                "normal": "< 100 mg/dL",
-                "watch": "100 - 159 mg/dL",
-                "high": ">= 160 mg/dL",
-            },
-            {
-                "metric": "Creatinine (Nam)",
-                "normal": "0,7 - 1,2 mg/dL",
-                "watch": "-",
-                "high": "> 1,2 mg/dL",
-            },
-            {
-                "metric": "Creatinine (Nữ)",
-                "normal": "0,5 - 1,1 mg/dL",
-                "watch": "-",
-                "high": "> 1,1 mg/dL",
-            },
-            {
-                "metric": "Vòng bụng (Nam Châu Á)",
-                "normal": "< 90 cm",
-                "watch": "90 - 95 cm",
-                "high": "> 95 cm",
-            },
-            {
-                "metric": "Vòng bụng (Nữ Châu Á)",
-                "normal": "< 80 cm",
-                "watch": "80 - 85 cm",
-                "high": "> 85 cm",
-            },
+            {"metric": "Cholesterol toàn phần", "normal": "< 200 mg/dL", "watch": "200 - 239 mg/dL", "high": ">= 240 mg/dL"},
+            {"metric": "LDL-Cholesterol", "normal": "< 100 mg/dL", "watch": "100 - 159 mg/dL", "high": ">= 160 mg/dL"},
+            {"metric": "Creatinine (Nam)", "normal": "0,7 - 1,2 mg/dL", "watch": "-", "high": "> 1,2 mg/dL"},
+            {"metric": "Creatinine (Nữ)", "normal": "0,5 - 1,1 mg/dL", "watch": "-", "high": "> 1,1 mg/dL"},
+            {"metric": "Vòng bụng (Nam Châu Á)", "normal": "< 90 cm", "watch": "90 - 95 cm", "high": "> 95 cm"},
+            {"metric": "Vòng bụng (Nữ Châu Á)", "normal": "< 80 cm", "watch": "80 - 85 cm", "high": "> 85 cm"}
         ],
         "lifestyle_cards": [
-            {
-                "title": "Chế độ ăn uống lành mạnh",
-                "tone": "blue",
-                "items": [
-                    "Hạn chế đường, muối và chất béo bão hòa",
-                    "Ăn nhiều rau xanh, trái cây tươi, ngũ cốc nguyên hạt",
-                    "Đảm bảo đủ protein từ cá, đậu hũ, trứng",
-                    "Uống đủ nước: 1,5 - 2 lít/ngày",
-                    "Giảm thực phẩm chế biến sẵn, đồ uống có ga",
-                ],
-            },
-            {
-                "title": "Mục tiêu vận động",
-                "tone": "purple",
-                "items": [
-                    "Ít nhất 150 phút/tuần vận động vừa",
-                    "Hoặc 75 phút/tuần vận động mạnh",
-                    "Tập sức mạnh 2-3 lần/tuần",
-                    "Đi bộ sau bữa ăn 10-15 phút để hỗ trợ kiểm soát đường huyết",
-                ],
-            },
-            {
-                "title": "Cân nặng và stress",
-                "tone": "teal",
-                "items": [
-                    "Duy trì BMI trong khoảng 18,5 - 22,9",
-                    "Giảm dần 0,5 - 1 kg/tuần nếu đang thừa cân",
-                    "Thực hành thiền, yoga, thở sâu để giảm stress",
-                    "Ngủ đủ 7 - 8 tiếng mỗi đêm",
-                ],
-            },
-            {
-                "title": "Khi nào nên gặp bác sĩ",
-                "tone": "amber",
-                "items": [
-                    "Huyết áp >= 140/90 mmHg liên tục",
-                    "Đường huyết lúc đói >= 126 mg/dL",
-                    "HbA1c >= 6,5% hoặc Cholesterol >= 240 mg/dL",
-                    "Tức ngực, khó thở, đau đầu dữ dội hoặc phù chân",
-                ],
-            },
-        ],
+            {"title": "Chế độ ăn uống lành mạnh", "tone": "blue", "items": ["Hạn chế đường, muối và chất béo bão hòa", "Ăn nhiều rau xanh, trái cây tươi, ngũ cốc nguyên hạt", "Đảm bảo đủ protein từ cá, đậu hũ, trứng", "Uống đủ nước: 1,5 - 2 lít/ngày", "Giảm thực phẩm chế biến sẵn, đồ uống có ga"]},
+            {"title": "Mục tiêu vận động", "tone": "purple", "items": ["Ít nhất 150 phút/tuần vận động vừa", "Hoặc 75 phút/tuần vận động mạnh", "Tập sức mạnh 2-3 lần/tuần", "Đi bộ sau bữa ăn 10-15 phút để hỗ trợ kiểm soát đường huyết"]},
+            {"title": "Cân nặng và stress", "tone": "teal", "items": ["Duy trì BMI trong khoảng 18,5 - 22,9", "Giảm dần 0,5 - 1 kg/tuần nếu đang thừa cân", "Thực hành thiền, yoga, thở sâu để giảm stress", "Ngủ đủ 7 - 8 tiếng mỗi đêm"]},
+            {"title": "Khi nào nên gặp bác sĩ", "tone": "amber", "items": ["Huyết áp >= 140/90 mmHg liên tục", "Đường huyết lúc đói >= 126 mg/dL", "HbA1c >= 6,5% hoặc Cholesterol >= 240 mg/dL", "Tức ngực, khó thở, đau đầu dữ dội hoặc phù chân"]}
+        ]
     }
-
 ```
 
 ### prompt_builder.py
@@ -3090,6 +2912,17 @@ def compute_dynamic_score(plugin_id: str, user_data: dict) -> tuple[int, list]:
     plugin = get_plugin(plugin_id)
     if not plugin:
         return 0, ["Lỗi: Không tìm thấy cấu hình bệnh lý."]
+    
+    # Ưu tiên custom_scorer.py nếu plugin có khai báo và file tồn tại
+    custom_cfg = plugin.get("custom_scorer", {})
+    if custom_cfg.get("enabled"):
+        scorer_path = Path(__file__).parent.parent / "plugins" / plugin_id / custom_cfg.get("file", "custom_scorer.py")
+        if scorer_path.exists():
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("custom_scorer", scorer_path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod.compute_score(user_data)
 
     score = 0
     reasons = []
@@ -3781,6 +3614,134 @@ def get_all_plugins():
 #         print(f"  Tìm thấy! Tên bệnh: {diab['name']}")
 #     else:
 #         print("  ❌ Không tìm thấy bệnh diabetes.")
+```
+
+### modules\plugin_trainer.py
+```py
+# modules/plugin_trainer.py
+from __future__ import annotations
+import io
+import json
+import warnings
+warnings.filterwarnings("ignore")
+
+import numpy as np
+import pandas as pd
+import joblib
+from pathlib import Path
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score, precision_recall_curve
+
+
+def _find_optimal_threshold(y_true, y_proba) -> float:
+    """Tìm threshold tối ưu theo F-beta (tái dụng logic từ train_model_v1.py)."""
+    prec, rec, thresh = precision_recall_curve(y_true, y_proba)
+    beta = 0.75
+    fbeta = (1 + beta**2) * (prec * rec) / (beta**2 * prec + rec + 1e-8)
+    best_idx = np.argmax(fbeta)
+    return float(thresh[best_idx]) if best_idx < len(thresh) else 0.5
+
+
+def train_plugin_model(plugin_id: str, plugin: dict, csv_bytes: bytes) -> dict:
+    """
+    Nhận CSV bytes → train model → lưu model.pkl vào plugins/{id}/
+    → cập nhật metadata.json: ml_model.enabled = true
+    """
+    try:
+        plugin_dir = Path("plugins") / plugin_id
+        feature_cols = plugin.get("ml_model", {}).get("feature_cols", [])
+
+        if not feature_cols:
+            return {"ok": False, "error": "Plugin chưa khai báo feature_cols trong ml_model"}
+
+        # ── 1. Đọc CSV ───────────────────────────────────────────────────────
+        df = pd.read_csv(io.BytesIO(csv_bytes))
+
+        # Kiểm tra cột target bắt buộc
+        if "target" not in df.columns:
+            return {
+                "ok": False,
+                "error": "CSV thiếu cột 'target' (0 = không bệnh, 1 = có bệnh)"
+            }
+
+        # Kiểm tra feature_cols có đủ không
+        missing_cols = [c for c in feature_cols if c not in df.columns]
+        if missing_cols:
+            return {
+                "ok": False,
+                "error": f"CSV thiếu các cột: {missing_cols}"
+            }
+
+        # ── 2. Chuẩn bị X, y ─────────────────────────────────────────────────
+        X = df[feature_cols].copy()
+        y = df["target"].astype(int)
+
+        if len(y) < 50:
+            return {"ok": False, "error": "Dataset quá nhỏ — cần ít nhất 50 mẫu"}
+
+        if y.nunique() < 2:
+            return {"ok": False, "error": "Dataset chỉ có 1 nhãn — cần cả mẫu 0 và 1"}
+
+        # ── 3. Train ─────────────────────────────────────────────────────────
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
+
+        # Thử Random Forest trước, fallback Logistic Regression nếu dataset nhỏ
+        clf = (
+            RandomForestClassifier(
+                n_estimators=300, max_depth=8, min_samples_leaf=3,
+                class_weight="balanced", random_state=42, n_jobs=-1
+            )
+            if len(X_train) >= 200
+            else LogisticRegression(max_iter=1000, class_weight="balanced", C=0.5)
+        )
+
+        pipe = Pipeline([
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler",  StandardScaler()),
+            ("clf",     clf),
+        ])
+        pipe.fit(X_train, y_train)
+
+        # ── 4. Đánh giá & tìm threshold ──────────────────────────────────────
+        y_proba = pipe.predict_proba(X_test)[:, 1]
+        threshold = _find_optimal_threshold(y_test, y_proba)
+        y_pred = (y_proba >= threshold).astype(int)
+        f1 = f1_score(y_test, y_pred, zero_division=0)
+
+        # ── 5. Lưu model.pkl và threshold.pkl ────────────────────────────────
+        joblib.dump(pipe,      plugin_dir / "model.pkl")
+        joblib.dump(threshold, plugin_dir / "threshold.pkl")
+
+        # ── 6. Cập nhật metadata.json: bật enabled = true ────────────────────
+        meta_path = plugin_dir / "metadata.json"
+        with open(meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+
+        meta["ml_model"]["enabled"] = True
+        meta["ml_model"]["threshold_file"] = "threshold.pkl"
+
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+
+        return {
+            "ok": True,
+            "plugin_id": plugin_id,
+            "samples": len(df),
+            "f1_score": round(f1, 4),
+            "threshold": round(threshold, 4),
+            "model_file": "model.pkl",
+            "message": f"Train thành công — F1={f1:.4f}, threshold={threshold:.4f}"
+        }
+
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 ```
 
 ### modules\risk_engine.py

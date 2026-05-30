@@ -249,7 +249,13 @@
   },
   "ml_model": {
     "enabled": false,
-    "_note": "ML dùng chung 1 model tổng (screening_best_model.pkl) quản lý ở cấp framework, không phải plugin"
+    "model_file": "model.pkl",
+    "feature_cols": [
+      "age", "gender_code", "bmi", "waist",
+      "fasting_glucose", "hba1c",
+      "hypertension", "smoke", "exercise", "alcohol",
+      "family_diabetes"
+    ]
   },
   "diet_keys": [
     "diab"
