@@ -6,8 +6,8 @@ from typing import Any
 
 from modules.plugin_manager import get_all_plugins, get_plugin
 from modules.dynamic_scorer import compute_dynamic_score
-from gemini_api import call_gemini
-from prompt_builder import build_gemini_prompt
+from core.gemini_api import call_gemini
+from core.prompt_builder import build_gemini_prompt
 from modules.diet_advisor import get_diet_benchmark, NUTRITION_COLS
 from modules.medication_checker import check_medications, get_available_drugs, get_drug_disease_stats
 from modules.risk_engine import bmi_category, bp_category, glucose_category, hba1c_category, cholesterol_category, ldl_category

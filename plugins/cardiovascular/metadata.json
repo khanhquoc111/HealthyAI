@@ -248,13 +248,22 @@
     }
   },
   "ml_model": {
-    "enabled": false,
+    "enabled": true,
     "model_file": "model.pkl",
     "feature_cols": [
-      "age", "gender_code", "bmi", "total_cholesterol", "ldl",
-      "fasting_glucose", "hypertension", "smoke", "exercise",
+      "age",
+      "gender_code",
+      "bmi",
+      "total_cholesterol",
+      "ldl",
+      "fasting_glucose",
+      "hypertension",
+      "smoke",
+      "exercise",
       "family_cardiovascular"
-    ]
+    ],
+    "threshold_file": "threshold.pkl",
+    "train_f1": 0.3978
   },
   "diet_keys": [
     "cvd"

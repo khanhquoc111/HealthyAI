@@ -179,10 +179,16 @@
     "enabled": false,
     "model_file": "model.pkl",
     "feature_cols": [
-      "age", "gender_code", "bmi",
-      "creatinine", "fasting_glucose",
-      "hypertension", "smoke", "nsaid_use"
-    ]
+      "age",
+      "gender_code",
+      "bmi",
+      "fasting_glucose",
+      "hypertension",
+      "smoke",
+      "nsaid_use"
+    ],
+    "threshold_file": "threshold.pkl",
+    "train_f1": 0.378
   },
   "diet_keys": [
     "kid"
