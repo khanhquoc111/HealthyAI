@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { getJson, postJson } from "./api.js";
 
+import DiseaseSelector from "./DiseaseSelector.jsx";
+import DiabetesAssessment from "./DiabetesAssessment.jsx";
+import HypertensionAssessment from "./HypertensionAssessment.jsx";
+import CardiovascularAssessment from "./CardiovascularAssessment.jsx"; 
+import KidneyAssessment from "./KidneyAssessment.jsx";
+
 const DEFAULT_PROFILE = {
   age: 40,
   gender: "Nam",
@@ -105,6 +111,7 @@ function App() {
   const [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [selectedDisease, setSelectedDisease] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -165,16 +172,53 @@ function App() {
         <Header title={currentTitle} analysis={analysis} />
         {error ? <div className="system-alert">API: {error}</div> : null}
 
-        {activeView === "assessment" && (
-          <AssessmentPage
+        {/* Nếu đang ở tab Đánh giá và chưa chọn bệnh -> Hiển thị menu chọn bệnh */}
+        {activeView === "assessment" && !selectedDisease && (
+          <DiseaseSelector onSelect={setSelectedDisease} />
+        )}
+
+        {/* Các form tương ứng dựa vào ID bệnh được chọn */}
+        {activeView === "assessment" && selectedDisease === "diabetes" && (
+          <DiabetesAssessment
             profile={profile}
             analysis={analysis}
-            dirty={dirty}
             loading={loading}
-            showAnalysis={showAnalysis}
             onUpdate={updateProfile}
             onAnalyze={() => runAnalysis({ reveal: true })}
-            onReset={resetProfile}
+            onBack={() => setSelectedDisease(null)}
+          />
+        )}
+
+        {activeView === "assessment" && selectedDisease === "hypertension" && (
+          <HypertensionAssessment
+            profile={profile}
+            analysis={analysis}
+            loading={loading}
+            onUpdate={updateProfile}
+            onAnalyze={() => runAnalysis({ reveal: true })}
+            onBack={() => setSelectedDisease(null)}
+          />
+        )}
+
+        {activeView === "assessment" && selectedDisease === "cardiovascular" && (
+          <CardiovascularAssessment
+            profile={profile}
+            analysis={analysis}
+            loading={loading}
+            onUpdate={updateProfile}
+            onAnalyze={() => runAnalysis({ reveal: true })}
+            onBack={() => setSelectedDisease(null)}
+          />
+        )}
+
+        {activeView === "assessment" && selectedDisease === "kidney" && (
+          <KidneyAssessment
+            profile={profile}
+            analysis={analysis}
+            loading={loading}
+            onUpdate={updateProfile}
+            onAnalyze={() => runAnalysis({ reveal: true })}
+            onBack={() => setSelectedDisease(null)}
           />
         )}
         {activeView === "overview" && (

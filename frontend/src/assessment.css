@@ -1,0 +1,770 @@
+/* ============================================================
+   ASSESSMENT PAGES — shared + per-disease theming
+   Builds on top of the existing styles.css (variables inherited)
+   ============================================================ */
+
+/* ─── Per-disease accent tokens ─────────────────────────────── */
+:root {
+  /* Diabetes — amber/orange */
+  --diabetes-hue: #f57c00;
+  --diabetes-soft: #fff8f0;
+  --diabetes-border: #ffe0b2;
+  --diabetes-gradient: linear-gradient(135deg, #fff8f0 0%, #ffe0b2 100%);
+
+  /* Hypertension — red/crimson */
+  --htn-hue: #c62828;
+  --htn-soft: #fff5f5;
+  --htn-border: #ffcdd2;
+  --htn-gradient: linear-gradient(135deg, #fff5f5 0%, #ffcdd2 100%);
+
+  /* Cardiovascular — blue/indigo */
+  --cvd-hue: #1565c0;
+  --cvd-soft: #f0f6ff;
+  --cvd-border: #bbdefb;
+  --cvd-gradient: linear-gradient(135deg, #f0f6ff 0%, #bbdefb 100%);
+
+  /* Kidney — teal/green */
+  --kidney-hue: #00695c;
+  --kidney-soft: #f0faf8;
+  --kidney-border: #b2dfdb;
+  --kidney-gradient: linear-gradient(135deg, #f0faf8 0%, #b2dfdb 100%);
+}
+
+/* ─── Shared layout ──────────────────────────────────────────── */
+.assessment-page {
+  margin-top: 20px;
+  animation: fadeSlideIn 0.3s ease both;
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.assessment-container {
+  max-width: 900px;
+  margin: 0 auto;
+  display: grid;
+  gap: 20px;
+}
+
+/* ─── Header ─────────────────────────────────────────────────── */
+.assessment-header {
+  padding: 28px 30px;
+  border-radius: 12px;
+  color: #fff;
+  background: linear-gradient(160deg, var(--navy), #01497c);
+  box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+.assessment-header::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none;
+}
+
+.assessment-header h2 {
+  margin: 10px 0 6px;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: clamp(22px, 3vw, 32px);
+  line-height: 1.15;
+}
+
+.assessment-header p {
+  margin: 0;
+  color: rgba(255,255,255,.72);
+  font-size: 14px;
+}
+
+/* Disease-specific header accents */
+.diabetes-assessment .assessment-header {
+  background: linear-gradient(160deg, #bf360c, #e64a19);
+}
+
+.hypertension-assessment .assessment-header {
+  background: linear-gradient(160deg, #b71c1c, #c62828);
+}
+
+.cardiovascular-assessment .assessment-header {
+  background: linear-gradient(160deg, #0d47a1, #1565c0);
+}
+
+.kidney-assessment .assessment-header {
+  background: linear-gradient(160deg, #004d40, #00695c);
+}
+
+/* ─── Back button ────────────────────────────────────────────── */
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.28);
+  background: rgba(255,255,255,.12);
+  color: rgba(255,255,255,.9);
+  font-size: 13px;
+  font-weight: 700;
+  transition: background .18s;
+  margin-bottom: 4px;
+}
+
+.back-button:hover {
+  background: rgba(255,255,255,.22);
+}
+
+/* ─── Form ───────────────────────────────────────────────────── */
+.assessment-form {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 20px;
+}
+
+/* Fieldset / form group */
+.form-group {
+  border: 1px solid #e1ebf6;
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin: 0;
+  background: #fbfdff;
+}
+
+.form-group legend {
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--blue);
+  letter-spacing: .4px;
+}
+
+/* Disease-specific legend color */
+.diabetes-assessment   .form-group legend { color: var(--diabetes-hue); }
+.hypertension-assessment .form-group legend { color: var(--htn-hue); }
+.cardiovascular-assessment .form-group legend { color: var(--cvd-hue); }
+.kidney-assessment     .form-group legend { color: var(--kidney-hue); }
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.field-wrapper {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #466174;
+}
+
+.field-wrapper label {
+  font-size: 12.5px;
+}
+
+.form-input {
+  width: 100%;
+  min-height: 42px;
+  border: 1.5px solid #cfe0f2;
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: var(--ink);
+  background: #fff;
+  font: inherit;
+  outline: none;
+  transition: border-color .18s, box-shadow .18s;
+}
+
+.form-input:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(25,118,210,.12);
+}
+
+.diabetes-assessment   .form-input:focus { border-color: var(--diabetes-hue); box-shadow: 0 0 0 3px rgba(245,124,0,.12); }
+.hypertension-assessment .form-input:focus { border-color: var(--htn-hue); box-shadow: 0 0 0 3px rgba(198,40,40,.12); }
+.cardiovascular-assessment .form-input:focus { border-color: var(--cvd-hue); box-shadow: 0 0 0 3px rgba(21,101,192,.12); }
+.kidney-assessment     .form-input:focus { border-color: var(--kidney-hue); box-shadow: 0 0 0 3px rgba(0,105,92,.12); }
+
+/* Boolean toggle buttons */
+.boolean-group {
+  display: flex;
+  gap: 6px;
+}
+
+.bool-btn {
+  flex: 1;
+  min-height: 40px;
+  border: 1.5px solid #d7e5f4;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 13px;
+  transition: .18s;
+}
+
+.bool-btn:hover {
+  background: #f0f7ff;
+  border-color: #adc8e8;
+}
+
+.bool-btn.active {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(25,118,210,.22);
+}
+
+.diabetes-assessment   .bool-btn.active { background: var(--diabetes-hue); border-color: var(--diabetes-hue); box-shadow: 0 4px 12px rgba(245,124,0,.22); }
+.hypertension-assessment .bool-btn.active { background: var(--htn-hue); border-color: var(--htn-hue); box-shadow: 0 4px 12px rgba(198,40,40,.22); }
+.cardiovascular-assessment .bool-btn.active { background: var(--cvd-hue); border-color: var(--cvd-hue); box-shadow: 0 4px 12px rgba(21,101,192,.22); }
+.kidney-assessment     .bool-btn.active { background: var(--kidney-hue); border-color: var(--kidney-hue); box-shadow: 0 4px 12px rgba(0,105,92,.22); }
+
+/* ─── Metrics display ────────────────────────────────────────── */
+.metrics-display {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.metric-card {
+  display: grid;
+  align-items: center;
+  grid-template-columns: auto auto;
+  column-gap: 6px;
+  padding: 12px 18px;
+  border-radius: 10px;
+  border: 1.5px solid #d7e8f7;
+  background: #f5faff;
+  min-width: 140px;
+}
+
+.metric-card .metric-label {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  margin-bottom: 2px;
+}
+
+.metric-card .metric-value {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--ink);
+  font-family: "Space Grotesk", sans-serif;
+  line-height: 1;
+}
+
+.metric-card .metric-unit {
+  font-size: 11px;
+  color: var(--muted);
+  align-self: end;
+  padding-bottom: 3px;
+}
+
+.metric-card.good   { border-color: #a5d6a7; background: #f1f8f1; }
+.metric-card.good .metric-value { color: var(--green); }
+
+.metric-card.warn   { border-color: #ffe082; background: #fffde7; }
+.metric-card.warn .metric-value { color: var(--amber); }
+
+.metric-card.danger { border-color: #ef9a9a; background: #fff5f5; }
+.metric-card.danger .metric-value { color: var(--red); }
+
+/* ─── Analyze button ─────────────────────────────────────────── */
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+  padding-top: 16px;
+  border-top: 1px solid #e7eef8;
+}
+
+.analyze-button {
+  min-width: 180px;
+  font-size: 15px;
+  letter-spacing: .3px;
+  border-radius: 10px;
+  box-shadow: 0 8px 18px rgba(25,118,210,.24);
+}
+
+.diabetes-assessment   .analyze-button { background: var(--diabetes-hue); box-shadow: 0 8px 18px rgba(245,124,0,.28); }
+.hypertension-assessment .analyze-button { background: var(--htn-hue); box-shadow: 0 8px 18px rgba(198,40,40,.28); }
+.cardiovascular-assessment .analyze-button { background: var(--cvd-hue); box-shadow: 0 8px 18px rgba(21,101,192,.28); }
+.kidney-assessment     .analyze-button { background: var(--kidney-hue); box-shadow: 0 8px 18px rgba(0,105,92,.28); }
+
+/* ─── Analysis results panel ─────────────────────────────────── */
+.analysis-results {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: var(--shadow);
+  animation: fadeSlideIn .35s ease both;
+}
+
+.analysis-results h3 {
+  margin: 0 0 18px;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 18px;
+  color: var(--ink);
+}
+
+/* Disease-specific h3 color */
+.diabetes-results h3   { color: var(--diabetes-hue); }
+.hypertension-results h3 { color: var(--htn-hue); }
+.cardiovascular-results h3 { color: var(--cvd-hue); }
+.kidney-results h3     { color: var(--kidney-hue); }
+
+/* ─── Risk panel ─────────────────────────────────────────────── */
+.risk-panel {
+  display: grid;
+  gap: 20px;
+  padding: 20px;
+  border-radius: 10px;
+  border: 1px solid #e2edf7;
+  background: #fbfdff;
+}
+
+.risk-panel.low    { border-color: #a5d6a7; background: #f1f9f1; }
+.risk-panel.medium { border-color: #ffe082; background: #fffde7; }
+.risk-panel.danger { border-color: #ef9a9a; background: #fff5f5; }
+.risk-panel.high   { border-color: #ef9a9a; background: #fff5f5; }
+
+/* Risk header row */
+.risk-header {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.risk-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 100px;
+  padding: 14px 20px;
+  border-radius: 10px;
+  background: var(--navy);
+  color: #fff;
+  gap: 4px;
+}
+
+.risk-panel.low    .risk-badge { background: var(--green); }
+.risk-panel.medium .risk-badge { background: var(--amber); }
+.risk-panel.danger .risk-badge,
+.risk-panel.high   .risk-badge { background: var(--red); }
+
+.risk-level {
+  font-size: 18px;
+  font-weight: 800;
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.risk-score {
+  font-size: 13px;
+  opacity: .85;
+}
+
+/* Meter bar */
+.risk-meter {
+  flex: 1;
+  min-width: 200px;
+  display: grid;
+  gap: 6px;
+}
+
+.meter-bar {
+  height: 14px;
+  border-radius: 999px;
+  background: #e8eef7;
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--blue);
+  transition: width .6s cubic-bezier(.4,0,.2,1);
+}
+
+.risk-panel.low    .meter-fill { background: var(--green); }
+.risk-panel.medium .meter-fill { background: var(--amber); }
+.risk-panel.danger .meter-fill,
+.risk-panel.high   .meter-fill { background: var(--red); }
+
+.meter-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+/* ─── Risk details / reason list ─────────────────────────────── */
+.risk-details {
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e8eef7;
+  padding: 16px;
+}
+
+.risk-details h4 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.reason-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.reason-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--text);
+  padding: 8px 10px;
+  background: #f8fafd;
+  border-radius: 6px;
+  border-left: 3px solid var(--amber);
+  line-height: 1.5;
+}
+
+.reason-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  margin-top: 1px;
+}
+
+/* ─── Recommendations ────────────────────────────────────────── */
+.recommendations {
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e8eef7;
+  padding: 16px;
+}
+
+.recommendations h4 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.recommendations ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 7px;
+}
+
+.recommendations li {
+  font-size: 13.5px;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.recommendations li.urgent {
+  color: var(--red);
+  font-weight: 800;
+  background: var(--red-soft);
+  padding: 8px 10px;
+  border-radius: 6px;
+  list-style: none;
+  margin-left: -18px;
+  border-left: 3px solid var(--red);
+}
+
+/* ─── Diet advice ────────────────────────────────────────────── */
+.diet-advice {
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e8eef7;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.diet-advice h4 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.diet-section {
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.diet-section.good {
+  background: var(--green-soft);
+  border: 1px solid #c8e6c9;
+}
+
+.diet-section.warn {
+  background: var(--amber-soft);
+  border: 1px solid #ffe082;
+}
+
+.diet-section h5 {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+}
+
+.diet-section.good h5 { color: var(--green); }
+.diet-section.warn h5 { color: #b45309; }
+
+.diet-section ul {
+  margin: 0;
+  padding-left: 16px;
+  display: grid;
+  gap: 5px;
+}
+
+.diet-section li {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.diet-note {
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--blue-soft);
+  border-left: 4px solid var(--blue);
+  font-size: 13px;
+  color: #0d47a1;
+  line-height: 1.6;
+}
+
+/* ─── Disease selector ───────────────────────────────────────── */
+.disease-selector-page {
+  margin-top: 20px;
+  animation: fadeSlideIn .3s ease both;
+}
+
+.selector-header {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.selector-header h2 {
+  margin: 0 0 8px;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: clamp(22px, 3vw, 30px);
+  color: var(--ink);
+}
+
+.selector-header p {
+  color: var(--muted);
+  font-size: 14px;
+  max-width: 540px;
+  margin: 0 auto;
+}
+
+.disease-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+/* Disease card base */
+.disease-card {
+  text-align: left;
+  border: 2px solid #dce8f5;
+  border-radius: 14px;
+  padding: 22px 20px 18px;
+  background: #fff;
+  display: grid;
+  gap: 8px;
+  transition: .22s ease;
+  box-shadow: 0 2px 8px rgba(13,43,94,.06);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.disease-card::after {
+  content: "";
+  position: absolute;
+  top: 0; right: 0;
+  width: 100px; height: 100px;
+  border-radius: 50%;
+  opacity: .06;
+  transform: translate(30%, -30%);
+  transition: transform .3s;
+}
+
+.disease-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 28px rgba(13,43,94,.12);
+}
+
+.disease-card:hover::after {
+  transform: translate(20%, -20%);
+}
+
+/* Per-disease card colors */
+.disease-card.diabetes   { border-color: var(--diabetes-border); }
+.disease-card.diabetes::after, .disease-card.diabetes .disease-icon { background: var(--diabetes-hue); }
+.disease-card.diabetes:hover,
+.disease-card.diabetes.selected { border-color: var(--diabetes-hue); background: var(--diabetes-soft); }
+
+.disease-card.hypertension   { border-color: var(--htn-border); }
+.disease-card.hypertension::after, .disease-card.hypertension .disease-icon { background: var(--htn-hue); }
+.disease-card.hypertension:hover,
+.disease-card.hypertension.selected { border-color: var(--htn-hue); background: var(--htn-soft); }
+
+.disease-card.cardiovascular   { border-color: var(--cvd-border); }
+.disease-card.cardiovascular::after, .disease-card.cardiovascular .disease-icon { background: var(--cvd-hue); }
+.disease-card.cardiovascular:hover,
+.disease-card.cardiovascular.selected { border-color: var(--cvd-hue); background: var(--cvd-soft); }
+
+.disease-card.kidney   { border-color: var(--kidney-border); }
+.disease-card.kidney::after, .disease-card.kidney .disease-icon { background: var(--kidney-hue); }
+.disease-card.kidney:hover,
+.disease-card.kidney.selected { border-color: var(--kidney-hue); background: var(--kidney-soft); }
+
+.disease-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.disease-card h3 {
+  margin: 0;
+  font-size: 17px;
+  color: var(--ink);
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.disease-desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.risk-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.tag {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  background: #edf4fb;
+  color: var(--blue);
+  border: 1px solid #d5e7f7;
+}
+
+.disease-card.diabetes   .tag { background: #fff3e0; color: #e65100; border-color: var(--diabetes-border); }
+.disease-card.hypertension .tag { background: #fff5f5; color: #c62828; border-color: var(--htn-border); }
+.disease-card.cardiovascular .tag { background: #e8f0fe; color: #1a56db; border-color: #c3d7fd; }
+.disease-card.kidney .tag { background: #e0f2f1; color: #00695c; border-color: #b2dfdb; }
+
+.select-indicator {
+  margin-top: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 800;
+  text-align: center;
+  border: 1.5px solid #d5e7f7;
+  color: var(--muted);
+  background: #f4f8fc;
+  transition: .2s;
+  align-self: start;
+  justify-self: start;
+}
+
+.disease-card.selected .select-indicator {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+}
+
+.disease-card.diabetes.selected .select-indicator   { background: var(--diabetes-hue); border-color: var(--diabetes-hue); }
+.disease-card.hypertension.selected .select-indicator { background: var(--htn-hue); border-color: var(--htn-hue); }
+.disease-card.cardiovascular.selected .select-indicator { background: var(--cvd-hue); border-color: var(--cvd-hue); }
+.disease-card.kidney.selected .select-indicator     { background: var(--kidney-hue); border-color: var(--kidney-hue); }
+
+.selector-help {
+  margin-top: 18px;
+  padding: 14px 18px;
+  border-radius: 10px;
+  background: var(--blue-soft);
+  border-left: 4px solid var(--blue);
+  font-size: 14px;
+  color: #0d47a1;
+}
+
+/* ─── Responsive ─────────────────────────────────────────────── */
+@media (max-width: 760px) {
+  .disease-grid,
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .assessment-header {
+    padding: 20px 18px;
+  }
+
+  .risk-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .risk-badge {
+    flex-direction: row;
+    justify-content: space-between;
+    min-width: unset;
+  }
+
+  .form-actions {
+    justify-content: stretch;
+  }
+
+  .analyze-button {
+    width: 100%;
+    min-width: unset;
+  }
+
+  .metrics-display {
+    flex-direction: column;
+  }
+
+  .metric-card {
+    min-width: unset;
+  }
+}
