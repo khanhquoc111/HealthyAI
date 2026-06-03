@@ -1,18 +1,21 @@
 # ==================================================
-# Path: D:\HealthyAI
-# Detected tech: javascript, python, react, typescript
+# Path: C:\Users\trann\CODE\ProjectMachineLearning\HealthyAI
+# Detected tech: c, cpp, javascript, python, react, typescript
 # ==================================================
 
 ## DIRECTORY STRUCTURE
 ```
 HealthyAI/
 ├── .git/
+├── .venv/
 ├── __pycache__/
 ├── core/
 │   ├── __pycache__/
 │   ├── gemini_api.py
 │   └── prompt_builder.py
+├── data/
 ├── frontend/
+│   ├── dist/
 │   ├── node_modules/
 │   ├── src/
 │   │   ├── App.jsx
@@ -29,13 +32,32 @@ HealthyAI/
 │   ├── package-lock.json
 │   ├── package.json
 │   └── vite.config.js
+├── migrations/
+│   └── 001_init.sql
 ├── models/
-│   └── experiment_results.csv
+│   ├── experiment_results.csv
+│   ├── feature_cols.pkl
+│   ├── screening_best_model.pkl
+│   └── screening_best_threshold.pkl
+├── models_v1/
+│   ├── feature_cols.pkl
+│   ├── screening_best_model.pkl
+│   ├── screening_best_threshold.pkl
+│   ├── screening_extra_trees.pkl
+│   ├── screening_extra_trees_threshold.pkl
+│   ├── screening_logistic_regression.pkl
+│   ├── screening_logistic_regression_threshold.pkl
+│   ├── screening_random_forest.pkl
+│   ├── screening_random_forest_threshold.pkl
+│   ├── screening_xgboost.pkl
+│   └── screening_xgboost_threshold.pkl
 ├── modules/
 │   ├── __pycache__/
+│   ├── database.py
 │   ├── diet_advisor.py
 │   ├── dynamic_scorer.py
 │   ├── medication_checker.py
+│   ├── migration.py
 │   ├── plugin_manager.py
 │   ├── plugin_trainer.py
 │   └── risk_engine.py
@@ -71,13 +93,15 @@ HealthyAI/
 │   └── train_model_shared_legacy.py
 ├── validator/
 │   └── plugin_validator.py
+├── venv/
 ├── .env
 ├── .gitignore
 ├── PLUGIN_SCHEMA_SPEC.md
 ├── api_server.py
 ├── caidat.txt
 ├── healthyai_service.py
-└── requirements.txt
+├── requirements.txt
+└── source_dump.txt
 ```
 
 ## FILE CONTENTS
@@ -2113,10 +2137,11 @@ export function HypertensionAssessment({ profile, onUpdate, onAnalyze, onBack, a
         </div>
 
         {/* Analysis Results */}
+        {/* Analysis Results */}
         {showAnalysis && analysis && (
-          <div className="analysis-results hypertension-results">
-            <h3>Kết Quả Đánh Giá Nguy Cơ Tăng Huyết Áp</h3>
-            <HypertensionAnalysisPanel analysis={analysis} />
+          <div className="analysis-results cardiovascular-results">
+            <h3>Kết Quả Đánh Giá Nguy Cơ Bệnh Tim Mạch</h3>
+            <CardiovascularAnalysisPanel analysis={analysis} />
           </div>
         )}
       </div>
@@ -2124,15 +2149,17 @@ export function HypertensionAssessment({ profile, onUpdate, onAnalyze, onBack, a
   );
 }
 
-function HypertensionAnalysisPanel({ analysis }) {
+function CardiovascularAnalysisPanel({ analysis }) {
   if (!analysis?.risks?.items) return <p className="muted">Chưa có kết quả</p>;
 
-  const htnRisk = analysis.risks.items.find(r => r.key === "htn");
-  if (!htnRisk) return <p className="muted">Không tìm thấy dữ liệu tăng huyết áp</p>;
+  const cvdRisk = analysis.risks.items.find(r => r.key === "cardiovascular");
+  if (!cvdRisk) return <p className="muted">Không tìm thấy dữ liệu bệnh tim mạch</p>;
 
-  const riskLevel = htnRisk.level_key;
-  const riskScore = htnRisk.score || 0;
-  const maxScore = htnRisk.max_score || 14;
+  const riskLevel = cvdRisk.level_key;
+  const riskScore = cvdRisk.score || 0;
+  const maxScore = cvdRisk.max_score || 16;
+  
+  // ĐÃ THÊM BIẾN PERCENT Ở ĐÂY ĐỂ TRÁNH LỖI TRANG TRẮNG
   const percent = (riskScore / maxScore) * 100;
 
   return (
@@ -2140,7 +2167,7 @@ function HypertensionAnalysisPanel({ analysis }) {
       {/* Risk Level Badge */}
       <div className="risk-header">
         <div className="risk-badge">
-          <span className="risk-level">{htnRisk.level}</span>
+          <span className="risk-level">{cvdRisk.level}</span>
           <span className="risk-score">{riskScore}/{maxScore}</span>
         </div>
         <div className="risk-meter">
@@ -2156,11 +2183,11 @@ function HypertensionAnalysisPanel({ analysis }) {
       </div>
 
       {/* Risk Reasons */}
-      {analysis.reasons?.[1]?.length > 0 && (
+      {cvdRisk.reasons?.length > 0 && (
         <div className="risk-details">
           <h4>Các Yếu Tố Nguy Cơ Phát Hiện:</h4>
           <ul className="reason-list">
-            {analysis.reasons[1].map((reason, idx) => (
+            {cvdRisk.reasons.map((reason, idx) => (
               <li key={idx}>
                 <span className="reason-icon">⚠️</span>
                 {reason}
@@ -2174,21 +2201,54 @@ function HypertensionAnalysisPanel({ analysis }) {
       <div className="recommendations">
         <h4>Khuyến Cáo</h4>
         <ul>
-          <li>Khám huyết áp định kỳ 3-6 tháng 1 lần</li>
-          <li>Giảm lượng muối dưới 2,300 mg/ngày (tương đương khoảng 1 thìa cà phê)</li>
-          <li>Tăng cường hoạt động thể chất 150 phút/tuần</li>
-          <li>Duy trì cân nặng lành mạnh (BMI 18.5-24.9)</li>
-          <li>Hạn chế rượu bia, dừa hút thuốc lá</li>
-          <li>Tăng cường bầu rau xanh, trái cây, đặc biệt là khoai lang, chuối (giàu kali)</li>
-          {htnRisk.level_key === "high" && (
-            <li className="urgent">Cần khám bác sĩ ngay và có thể cần dùng thuốc kiểm soát huyết áp</li>
+          <li>Kiểm tra mỡ máu và huyết áp định kỳ.</li>
+          <li>Tăng cường hoạt động thể chất 150 phút/tuần.</li>
+          <li>Duy trì cân nặng lành mạnh (BMI 18.5-24.9).</li>
+          <li>Tuyệt đối không hút thuốc lá, hạn chế rượu bia.</li>
+          <li>Tăng cường rau xanh, trái cây, các loại hạt và cá chứa omega-3.</li>
+          
+          {/* ĐÃ ĐỔI TÊN BIẾN THÀNH cvdRisk VÀ KEY THÀNH "cao" */}
+          {cvdRisk.level_key === "cao" && (
+            <li className="urgent">Cần khám bác sĩ chuyên khoa tim mạch ngay để kiểm tra chuyên sâu và có hướng điều trị.</li>
           )}
         </ul>
       </div>
 
       {/* Diet Advice */}
       {analysis.diet && (
-        <HypertensionDietAdvice diet={analysis.diet} />
+        <CardiovascularDietAdvice diet={analysis.diet} />
+      )}
+    </div>
+  );
+}
+
+function CardiovascularDietAdvice({ diet }) {
+  if (!diet) return null;
+
+  return (
+    <div className="diet-advice">
+      <h4>🍎 Gợi Ý Dinh Dưỡng Cho Tim Mạch</h4>
+      
+      {diet.tips?.["ăn nhiều"] && (
+        <div className="diet-section good">
+          <h5>Ăn Nhiều</h5>
+          <ul>
+            {diet.tips["ăn nhiều"].map((food, idx) => (
+              <li key={idx}>{food}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {diet.tips?.["hạn chế"] && (
+        <div className="diet-section warn">
+          <h5>Hạn Chế</h5>
+          <ul>
+            {diet.tips["hạn chế"].map((food, idx) => (
+              <li key={idx}>{food}</li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );
@@ -2429,7 +2489,7 @@ export function DiabetesAssessment({ profile, onUpdate, onAnalyze, onBack, analy
 function DiabetesAnalysisPanel({ analysis }) {
   if (!analysis?.risks?.items) return <p className="muted">Chưa có kết quả</p>;
 
-  const diabetesRisk = analysis.risks.items.find(r => r.key === "diab");
+  const diabetesRisk = analysis.risks.items.find(r => r.key === "diabetes");
   if (!diabetesRisk) return <p className="muted">Không tìm thấy dữ liệu bệnh tiểu đường</p>;
 
   const riskLevel = diabetesRisk.level_key;
@@ -2458,11 +2518,11 @@ function DiabetesAnalysisPanel({ analysis }) {
       </div>
 
       {/* Risk Reasons */}
-      {analysis.reasons?.[0]?.length > 0 && (
+      {diabetesRisk.reasons?.length > 0 && (
         <div className="risk-details">
           <h4>Các Yếu Tố Nguy Cơ Phát Hiện:</h4>
           <ul className="reason-list">
-            {analysis.reasons[0].map((reason, idx) => (
+            {diabetesRisk.reasons.map((reason, idx) => (
               <li key={idx}>
                 <span className="reason-icon">⚠️</span>
                 {reason}
@@ -2829,8 +2889,8 @@ export function HypertensionAssessment({ profile, onUpdate, onAnalyze, onBack, a
 
 function HypertensionAnalysisPanel({ analysis }) {
   if (!analysis?.risks?.items) return <p className="muted">Chưa có kết quả</p>;
-
-  const htnRisk = analysis.risks.items.find(r => r.key === "htn");
+  
+const htnRisk = analysis.risks.items.find(r => r.key === "hypertension");
   if (!htnRisk) return <p className="muted">Không tìm thấy dữ liệu tăng huyết áp</p>;
 
   const riskLevel = htnRisk.level_key;
@@ -2859,11 +2919,11 @@ function HypertensionAnalysisPanel({ analysis }) {
       </div>
 
       {/* Risk Reasons */}
-      {analysis.reasons?.[1]?.length > 0 && (
+      {htnRisk.reasons?.length > 0 && (
         <div className="risk-details">
           <h4>Các Yếu Tố Nguy Cơ Phát Hiện:</h4>
           <ul className="reason-list">
-            {analysis.reasons[1].map((reason, idx) => (
+            {htnRisk.reasons.map((reason, idx) => (
               <li key={idx}>
                 <span className="reason-icon">⚠️</span>
                 {reason}
@@ -3133,7 +3193,7 @@ function KidneyAnalysisPanel({ analysis }) {
   if (!analysis?.risks?.items)
     return <p className="muted">Chưa có kết quả</p>;
 
-  const kidneyRisk = analysis.risks.items.find((r) => r.key === "kid");
+  const kidneyRisk = analysis.risks.items.find((r) => r.key === "kidney");
   if (!kidneyRisk)
     return <p className="muted">Không tìm thấy dữ liệu bệnh thận</p>;
 
@@ -3168,11 +3228,11 @@ function KidneyAnalysisPanel({ analysis }) {
       </div>
 
       {/* Risk Reasons */}
-      {analysis.reasons?.kid?.length > 0 && (
+      {kidneyRisk.reasons?.length > 0 && (
         <div className="risk-details">
           <h4>Các Yếu Tố Nguy Cơ Phát Hiện:</h4>
           <ul className="reason-list">
-            {analysis.reasons.kid.map((reason, idx) => (
+            {kidneyRisk.reasons.map((reason, idx) => (
               <li key={idx}>
                 <span className="reason-icon">⚠️</span>
                 {reason}
@@ -3259,6 +3319,299 @@ createRoot(document.getElementById("root")).render(
     <App />
   </React.StrictMode>
 );
+```
+
+### modules\database.py
+```py
+"""
+modules/database.py
+-------------------
+Quản lý SQLite database cho HealthyAI.
+Schema được quản lý bởi modules/migration.py — không định nghĩa bảng ở đây.
+
+Các hàm CRUD:
+    users          — tạo, xác thực, tra cứu tài khoản
+    health_records — lưu/lấy lịch sử phân tích
+    chat_history   — lưu/lấy lịch sử chat AI
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import sqlite3
+import threading
+from pathlib import Path
+
+# ── Cấu hình ─────────────────────────────────────────────────────────────────
+
+DB_PATH = Path(__file__).parent.parent / "healthyai.db"
+
+# Thread-local connection — mỗi thread dùng connection riêng
+_local = threading.local()
+
+
+# ── Connection management ─────────────────────────────────────────────────────
+
+def get_conn() -> sqlite3.Connection:
+    """Trả về connection cho thread hiện tại, tạo mới nếu chưa có."""
+    if not hasattr(_local, "conn") or _local.conn is None:
+        _local.conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+        _local.conn.row_factory = sqlite3.Row
+        _local.conn.execute("PRAGMA journal_mode=WAL")
+        _local.conn.execute("PRAGMA foreign_keys=ON")
+    return _local.conn
+
+
+def close_conn():
+    """Đóng connection của thread hiện tại."""
+    if hasattr(_local, "conn") and _local.conn:
+        _local.conn.close()
+        _local.conn = None
+
+
+# ── Users ─────────────────────────────────────────────────────────────────────
+
+def _hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def create_user(username: str, password: str,
+                full_name: str = "", role: str = "patient") -> dict | None:
+    """
+    Tạo tài khoản mới.
+    Trả về user dict nếu thành công, None nếu username đã tồn tại.
+    """
+    try:
+        conn = get_conn()
+        conn.execute(
+            "INSERT INTO users (username, password_hash, full_name, role) VALUES (?, ?, ?, ?)",
+            (username, _hash_password(password), full_name, role)
+        )
+        conn.commit()
+        return get_user_by_username(username)
+    except sqlite3.IntegrityError:
+        return None
+
+
+def get_user_by_username(username: str) -> dict | None:
+    """Lấy thông tin user theo username (không có password_hash)."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id, username, full_name, role, created_at FROM users WHERE username = ?",
+        (username,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_user_by_id(user_id: int) -> dict | None:
+    """Lấy thông tin user theo id."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id, username, full_name, role, created_at FROM users WHERE id = ?",
+        (user_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def verify_login(username: str, password: str) -> dict | None:
+    """
+    Xác thực đăng nhập.
+    Trả về user dict nếu đúng, None nếu sai.
+    """
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id, username, full_name, role, created_at FROM users "
+        "WHERE username = ? AND password_hash = ?",
+        (username, _hash_password(password))
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def update_password(user_id: int, new_password: str) -> bool:
+    """Đổi mật khẩu. Trả về True nếu thành công."""
+    conn = get_conn()
+    cursor = conn.execute(
+        "UPDATE users SET password_hash = ? WHERE id = ?",
+        (_hash_password(new_password), user_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def list_users(role: str | None = None) -> list[dict]:
+    """Lấy danh sách user, lọc theo role nếu cần."""
+    conn = get_conn()
+    if role:
+        rows = conn.execute(
+            "SELECT id, username, full_name, role, created_at "
+            "FROM users WHERE role = ? ORDER BY created_at DESC",
+            (role,)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, username, full_name, role, created_at "
+            "FROM users ORDER BY created_at DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── Health Records ────────────────────────────────────────────────────────────
+
+def _parse_record(row: sqlite3.Row) -> dict:
+    """Parse JSON fields trong record row."""
+    rec = dict(row)
+    rec["profile"] = json.loads(rec["profile"])
+    rec["result"]  = json.loads(rec["result"])
+    return rec
+
+
+def save_health_record(user_id: int, profile: dict,
+                       result: dict, note: str = "") -> int:
+    """
+    Lưu kết quả phân tích sức khoẻ.
+    Trả về id của record vừa tạo.
+    """
+    conn = get_conn()
+    cursor = conn.execute(
+        "INSERT INTO health_records (user_id, profile, result, note) VALUES (?, ?, ?, ?)",
+        (user_id,
+         json.dumps(profile, ensure_ascii=False),
+         json.dumps(result,  ensure_ascii=False),
+         note)
+    )
+    conn.commit()
+    return cursor.lastrowid
+
+
+def get_health_records(user_id: int, limit: int = 20) -> list[dict]:
+    """Lấy lịch sử phân tích của 1 user, mới nhất trước."""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT id, user_id, profile, result, note, created_at "
+        "FROM health_records WHERE user_id = ? "
+        "ORDER BY created_at DESC LIMIT ?",
+        (user_id, limit)
+    ).fetchall()
+    return [_parse_record(r) for r in rows]
+
+
+def get_health_record_by_id(record_id: int) -> dict | None:
+    """Lấy 1 record theo id."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id, user_id, profile, result, note, created_at "
+        "FROM health_records WHERE id = ?",
+        (record_id,)
+    ).fetchone()
+    return _parse_record(row) if row else None
+
+
+def update_record_note(record_id: int, user_id: int, note: str) -> bool:
+    """Cập nhật ghi chú của 1 record. Trả về True nếu thành công."""
+    conn = get_conn()
+    cursor = conn.execute(
+        "UPDATE health_records SET note = ? WHERE id = ? AND user_id = ?",
+        (note, record_id, user_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def delete_health_record(record_id: int, user_id: int) -> bool:
+    """
+    Xoá record theo id.
+    user_id đảm bảo chỉ xoá record của chính mình.
+    """
+    conn = get_conn()
+    cursor = conn.execute(
+        "DELETE FROM health_records WHERE id = ? AND user_id = ?",
+        (record_id, user_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+# ── Chat History ──────────────────────────────────────────────────────────────
+
+def save_chat_message(user_id: int, role: str, message: str,
+                      record_id: int | None = None) -> int:
+    """
+    Lưu 1 tin nhắn.
+    role: 'user' hoặc 'assistant'
+    Trả về id của message vừa tạo.
+    """
+    conn = get_conn()
+    cursor = conn.execute(
+        "INSERT INTO chat_history (user_id, record_id, role, message) VALUES (?, ?, ?, ?)",
+        (user_id, record_id, role, message)
+    )
+    conn.commit()
+    return cursor.lastrowid
+
+
+def get_chat_history(user_id: int, record_id: int | None = None,
+                     limit: int = 50) -> list[dict]:
+    """
+    Lấy lịch sử chat của 1 user.
+    Nếu có record_id thì lọc theo phiên khám đó.
+    """
+    conn = get_conn()
+    if record_id is not None:
+        rows = conn.execute(
+            "SELECT id, user_id, record_id, role, message, created_at "
+            "FROM chat_history WHERE user_id = ? AND record_id = ? "
+            "ORDER BY created_at ASC LIMIT ?",
+            (user_id, record_id, limit)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT id, user_id, record_id, role, message, created_at "
+            "FROM chat_history WHERE user_id = ? "
+            "ORDER BY created_at DESC LIMIT ?",
+            (user_id, limit)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def clear_chat_history(user_id: int, record_id: int | None = None) -> int:
+    """Xoá lịch sử chat. Trả về số dòng đã xoá."""
+    conn = get_conn()
+    if record_id is not None:
+        cursor = conn.execute(
+            "DELETE FROM chat_history WHERE user_id = ? AND record_id = ?",
+            (user_id, record_id)
+        )
+    else:
+        cursor = conn.execute(
+            "DELETE FROM chat_history WHERE user_id = ?", (user_id,)
+        )
+    conn.commit()
+    return cursor.rowcount
+
+
+# ── Seed data ─────────────────────────────────────────────────────────────────
+
+def seed_default_accounts():
+    """
+    Tạo tài khoản mặc định nếu DB mới tạo (chưa có user nào).
+    Gọi sau run_migrations() trong main().
+    """
+    conn = get_conn()
+    count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    if count > 0:
+        return
+
+    defaults = [
+        ("admin",    "admin123",   "Quản trị viên", "admin"),
+        ("doctor1",  "doctor123",  "Bác sĩ Nguyễn", "doctor"),
+        ("patient1", "patient123", "Bệnh nhân A",    "patient"),
+    ]
+    for username, password, full_name, role in defaults:
+        create_user(username, password, full_name, role)
+
+    print("[DB] Đã tạo tài khoản mặc định: admin / doctor1 / patient1")
+    print("[DB] ⚠ Nhớ đổi mật khẩu trước khi deploy!")
 ```
 
 ### modules\diet_advisor.py
@@ -4206,6 +4559,139 @@ def get_drug_disease_stats(drug_name: str) -> dict:
     counts = subset["RXDRSD1"].dropna().value_counts().head(5)
     # Dịch tên bệnh sang tiếng Việt
     return {_translate_disease(k): v for k, v in counts.to_dict().items()}
+```
+
+### modules\migration.py
+```py
+"""
+modules/migration.py
+--------------------
+Hệ thống migration đơn giản cho HealthyAI.
+
+Cách hoạt động:
+    - Mỗi thay đổi schema là 1 file .sql trong thư mục migrations/
+    - File đặt tên theo dạng: 001_init.sql, 002_add_avatar.sql, ...
+    - DB tự theo dõi migration nào đã chạy qua bảng _migrations
+    - Mỗi lần server khởi động: chỉ chạy các file mới, bỏ qua file cũ
+    - Không bao giờ sửa file migration cũ — chỉ thêm file mới
+
+Cách dùng:
+    from modules.migration import run_migrations
+    run_migrations()   # gọi trong main() trước init_db()
+
+Cách thêm thay đổi schema:
+    1. Tạo file migrations/002_ten_thay_doi.sql
+    2. Viết câu SQL vào đó (ALTER TABLE, CREATE TABLE, ...)
+    3. Chạy lại server — migration tự chạy
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+from modules.database import get_conn, DB_PATH
+
+MIGRATIONS_DIR = Path(__file__).parent.parent / "migrations"
+
+
+# ── Bảng theo dõi migration ───────────────────────────────────────────────────
+
+def _ensure_migrations_table(conn: sqlite3.Connection):
+    """Tạo bảng _migrations nếu chưa có."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS _migrations (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename   TEXT    NOT NULL UNIQUE,
+            applied_at TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+    """)
+    conn.commit()
+
+
+def _get_applied(conn: sqlite3.Connection) -> set[str]:
+    """Trả về set tên file migration đã chạy."""
+    rows = conn.execute("SELECT filename FROM _migrations").fetchall()
+    return {row[0] for row in rows}
+
+
+def _mark_applied(conn: sqlite3.Connection, filename: str):
+    """Đánh dấu migration đã chạy thành công."""
+    conn.execute(
+        "INSERT INTO _migrations (filename) VALUES (?)", (filename,)
+    )
+    conn.commit()
+
+
+# ── Chạy migration ────────────────────────────────────────────────────────────
+
+def run_migrations():
+    """
+    Quét thư mục migrations/, chạy các file .sql chưa được apply.
+    Gọi 1 lần khi server khởi động, trước init_db().
+    """
+    MIGRATIONS_DIR.mkdir(exist_ok=True)
+
+    conn = get_conn()
+    _ensure_migrations_table(conn)
+    applied = _get_applied(conn)
+
+    # Lấy tất cả file .sql, sort theo tên (001, 002, ...)
+    sql_files = sorted(MIGRATIONS_DIR.glob("*.sql"))
+
+    if not sql_files:
+        print("[Migration] Không có file migration nào.")
+        return
+
+    pending = [f for f in sql_files if f.name not in applied]
+
+    if not pending:
+        print(f"[Migration] Đã cập nhật — {len(applied)} migration đã apply.")
+        return
+
+    print(f"[Migration] Tìm thấy {len(pending)} migration mới:")
+
+    for sql_file in pending:
+        sql = sql_file.read_text(encoding="utf-8").strip()
+        if not sql:
+            print(f"  ⚠ Bỏ qua file rỗng: {sql_file.name}")
+            continue
+
+        try:
+            conn.executescript(sql)
+            _mark_applied(conn, sql_file.name)
+            print(f"  ✅ {sql_file.name}")
+        except Exception as e:
+            print(f"  ❌ {sql_file.name}: {e}")
+            raise RuntimeError(
+                f"Migration thất bại tại {sql_file.name}. "
+                "Kiểm tra lại file SQL và thử lại."
+            ) from e
+
+    print(f"[Migration] Hoàn tất — đã apply {len(pending)} migration mới.")
+
+
+# ── Tiện ích xem trạng thái ───────────────────────────────────────────────────
+
+def migration_status() -> list[dict]:
+    """
+    Trả về trạng thái tất cả migration.
+    Dùng để debug hoặc hiển thị trong admin panel.
+    """
+    MIGRATIONS_DIR.mkdir(exist_ok=True)
+    conn = get_conn()
+    _ensure_migrations_table(conn)
+    applied = _get_applied(conn)
+
+    sql_files = sorted(MIGRATIONS_DIR.glob("*.sql"))
+    result = []
+    for f in sql_files:
+        result.append({
+            "filename":   f.name,
+            "applied":    f.name in applied,
+            "size_bytes": f.stat().st_size,
+        })
+    return result
 ```
 
 ### modules\plugin_manager.py

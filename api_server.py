@@ -199,7 +199,14 @@ def main():
 
     server = ThreadingHTTPServer((args.host, args.port), HealthyAIHandler)
     print(f"HealthyAI API đang chạy tại http://{args.host}:{args.port}")
-    server.serve_forever()
+    
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n[HealthyAI] Đang tiến hành đóng các kết nối socket an toàn...")
+    finally:
+        server.server_close()
+        print("[HealthyAI] Server đã tắt hoàn toàn. Hẹn gặp lại!")
 
 
 if __name__ == "__main__":

@@ -17,3 +17,6 @@ frontend/dist/
 data/*.csv
 models/*.pkl
 models_v1/*.pkl
+
+#Cấu trúc dự án
+source_dump.txt
