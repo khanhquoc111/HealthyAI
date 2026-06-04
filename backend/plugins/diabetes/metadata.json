@@ -5,7 +5,7 @@
     "version": "1.1",
     "description": "Công cụ đánh giá nguy cơ phát triển tiểu đường type 2 dựa trên các yếu tố nguy cơ.",
     "author": "LuanVanKTPM",
-    "last_updated": "2026-06-02"
+    "last_updated": "2026-06-04"
   },
   "fields": [
     {
@@ -56,7 +56,7 @@
   "risk_config": {
     "baseline_mapping": [
       { "name": "Low Risk", "condition": { "field": "bmi", "op": "lt", "value": 25 }, "score": 15 },
-      { "name": "Moderate Risk", "condition": { "field": "bmi", "op": "range", "min": 25, "max": 30 }, "score": 35 },
+      { "name": "Moderate Risk", "condition": { "field": "bmi", "op": "gte", "value": 25 }, "score": 35 },
       { "name": "High Risk", "condition": { "field": "bmi", "op": "gte", "value": 30 }, "score": 55 }
     ],
     "risk_modifiers": [
@@ -104,29 +104,7 @@
       { "range": [0, 40], "level": "low" },
       { "range": [40, 70], "level": "medium" },
       { "range": [70, 100], "level": "high" }
-    ],
-    "computed_fields": [
-      {
-        "key": "risk_score_base",
-        "formula": "bmi * 1.8 + (age - 30) * 0.5",
-        "dependencies": ["bmi", "age"]
-      }
     ]
-  },
-  "explanation_templates": [
-    {
-      "rule_id": "family_history",
-      "template": "Có tiền sử gia đình bị tiểu đường - tăng nguy cơ đáng kể"
-    },
-    {
-      "rule_id": "age_high",
-      "template": "Tuổi {age} là yếu tố nguy cơ quan trọng"
-    }
-  ],
-  "risk_levels": {
-    "low": { "summary": "Nguy cơ thấp. Duy trì lối sống hiện tại." },
-    "medium": { "summary": "Nguy cơ trung bình. Cần cải thiện chế độ ăn và tập luyện." },
-    "high": { "summary": "Nguy cơ cao. Nên kiểm tra đường huyết và gặp bác sĩ." }
   },
   "recommendations": [
     {
@@ -135,13 +113,7 @@
       "text": "Tập thể dục ít nhất 150 phút/tuần, giảm cân và ăn uống lành mạnh.",
       "priority": 1,
       "action_type": "lifestyle"
-    },
-    {
-      "id": "screening",
-      "condition": { "field": "final_score", "op": "gte", "value": 60 },
-      "text": "Nên đi xét nghiệm đường huyết sớm.",
-      "priority": 2,
-      "action_type": "monitoring"
     }
-  ]
+  ],
+  "cross_validations": []
 }

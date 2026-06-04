@@ -13,8 +13,42 @@ except ImportError:
     from explanation_engine import ExplanationEngine
     from condition_evaluator import ConditionEvaluator
 
+from database.database import SessionLocal
+from database.nguoi_dung import NguoiDung
+from database.cs_suc_khoe import CsSucKhoe
+
 DEBUG_MODE = os.environ.get("DEBUG_CONDITION_EVAL", "").lower() in ("1", "true", "yes")
 logger = logging.getLogger(__name__)
+
+FEATURE_COLS = [
+    "age", "gender_code", "bmi", "waist", "systolic", "diastolic", "hypertension",
+    "fasting_glucose", "hba1c", "total_cholesterol", "ldl", "creatinine",
+    "smoke", "exercise", "alcohol", "sodium_intake",
+    "family_hypertension", "family_cardiovascular",
+]
+
+DEFAULT_FEATURES = {
+    "age": 45.0, "gender_code": 1.0, "bmi": 24.0, "waist": 85.0,
+    "systolic": 120.0, "diastolic": 80.0, "hypertension": 0.0,
+    "fasting_glucose": 92.0, "hba1c": 5.4, "total_cholesterol": 180.0,
+    "ldl": 100.0, "creatinine": 0.9, "smoke": 0.0, "exercise": 1.0,
+    "alcohol": 0.0, "sodium_intake": 3200.0,
+    "family_hypertension": 0.0, "family_cardiovascular": 0.0,
+}
+
+COMMON_FIELD_MAPPING = {
+    "tuoi": "age",
+    "bmi": "bmi",
+    "vongEo": "waist",
+    "huyetApTamThu": "systolic",
+    "huyetApTamTruong": "diastolic",
+    "hutThuoc": "smoke",
+    "giaDinhCaoHuyetAp": "family_hypertension",
+    "giaDinhTimMach": "family_cardiovascular",
+    "caoHuyetAp": "hypertension",
+    "tieuDuong": "hypertension",
+    "giaDinhTieuDuong": "family_cardiovascular",
+}
 
 
 class RiskStratificationEngine:
@@ -28,197 +62,169 @@ class RiskStratificationEngine:
         self.interactions = self.risk_config.get("interactions", [])
         self.thresholds = self.risk_config.get("thresholds", [])
 
-        # ==================== ML MODEL INTEGRATION ====================
         self.ml_model = None
-        self.ml_threshold = 0.5
-        self.feature_cols = None
         self._load_ml_model()
-        # ============================================================
 
     def _load_ml_model(self):
-        """Load ML Screening Model"""
         try:
             ml_dir = os.path.join(os.path.dirname(__file__), "..", "ml", "models")
             model_path = os.path.join(ml_dir, "screening_best_model.pkl")
-            thresh_path = os.path.join(ml_dir, "screening_best_threshold.pkl")
-            cols_path = os.path.join(ml_dir, "feature_cols.pkl")
-            
-            if all(os.path.exists(p) for p in [model_path, thresh_path, cols_path]):
+            if os.path.exists(model_path):
                 self.ml_model = joblib.load(model_path)
-                self.ml_threshold = joblib.load(thresh_path)
-                self.feature_cols = joblib.load(cols_path)
-                print(f"✅ ML Model loaded successfully for diabetes!")
+                print("✅ ML Model loaded successfully!")
             else:
                 print("⚠️ ML Model not found - using rule-based only")
         except Exception as e:
             print(f"⚠️ Failed to load ML model: {e}")
 
-    def _predict_with_ml(self, form_data: Dict) -> float:
-        """Dự đoán xác suất từ ML Model - Có Mapping Dữ liệu"""
-        if not self.ml_model or not self.feature_cols:
-            return 0.0
-        try:
-            # FIX 1 & 2: Mapping dữ liệu từ Form sang đúng định dạng của ML Model
-            mapped_data = form_data.copy()
-            
-            # Xử lý các trường Select/Boolean sang float (0.0 / 1.0)
-            mapped_data["smoke"] = 1.0 if str(form_data.get("smoking_status", "")).lower() == "current" else 0.0
-            
-            exercise_mins = float(form_data.get("exercise_minutes_per_week", 0))
-            mapped_data["exercise"] = 1.0 if exercise_mins >= 150 else 0.0
-            
-            # Xử lý các tiền sử bệnh tật
-            family_diab = form_data.get("family_history_diabetes", False)
-            mapped_data["family_cardiovascular"] = 1.0 if family_diab else 0.0 # Tạm thời dùng thay cho cardiovascular nếu form chỉ hỏi tiểu đường
-            
-            # Xử lý các chỉ số sinh tồn (tránh gán = 0 làm hỏng dự đoán AI)
-            # Gán giá trị trung bình chuẩn nếu form không cung cấp
-            mapped_data.setdefault("fasting_glucose", 90.0)
-            mapped_data.setdefault("hba1c", 5.0)
-            mapped_data.setdefault("systolic", 120.0)
-            mapped_data.setdefault("diastolic", 80.0)
-            mapped_data.setdefault("total_cholesterol", 150.0)
-            mapped_data.setdefault("ldl", 100.0)
-            mapped_data.setdefault("creatinine", 0.9)
-            mapped_data.setdefault("sodium_intake", 3000.0)
-            
-            # Trích xuất dữ liệu đúng cấu trúc
-            input_dict = {col: float(mapped_data.get(col, 0)) for col in self.feature_cols}
-            df_input = pd.DataFrame([input_dict])
-            
-            proba = self.ml_model.predict_proba(df_input)[0, 1]
-            print(f"🔍 ML Debug - proba = {proba:.4f} | age={input_dict.get('age')}, bmi={input_dict.get('bmi')}")
-            return float(proba)
-        except Exception as e:
-            print(f"❌ ML Prediction error: {e}")
-            return 0.0
+    def _merge_with_health_profile(self, form_data: Dict, health_profile: Dict = None) -> Dict:
+        merged = form_data.copy()
+        health_profile = health_profile or {}
 
-    def calculate_risk(self, form_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Pipeline tính toán nguy cơ hoàn chỉnh - Production Ready"""
-        enriched_data = self._compute_derived_fields(form_data)
+        # Merge fields từ Health Profile
+        for db_key, ml_key in COMMON_FIELD_MAPPING.items():
+            if db_key in health_profile and ml_key and ml_key not in merged:
+                merged[ml_key] = health_profile[db_key]
+
+        # Convert special fields
+        merged = self._convert_special_fields(merged)
+
+        # Fill defaults cho đủ 18 features
+        for col in FEATURE_COLS:
+            if col not in merged or merged[col] is None:
+                merged[col] = DEFAULT_FEATURES.get(col, 0.0)
+
+        return merged
+
+    def _convert_special_fields(self, data: Dict) -> Dict:
+        """Convert string sang numeric cho ML"""
+        converted = data.copy()
         
+        # hutThuoc -> smoke
+        if "hutThuoc" in converted:
+            val = str(converted.get("hutThuoc", "")).strip().lower()
+            converted["smoke"] = 1.0 if val in ["đang hút", "current", "yes", "1"] else 0.0
+
+        # soPhutVanDongMoiTuan -> exercise (1 nếu >= 150 phút)
+        if "soPhutVanDongMoiTuan" in converted:
+            try:
+                mins = float(converted["soPhutVanDongMoiTuan"])
+                converted["exercise"] = 1.0 if mins >= 150 else 0.0
+            except:
+                converted["exercise"] = 0.0
+
+        # Boolean fields
+        for field in ["caoHuyetAp", "tieuDuong", "giaDinhCaoHuyetAp", "giaDinhTimMach", "giaDinhTieuDuong"]:
+            if field in converted:
+                val = converted[field]
+                if isinstance(val, bool):
+                    converted[field] = 1.0 if val else 0.0
+                elif isinstance(val, str):
+                    converted[field] = 1.0 if val.lower() in ["true", "yes", "1"] else 0.0
+                else:
+                    converted[field] = float(val) if val else 0.0
+
+        return converted
+
+    def _predict_with_ml(self, form_data: Dict) -> Dict:
+        if not self.ml_model:
+            return {"probability": 0.0, "score": 0.0, "risk_level": "low", "confidence": 0.0}
+
+        try:
+            input_dict = {}
+            for col in FEATURE_COLS:
+                val = form_data.get(col)
+                try:
+                    input_dict[col] = float(val) if val is not None else DEFAULT_FEATURES.get(col, 0.0)
+                except (ValueError, TypeError):
+                    input_dict[col] = DEFAULT_FEATURES.get(col, 0.0)
+
+            df_input = pd.DataFrame([input_dict])
+            proba = self.ml_model.predict_proba(df_input)[0, 1]
+            score = round(proba * 100, 2)
+            
+            return {
+                "probability": round(proba, 4),
+                "score": score,
+                "risk_level": "high" if score >= 60 else "medium" if score >= 30 else "low",
+                "confidence": 80
+            }
+        except Exception as e:
+            print(f"ML Error: {e}")
+            return {"probability": 0.0, "score": 0.0, "risk_level": "low", "confidence": 0.0}
+
+    def calculate_risk(self, form_data: Dict[str, Any], health_profile: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Pipeline tính toán nguy cơ hoàn chỉnh - Đánh giá Kép (Dual-Engine)
+        
+        Auto fetch health profile từ user để augment dữ liệu cho ML model
+        - Form data: từ JSON của doctor (có thể thiếu dữ liệu)
+        - Health profile: dữ liệu cá nhân đã lưu (đầy đủ 18 chỉ số)
+        - Merged data: form_data + health_profile (ưu tiên form_data)
+        """
+        # Step 1: Merge với health profile để đủ 18 features cho ML
+        enriched_data = self._merge_with_health_profile(form_data, health_profile or {})
+        
+        # 1. ĐÁNH GIÁ TỪ CHUYÊN GIA (RULE-BASED)
         baseline_score = self._calculate_baseline_risk(enriched_data)
         modified_score = self._apply_risk_modifiers(baseline_score, enriched_data)
         protected_score = self._apply_protective_factors(modified_score, enriched_data)
-        rule_based_score = self._apply_interactions(protected_score, enriched_data)
+        rule_score = self._apply_interactions(protected_score, enriched_data)
         
-        # FIX 3: Phân chia trọng số ĐỘNG theo đúng nguyên tắc hệ thống
-        if self.ml_model and self.feature_cols:
-            # Nguyên tắc 1: Có model -> Tính ML proba và kết hợp (Ví dụ: 65% ML, 35% Rules)
-            ml_proba = self._predict_with_ml(enriched_data)
-            final_score = round(rule_based_score * 0.35 + ml_proba * 100 * 0.65, 2)
-        else:
-            # Nguyên tắc 2: Không có model -> Trọng số Rule-based là 100%
-            ml_proba = 0.0
-            final_score = round(rule_based_score, 2)
+        # [SỬA Ở ĐÂY] Ép kiểu float() gốc của Python để tránh lỗi JSON
+        rule_score = float(min(round(rule_score, 2), 100))
+        rule_risk_level = self._stratify_risk_level(rule_score)
+
+        # 2. ĐÁNH GIÁ TỪ AI (MACHINE LEARNING)
+        if self.ml_model:
+            ml_result = self._predict_with_ml(enriched_data)
             
-        final_score = min(final_score, 100)
-        
-        risk_level = self._stratify_risk_level(final_score)
+            # ml_result là dict: {"probability": 0.42, "score": 42, "risk_level": "low", "confidence": 80}
+            ai_score = float(ml_result.get("score", 0.0))
+            ai_risk_level = ml_result.get("risk_level", "low")
+            has_ai = True
+            ai_confidence = ml_result.get("confidence", 0)
+        else:
+            ai_score = 0.0
+            ai_risk_level = "Chưa có dữ liệu để xác minh"
+            has_ai = False
+            ai_confidence = 0
+
         all_matched_rules = self._get_matched_rules(enriched_data)
 
-        # Scoring Breakdown
-        scoring_breakdown = {
-            "baseline_score": round(baseline_score, 2),
-            "modified_score": round(modified_score, 2),
-            "protected_score": round(protected_score, 2),
-            "ml_probability": round(ml_proba * 100, 2),
-            "final_score": round(final_score, 2),
-            "steps": [
-                {"step": 1, "name": "Điểm cơ sở (Baseline)", "score": round(baseline_score, 2)},
-                {"step": 2, "name": "Yếu tố nguy cơ", "score": round(modified_score, 2)},
-                {"step": 3, "name": "Yếu tố bảo vệ", "score": round(protected_score, 2)},
-                {"step": 4, "name": "ML Prediction", "score": round(ml_proba * 100, 2)},
-                {"step": 5, "name": "Kết quả cuối cùng", "score": round(final_score, 2)}
-            ]
-        }
-
+        # Giải thích kết quả
         explanation_engine = ExplanationEngine(self.metadata)
         explanation = explanation_engine.generate_explanation({
             "matched_rules": all_matched_rules,
-            "risk_level": risk_level,
-            "final_score": final_score,
-            "form_data": enriched_data,
-            "scoring_breakdown": scoring_breakdown
+            "risk_level": rule_risk_level,
+            "final_score": rule_score,
+            "form_data": enriched_data
         })
 
+        # TRẢ VỀ CẤU TRÚC KÉP RÕ RÀNG
         return {
-            "final_score": final_score,
-            "risk_level": risk_level,
-            "ml_probability": round(ml_proba * 100, 2),
-            "baseline_score": round(baseline_score, 2),
-            "modified_score": round(modified_score, 2),
-            "protected_score": round(protected_score, 2),
-            "risk_factors": [r["description"] for r in all_matched_rules if r.get("category") == "modifier"],
-            "protective_factors": [r["description"] for r in all_matched_rules if r.get("category") == "protective"],
+            "rule_based": {
+                "score": rule_score,
+                "risk_level": rule_risk_level,
+                "matched_rules": all_matched_rules
+            },
+            "ai_based": {
+                "model_available": has_ai,
+                "score": ai_score,
+                "risk_level": ai_risk_level,
+                "confidence": ai_confidence if has_ai else 0
+            },
             "matched_rules": all_matched_rules,
             **explanation
         }
 
-    # ==================== CODE BÊN DƯỚI GIỮ NGUYÊN HOÀN TOÀN TỪ ĐÂY ====================
-    def _compute_derived_fields(self, form_data: Dict) -> Dict:
-        """Tính computed fields từ metadata - Safe evaluation without eval()"""
-        data = form_data.copy()
-        for field in self.risk_config.get("computed_fields", []):
-            try:
-                result = self._safe_formula_eval(
-                    field["formula"],
-                    field.get("dependencies", []),
-                    data
-                )
-                data[field["key"]] = result
-            except Exception as e:
-                if DEBUG_MODE:
-                    print(f"⚠️ Computed field error {field.get('key')}: {e}")
-                data[field["key"]] = 0
-        return data
-
-    def _safe_formula_eval(self, formula: str, dependencies: list, form_data: Dict) -> float:
-        """
-        Safe formula evaluation without eval().
-        """
-        safe_context = {}
-        for dep in dependencies:
-            val = form_data.get(dep, 0)
-            try:
-                safe_context[dep] = float(val) if val is not None else 0
-            except (ValueError, TypeError):
-                safe_context[dep] = 0
-        
-        if not re.match(r'^[a-zA-Z0-9_\s\+\-\*/\(\)\.]+$', formula):
-            raise ValueError(f"Formula contains invalid characters: {formula}")
-        
-        result_formula = formula
-        for dep, value in safe_context.items():
-            result_formula = re.sub(r'\b' + re.escape(dep) + r'\b', str(value), result_formula)
-        
-        remaining_ids = re.findall(r'[a-zA-Z_][a-zA-Z0-9_]*', result_formula)
-        if remaining_ids:
-            raise ValueError(f"Unknown identifiers in formula: {remaining_ids}")
-        
-        try:
-            return float(eval(result_formula, {"__builtins__": {}}, {}))
-        except Exception as e:
-            raise ValueError(f"Formula evaluation error: {str(e)}")
-
+    # ==================== CÁC HÀM CŨ ====================
     def _calculate_baseline_risk(self, form_data):
-        """Tính baseline với hỗ trợ priority"""
-        matching_stages = [
-            stage for stage in self.baseline_mapping 
-            if ConditionEvaluator.evaluate(stage.get("condition"), form_data)
-        ]
-        
+        matching_stages = [stage for stage in self.baseline_mapping if ConditionEvaluator.evaluate(stage.get("condition"), form_data)]
         if not matching_stages:
             return 0
         if len(matching_stages) == 1:
             return float(matching_stages[0].get("score", 0))
-        
-        stages_with_priority = [s for s in matching_stages if s.get("priority") is not None]
-        if stages_with_priority:
-            selected = max(stages_with_priority, key=lambda s: s.get("priority", 0))
-        else:
-            selected = max(matching_stages, key=lambda s: float(s.get("score", 0)))
-        
+        selected = max(matching_stages, key=lambda s: s.get("priority", 0) or float(s.get("score", 0)))
         return float(selected.get("score", 0))
 
     def _apply_risk_modifiers(self, score, form_data):
@@ -238,32 +244,23 @@ class RiskStratificationEngine:
     def _apply_effect(self, score: float, rule: Dict) -> float:
         effect_type = rule.get("effect_type", "multiplicative")
         value = rule.get("value", 1.0)
-        
-        if effect_type == "additive":
-            return score + value
-        elif effect_type == "multiplicative":
-            return score * value
-        elif effect_type == "divisive":
-            return score / value if value != 0 else score
+        if effect_type == "additive": return score + value
+        if effect_type == "multiplicative": return score * value
+        if effect_type == "divisive": return score / value if value != 0 else score
         return score
 
     def _apply_interactions(self, score, form_data):
         result = score
         for interaction in self.interactions:
             if self._evaluate_interaction(interaction, form_data):
-                multiplier = interaction.get("interaction_multiplier", 1.0)
-                result *= multiplier
-                if DEBUG_MODE:
-                    logger.info(f"[INTERACTION] {interaction.get('id')} x{multiplier}")
+                result *= interaction.get("interaction_multiplier", 1.0)
         return result
 
     def _evaluate_interaction(self, interaction: Dict, form_data: Dict) -> bool:
         cond = interaction.get("condition") or interaction.get("conditions")
-        if not cond:
-            return False
         if isinstance(cond, list):
             return all(ConditionEvaluator.evaluate(c, form_data) for c in cond)
-        return ConditionEvaluator.evaluate(cond, form_data)
+        return ConditionEvaluator.evaluate(cond, form_data) if cond else False
 
     def _stratify_risk_level(self, score):
         for threshold in self.thresholds:
@@ -273,7 +270,6 @@ class RiskStratificationEngine:
         return "high"
 
     def _get_matched_rules(self, form_data):
-        """Lấy tất cả rules đã match"""
         rules = []
         for rule in self.risk_modifiers:
             if ConditionEvaluator.evaluate(rule.get("condition"), form_data):
