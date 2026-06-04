@@ -5,9 +5,10 @@ Quản lý SQLite database cho HealthyAI.
 Schema được quản lý bởi modules/migration.py — không định nghĩa bảng ở đây.
 
 Các hàm CRUD:
-    users          — tạo, xác thực, tra cứu tài khoản
-    health_records — lưu/lấy lịch sử phân tích
-    chat_history   — lưu/lấy lịch sử chat AI
+    users             — tạo, xác thực, tra cứu tài khoản
+    personal_profiles — lưu/lấy 18 chỉ số cố định của bệnh nhân   ← thêm dòng này
+    health_records    — lưu/lấy lịch sử phân tích
+    chat_history      — lưu/lấy lịch sử chat AI
 """
 
 from __future__ import annotations
@@ -130,6 +131,42 @@ def list_users(role: str | None = None) -> list[dict]:
         ).fetchall()
     return [dict(r) for r in rows]
 
+# ── Personal Profiles ─────────────────────────────────────────────────────────
+
+def save_personal_profile(user_id: int, data: dict) -> bool:
+    conn = get_conn()
+    conn.execute("""
+        INSERT INTO personal_profiles (user_id, data, updated_at)
+        VALUES (?, ?, datetime('now', 'localtime'))
+        ON CONFLICT(user_id) DO UPDATE SET
+            data       = excluded.data,
+            updated_at = excluded.updated_at
+    """, (user_id, json.dumps(data, ensure_ascii=False)))
+    conn.commit()
+    return True
+ 
+ 
+def get_personal_profile(user_id: int) -> dict | None:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT data, updated_at FROM personal_profiles WHERE user_id = ?",
+        (user_id,)
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        **json.loads(row["data"]),
+        "_updated_at": row["updated_at"],  # Frontend hiển thị "cập nhật lúc..."
+    }
+ 
+ 
+def delete_personal_profile(user_id: int) -> bool:
+    conn = get_conn()
+    cursor = conn.execute(
+        "DELETE FROM personal_profiles WHERE user_id = ?", (user_id,)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
 
 # ── Health Records ────────────────────────────────────────────────────────────
 

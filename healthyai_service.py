@@ -1,6 +1,7 @@
 from __future__ import annotations
 import joblib
 import pandas as pd
+import numpy as np
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +21,10 @@ DEFAULT_PROFILE: dict[str, Any] = {
     "nsaid_use": False, "family_diabetes": False, "family_hypertension": False, "family_cardiovascular": False
 }
 
-def build_user_data(profile: dict[str, Any] | None = None) -> dict[str, Any]:
-    data = {**DEFAULT_PROFILE, **(profile or {})}
+def build_user_data(profile: dict[str, Any] | None = None,
+                    personal: dict[str, Any] | None = None) -> dict[str, Any]:
+    clean_personal = {k: v for k, v in (personal or {}).items() if not k.startswith("_")}
+    data = {**DEFAULT_PROFILE, **clean_personal, **(profile or {})}
     height = max(float(data.get("height", 165)), 1.0)
     weight = float(data.get("weight", 65.0))
     
@@ -69,7 +72,7 @@ def _run_plugin_ml(pid: str, plugin: dict, user_data: dict[str, Any]) -> tuple[s
             elif col in user_data:
                 row[col] = int(user_data[col]) if isinstance(user_data[col], bool) else user_data[col]
             else:
-                row[col] = 0
+                row[col] = np.nan
 
         x_input = pd.DataFrame([row], columns=feature_cols)
         probability = float(model.predict_proba(x_input)[0, 1])
@@ -79,38 +82,45 @@ def _run_plugin_ml(pid: str, plugin: dict, user_data: dict[str, Any]) -> tuple[s
     except Exception as e:
         return None, []  # None = báo hiệu ML thất bại, fallback sang rule-based
 
-def analyze_profile(profile: dict[str, Any] | None = None) -> dict[str, Any]:
-    user_data = build_user_data(profile)
+def analyze_profile(profile: dict[str, Any] | None = None,
+                    personal: dict[str, Any] | None = None) -> dict[str, Any]:
+    user_data = build_user_data(profile, personal)
     plugins = get_all_plugins()
 
     items = []
     scores_dict, reasons_dict, keys_dict, labels_dict = {}, {}, {}, {}
     high_risks, medium_risks = [], []
+    level_rank = {"low": 0, "medium": 1, "cao": 2}
 
     for pid, plugin in plugins.items():
-        ml_config = plugin.get("ml_model", {})
+        ml_config  = plugin.get("ml_model", {})
         ml_enabled = ml_config.get("enabled", False)
-        ml_path = Path("plugins") / pid / ml_config.get("model_file", "model.pkl")
-        max_score = plugin.get("max_score", 10)
+        ml_path    = Path("plugins") / pid / ml_config.get("model_file", "model.pkl")
+        max_score  = plugin.get("max_score", 10)
 
+        # ── Rule-based — luôn chạy ────────────────────────────────────────────
+        rule_score, rule_reasons = compute_dynamic_score(pid, user_data)
+        pct        = rule_score / max_score
+        rule_level = "cao" if pct >= 0.60 else "medium" if pct >= 0.30 else "low"
+
+        # ── ML — chạy nếu có model ────────────────────────────────────────────
         if ml_enabled and ml_path.exists():
-            # Có model riêng → ưu tiên ML
-            final_key, reasons = _run_plugin_ml(pid, plugin, user_data)
-            if final_key is None:
-                # ML lỗi runtime → fallback rule-based
-                rule_score, reasons = compute_dynamic_score(pid, user_data)
-                pct = rule_score / max_score
-                final_key = "cao" if pct >= 0.60 else "medium" if pct >= 0.30 else "low"
+            ml_level, ml_reasons = _run_plugin_ml(pid, plugin, user_data)
+            if ml_level is None:    # lỗi runtime → fallback về rule
+                ml_level   = rule_level
+                ml_reasons = rule_reasons
+                ml_status  = "error"
             else:
-                # Ánh xạ level → score ước tính để hiển thị percent
-                rule_score = {"cao": max_score, "medium": max_score // 2, "low": 0}[final_key]
+                ml_status  = "available"
+            ml_probability = ml_reasons[0] if ml_reasons else None
         else:
-            # Không có model → rule-based (có thể có custom_scorer.py)
-            rule_score, reasons = compute_dynamic_score(pid, user_data)
-            pct = rule_score / max_score
-            final_key = "cao" if pct >= 0.60 else "medium" if pct >= 0.30 else "low"
+            ml_level       = None
+            ml_status      = "unavailable"
+            ml_reasons     = ["Chưa có dữ liệu huấn luyện để xác minh"]
+            ml_probability = None
 
-        percent = round((rule_score / max_score) * 100, 1)
+        # ── Kết luận cuối: lấy mức cao nhất từ cả 2 ─────────────────────────
+        final_key   = max(rule_level, ml_level or "low", key=lambda x: level_rank[x])
         final_label = "Cao" if final_key == "cao" else "Trung bình" if final_key == "medium" else "Thấp"
 
         if final_key == "cao":
@@ -118,33 +128,46 @@ def analyze_profile(profile: dict[str, Any] | None = None) -> dict[str, Any]:
         elif final_key == "medium":
             medium_risks.append(plugin["name"])
 
-        scores_dict[pid] = rule_score
-        reasons_dict[pid] = reasons
-        keys_dict[pid] = final_key
-        labels_dict[pid] = final_label
+        scores_dict[pid]  = rule_score
+        reasons_dict[pid] = rule_reasons
+        keys_dict[pid]    = final_key
+        labels_dict[pid]  = final_label
 
         items.append({
-            "key": pid,
-            "name": plugin["name"],
-            "short": plugin.get("short", pid),
+            "key":       pid,
+            "name":      plugin["name"],
+            "short":     plugin.get("short", pid),
             "level_key": final_key,
-            "level": final_label,
-            "score": rule_score,
+            "level":     final_label,
+            "score":     rule_score,
             "max_score": max_score,
-            "percent": percent,
-            "reasons": reasons,
-            "ml_used": ml_enabled and ml_path.exists(),  # Frontend biết kết quả từ nguồn nào
+            "percent":   round((rule_score / max_score) * 100, 1),
+            "rule_result": {
+                "level":   rule_level,
+                "score":   rule_score,
+                "reasons": rule_reasons,
+            },
+            "ml_result": {
+                "level":       ml_level,
+                "status":      ml_status,
+                "probability": ml_probability,
+                "reasons":     ml_reasons,
+            },
         })
 
     return {
         "user_data": user_data,
         "categories": health_categories(user_data),
         "risks": {
-            "scores": scores_dict, "reasons": reasons_dict,
-            "keys": keys_dict, "labels": labels_dict, "items": items,
+            "scores":  scores_dict,
+            "reasons": reasons_dict,
+            "keys":    keys_dict,
+            "labels":  labels_dict,
+            "items":   items,
         },
         "conclusion": {
-            "high_risks": high_risks, "medium_risks": medium_risks,
+            "high_risks":   high_risks,
+            "medium_risks": medium_risks,
             "status": "high" if high_risks else "medium" if medium_risks else "good",
         }
     }

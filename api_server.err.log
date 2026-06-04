@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "C:\Users\trann\CODE\ProjectMachineLearning\HealthyAI\api_server.py", line 20, in <module>
+    from healthyai_service import (
+    ...<7 lines>...
+    )
+  File "C:\Users\trann\CODE\ProjectMachineLearning\HealthyAI\healthyai_service.py", line 10, in <module>
+    from core.gemini_api import call_gemini
+  File "C:\Users\trann\CODE\ProjectMachineLearning\HealthyAI\core\gemini_api.py", line 6, in <module>
+    from dotenv import load_dotenv
+ModuleNotFoundError: No module named 'dotenv'

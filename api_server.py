@@ -8,6 +8,14 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from modules.plugin_manager import get_all_plugins, get_plugin, load_all_plugins
 from modules.plugin_trainer import train_plugin_model
+from modules.database import (
+    create_user,
+    get_personal_profile,
+    save_personal_profile,
+    seed_default_accounts,
+    verify_login,
+)
+from modules.migration import run_migrations
 
 from healthyai_service import (
     DEFAULT_PROFILE,
@@ -89,6 +97,14 @@ class HealthyAIHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json(404, {"error": f"Không tìm thấy cấu hình cho bệnh: {plugin_id}"})
             return
+        if path.startswith("/api/profile/"):
+            user_id = int(path.split("/")[-1])
+            data = get_personal_profile(user_id)
+            if data:
+                self._send_json(200, data)
+            else:
+                self._send_json(404, {"error": "Chưa có chỉ số cá nhân"})
+            return
 
         self._serve_static(parsed.path)
 
@@ -99,8 +115,47 @@ class HealthyAIHandler(BaseHTTPRequestHandler):
         try:
             payload = self._read_json()
 
+            if path == "/api/auth/login":
+                username = str(payload.get("username", "")).strip()
+                password = str(payload.get("password", ""))
+                if not username or not password:
+                    self._send_json(400, {"error": "Vui long nhap ten dang nhap va mat khau"})
+                    return
+
+                user = verify_login(username, password)
+                if not user:
+                    self._send_json(401, {"error": "Ten dang nhap hoac mat khau khong dung"})
+                    return
+
+                self._send_json(200, {"ok": True, "user": user})
+                return
+
+            if path == "/api/auth/register":
+                username = str(payload.get("username", "")).strip()
+                password = str(payload.get("password", ""))
+                full_name = str(payload.get("full_name", "")).strip()
+                if not username or not password:
+                    self._send_json(400, {"error": "Vui long nhap ten dang nhap va mat khau"})
+                    return
+                if len(username) < 3:
+                    self._send_json(400, {"error": "Ten dang nhap can it nhat 3 ky tu"})
+                    return
+                if len(password) < 6:
+                    self._send_json(400, {"error": "Mat khau can it nhat 6 ky tu"})
+                    return
+
+                user = create_user(username, password, full_name, "patient")
+                if not user:
+                    self._send_json(409, {"error": "Ten dang nhap da ton tai"})
+                    return
+
+                self._send_json(201, {"ok": True, "user": user})
+                return
+
             if path == "/api/analyze":
-                self._send_json(200, analyze_profile(payload.get("profile", payload)))
+                user_id  = payload.get("user_id")
+                personal = get_personal_profile(user_id) if user_id else None
+                self._send_json(200, analyze_profile(payload.get("profile", payload), personal))
                 return
 
             if path == "/api/diet":
@@ -137,6 +192,12 @@ class HealthyAIHandler(BaseHTTPRequestHandler):
                     self._send_json(200, result)
                 else:
                     self._send_json(500, result)
+                return
+            
+            if path.startswith("/api/profile/"):
+                user_id = int(path.split("/")[-1])
+                save_personal_profile(user_id, payload)
+                self._send_json(200, {"ok": True})
                 return
 
             self._send_json(404, {"error": "Không tìm thấy endpoint"})
@@ -199,6 +260,9 @@ def main():
 
     server = ThreadingHTTPServer((args.host, args.port), HealthyAIHandler)
     print(f"HealthyAI API đang chạy tại http://{args.host}:{args.port}")
+
+    run_migrations()
+    seed_default_accounts()
     
     try:
         server.serve_forever()

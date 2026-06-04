@@ -103,7 +103,17 @@ const TIPS = [
   "Giảm stress, tập thể dục nhẹ nhàng đều đặn.",
 ];
 
+const AUTH_STORAGE_KEY = "healthyai_user";
+
 function App() {
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
   const [activeView, setActiveView] = useState("assessment");
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
   const [analysis, setAnalysis] = useState(null);
@@ -114,15 +124,22 @@ function App() {
   const [selectedDisease, setSelectedDisease] = useState(null);
 
   useEffect(() => {
+    if (!currentUser) return;
     let cancelled = false;
 
     async function bootstrap() {
       try {
         const defaults = await getJson("/api/default-profile");
         if (cancelled) return;
-        const nextProfile = defaults.profile || DEFAULT_PROFILE;
+        let nextProfile = defaults.profile || DEFAULT_PROFILE;
+        try {
+          const savedProfile = await getJson(`/api/profile/${currentUser.id}`);
+          nextProfile = { ...nextProfile, ...savedProfile };
+        } catch {
+          // Ho so ca nhan la tuy chon, tai khoan moi co the chua co du lieu.
+        }
         setProfile(nextProfile);
-        const nextAnalysis = await postJson("/api/analyze", { profile: nextProfile });
+        const nextAnalysis = await postJson("/api/analyze", { user_id: currentUser.id, profile: nextProfile });
         if (!cancelled) setAnalysis(nextAnalysis);
       } catch (err) {
         if (!cancelled) setError(err.message);
@@ -133,13 +150,28 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [currentUser]);
+
+  function handleAuth(user) {
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+    setCurrentUser(user);
+    setError("");
+  }
+
+  function handleLogout() {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    setCurrentUser(null);
+    setAnalysis(null);
+    setProfile(DEFAULT_PROFILE);
+    setSelectedDisease(null);
+    setActiveView("assessment");
+  }
 
   async function runAnalysis({ reveal = true } = {}) {
     setLoading(true);
     setError("");
     try {
-      const result = await postJson("/api/analyze", { profile });
+      const result = await postJson("/api/analyze", { user_id: currentUser?.id, profile });
       setAnalysis(result);
       setDirty(false);
       if (reveal) setShowAnalysis(true);
@@ -165,11 +197,15 @@ function App() {
 
   const currentTitle = MENU_ITEMS.find((item) => item.id === activeView)?.label;
 
+  if (!currentUser) {
+    return <AuthPage onAuthenticated={handleAuth} />;
+  }
+
   return (
     <div className="app-shell">
-      <Sidebar activeView={activeView} onNavigate={setActiveView} />
+      <Sidebar activeView={activeView} onNavigate={setActiveView} user={currentUser} onLogout={handleLogout} />
       <main className="main-panel">
-        <Header title={currentTitle} analysis={analysis} />
+        <Header title={currentTitle} analysis={analysis} user={currentUser} />
         {error ? <div className="system-alert">API: {error}</div> : null}
 
         {/* Nếu đang ở tab Đánh giá và chưa chọn bệnh -> Hiển thị menu chọn bệnh */}
@@ -232,7 +268,105 @@ function App() {
   );
 }
 
-function Sidebar({ activeView, onNavigate }) {
+function AuthPage({ onAuthenticated }) {
+  const [mode, setMode] = useState("login");
+  const [form, setForm] = useState({ username: "", password: "", full_name: "" });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const isRegister = mode === "register";
+
+  function updateField(key, value) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  async function submitAuth(event) {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const endpoint = isRegister ? "/api/auth/register" : "/api/auth/login";
+      const data = await postJson(endpoint, form);
+      onAuthenticated(data.user);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel">
+        <div className="auth-brand">
+          <img
+            src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSml8Rxo3MX3HSecqWuczzz-GTkuFazmL356A&s"
+            alt="CTU"
+            className="brand-logo"
+          />
+          <div>
+            <span>Healthy AI</span>
+            <h1>{isRegister ? "Đăng kí tài khoản" : "Đăng nhập"}</h1>
+            <p>Truy cập hồ sơ sức khỏe và kết quả phân tích cá nhân.</p>
+          </div>
+        </div>
+
+        <div className="tab-strip auth-tabs">
+          <button className={!isRegister ? "active" : ""} type="button" onClick={() => setMode("login")}>
+            Đăng nhập
+          </button>
+          <button className={isRegister ? "active" : ""} type="button" onClick={() => setMode("register")}>
+            Đăng kí
+          </button>
+        </div>
+
+        <form className="auth-form" onSubmit={submitAuth}>
+          {isRegister ? (
+            <label className="field">
+              <span>Họ tên</span>
+              <input
+                value={form.full_name}
+                onChange={(event) => updateField("full_name", event.target.value)}
+                placeholder="Nguyễn Văn A"
+                autoComplete="name"
+              />
+            </label>
+          ) : null}
+
+          <label className="field">
+            <span>Tên đăng nhập</span>
+            <input
+              value={form.username}
+              onChange={(event) => updateField("username", event.target.value)}
+              placeholder="patient1"
+              autoComplete="username"
+              required
+            />
+          </label>
+
+          <label className="field">
+            <span>Mật khẩu</span>
+            <input
+              type="password"
+              value={form.password}
+              onChange={(event) => updateField("password", event.target.value)}
+              placeholder={isRegister ? "Ít nhất 6 kí tự" : "patient123"}
+              autoComplete={isRegister ? "new-password" : "current-password"}
+              required
+            />
+          </label>
+
+          {error ? <div className="system-alert auth-error">{error}</div> : null}
+
+          <button className="primary-button full" type="submit" disabled={loading}>
+            {loading ? "Đang xử lý..." : isRegister ? "Tạo tài khoản" : "Đăng nhập"}
+          </button>
+        </form>
+      </section>
+    </main>
+  );
+}
+
+function Sidebar({ activeView, onNavigate, user, onLogout }) {
   return (
     <aside className="sidebar">
       <div className="brand-block">
@@ -244,6 +378,12 @@ function Sidebar({ activeView, onNavigate }) {
         <div className="brand-school">Trường CNTT & Truyền Thông</div>
         <div className="brand-name">Healthy AI</div>
         <div className="brand-caption">Hệ thống hỗ trợ sức khỏe thông minh</div>
+      </div>
+
+      <div className="sidebar-user">
+        <span>Đang đăng nhập</span>
+        <strong>{user.full_name || user.username}</strong>
+        <button type="button" onClick={onLogout}>Đăng xuất</button>
       </div>
 
       <div className="nav-section">Chức năng</div>
@@ -284,14 +424,14 @@ function Sidebar({ activeView, onNavigate }) {
   );
 }
 
-function Header({ title, analysis }) {
+function Header({ title, analysis, user }) {
   const riskSummary = analysis?.risks?.items || [];
   return (
     <header className="page-header">
       <div>
         <div className="header-uni">Trường Công Nghệ Thông Tin và Truyền Thông - Đại học Cần Thơ</div>
         <h1>{title}</h1>
-        <p>Phân tích sức khỏe cá nhân, phát hiện nguy cơ sớm và hỗ trợ tư vấn theo dữ liệu nhập.</p>
+        <p>Xin chào {user.full_name || user.username}. Phân tích sức khỏe cá nhân, phát hiện nguy cơ sớm và hỗ trợ tư vấn theo dữ liệu nhập.</p>
       </div>
       <div className="header-tags">
         {riskSummary.slice(0, 4).map((risk) => (

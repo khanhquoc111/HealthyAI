@@ -33,7 +33,8 @@ HealthyAI/
 │   ├── package.json
 │   └── vite.config.js
 ├── migrations/
-│   └── 001_init.sql
+│   ├── 001_init.sql
+│   └── 002_add_personal_profile.sql
 ├── models/
 │   ├── experiment_results.csv
 │   ├── feature_cols.pkl
@@ -118,6 +119,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from modules.plugin_manager import get_all_plugins, get_plugin, load_all_plugins
 from modules.plugin_trainer import train_plugin_model
+from modules.database import (
+    get_personal_profile, save_personal_profile, seed_default_accounts
+)
+from modules.migration import run_migrations
 
 from healthyai_service import (
     DEFAULT_PROFILE,
@@ -199,6 +204,14 @@ class HealthyAIHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json(404, {"error": f"Không tìm thấy cấu hình cho bệnh: {plugin_id}"})
             return
+        if path.startswith("/api/profile/"):
+            user_id = int(path.split("/")[-1])
+            data = get_personal_profile(user_id)
+            if data:
+                self._send_json(200, data)
+            else:
+                self._send_json(404, {"error": "Chưa có chỉ số cá nhân"})
+            return
 
         self._serve_static(parsed.path)
 
@@ -210,7 +223,9 @@ class HealthyAIHandler(BaseHTTPRequestHandler):
             payload = self._read_json()
 
             if path == "/api/analyze":
-                self._send_json(200, analyze_profile(payload.get("profile", payload)))
+                user_id  = payload.get("user_id")
+                personal = get_personal_profile(user_id) if user_id else None
+                self._send_json(200, analyze_profile(payload.get("profile", payload), personal))
                 return
 
             if path == "/api/diet":
@@ -247,6 +262,12 @@ class HealthyAIHandler(BaseHTTPRequestHandler):
                     self._send_json(200, result)
                 else:
                     self._send_json(500, result)
+                return
+            
+            if path.startswith("/api/profile/"):
+                user_id = int(path.split("/")[-1])
+                save_personal_profile(user_id, payload)
+                self._send_json(200, {"ok": True})
                 return
 
             self._send_json(404, {"error": "Không tìm thấy endpoint"})
@@ -309,7 +330,17 @@ def main():
 
     server = ThreadingHTTPServer((args.host, args.port), HealthyAIHandler)
     print(f"HealthyAI API đang chạy tại http://{args.host}:{args.port}")
-    server.serve_forever()
+
+    run_migrations()
+    seed_default_accounts()
+    
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n[HealthyAI] Đang tiến hành đóng các kết nối socket an toàn...")
+    finally:
+        server.server_close()
+        print("[HealthyAI] Server đã tắt hoàn toàn. Hẹn gặp lại!")
 
 
 if __name__ == "__main__":
@@ -322,6 +353,7 @@ if __name__ == "__main__":
 from __future__ import annotations
 import joblib
 import pandas as pd
+import numpy as np
 from pathlib import Path
 from typing import Any
 
@@ -341,8 +373,10 @@ DEFAULT_PROFILE: dict[str, Any] = {
     "nsaid_use": False, "family_diabetes": False, "family_hypertension": False, "family_cardiovascular": False
 }
 
-def build_user_data(profile: dict[str, Any] | None = None) -> dict[str, Any]:
-    data = {**DEFAULT_PROFILE, **(profile or {})}
+def build_user_data(profile: dict[str, Any] | None = None,
+                    personal: dict[str, Any] | None = None) -> dict[str, Any]:
+    clean_personal = {k: v for k, v in (personal or {}).items() if not k.startswith("_")}
+    data = {**DEFAULT_PROFILE, **clean_personal, **(profile or {})}
     height = max(float(data.get("height", 165)), 1.0)
     weight = float(data.get("weight", 65.0))
     
@@ -390,7 +424,7 @@ def _run_plugin_ml(pid: str, plugin: dict, user_data: dict[str, Any]) -> tuple[s
             elif col in user_data:
                 row[col] = int(user_data[col]) if isinstance(user_data[col], bool) else user_data[col]
             else:
-                row[col] = 0
+                row[col] = np.nan
 
         x_input = pd.DataFrame([row], columns=feature_cols)
         probability = float(model.predict_proba(x_input)[0, 1])
@@ -400,38 +434,45 @@ def _run_plugin_ml(pid: str, plugin: dict, user_data: dict[str, Any]) -> tuple[s
     except Exception as e:
         return None, []  # None = báo hiệu ML thất bại, fallback sang rule-based
 
-def analyze_profile(profile: dict[str, Any] | None = None) -> dict[str, Any]:
-    user_data = build_user_data(profile)
+def analyze_profile(profile: dict[str, Any] | None = None,
+                    personal: dict[str, Any] | None = None) -> dict[str, Any]:
+    user_data = build_user_data(profile, personal)
     plugins = get_all_plugins()
 
     items = []
     scores_dict, reasons_dict, keys_dict, labels_dict = {}, {}, {}, {}
     high_risks, medium_risks = [], []
+    level_rank = {"low": 0, "medium": 1, "cao": 2}
 
     for pid, plugin in plugins.items():
-        ml_config = plugin.get("ml_model", {})
+        ml_config  = plugin.get("ml_model", {})
         ml_enabled = ml_config.get("enabled", False)
-        ml_path = Path("plugins") / pid / ml_config.get("model_file", "model.pkl")
-        max_score = plugin.get("max_score", 10)
+        ml_path    = Path("plugins") / pid / ml_config.get("model_file", "model.pkl")
+        max_score  = plugin.get("max_score", 10)
 
+        # ── Rule-based — luôn chạy ────────────────────────────────────────────
+        rule_score, rule_reasons = compute_dynamic_score(pid, user_data)
+        pct        = rule_score / max_score
+        rule_level = "cao" if pct >= 0.60 else "medium" if pct >= 0.30 else "low"
+
+        # ── ML — chạy nếu có model ────────────────────────────────────────────
         if ml_enabled and ml_path.exists():
-            # Có model riêng → ưu tiên ML
-            final_key, reasons = _run_plugin_ml(pid, plugin, user_data)
-            if final_key is None:
-                # ML lỗi runtime → fallback rule-based
-                rule_score, reasons = compute_dynamic_score(pid, user_data)
-                pct = rule_score / max_score
-                final_key = "cao" if pct >= 0.60 else "medium" if pct >= 0.30 else "low"
+            ml_level, ml_reasons = _run_plugin_ml(pid, plugin, user_data)
+            if ml_level is None:    # lỗi runtime → fallback về rule
+                ml_level   = rule_level
+                ml_reasons = rule_reasons
+                ml_status  = "error"
             else:
-                # Ánh xạ level → score ước tính để hiển thị percent
-                rule_score = {"cao": max_score, "medium": max_score // 2, "low": 0}[final_key]
+                ml_status  = "available"
+            ml_probability = ml_reasons[0] if ml_reasons else None
         else:
-            # Không có model → rule-based (có thể có custom_scorer.py)
-            rule_score, reasons = compute_dynamic_score(pid, user_data)
-            pct = rule_score / max_score
-            final_key = "cao" if pct >= 0.60 else "medium" if pct >= 0.30 else "low"
+            ml_level       = None
+            ml_status      = "unavailable"
+            ml_reasons     = ["Chưa có dữ liệu huấn luyện để xác minh"]
+            ml_probability = None
 
-        percent = round((rule_score / max_score) * 100, 1)
+        # ── Kết luận cuối: lấy mức cao nhất từ cả 2 ─────────────────────────
+        final_key   = max(rule_level, ml_level or "low", key=lambda x: level_rank[x])
         final_label = "Cao" if final_key == "cao" else "Trung bình" if final_key == "medium" else "Thấp"
 
         if final_key == "cao":
@@ -439,33 +480,46 @@ def analyze_profile(profile: dict[str, Any] | None = None) -> dict[str, Any]:
         elif final_key == "medium":
             medium_risks.append(plugin["name"])
 
-        scores_dict[pid] = rule_score
-        reasons_dict[pid] = reasons
-        keys_dict[pid] = final_key
-        labels_dict[pid] = final_label
+        scores_dict[pid]  = rule_score
+        reasons_dict[pid] = rule_reasons
+        keys_dict[pid]    = final_key
+        labels_dict[pid]  = final_label
 
         items.append({
-            "key": pid,
-            "name": plugin["name"],
-            "short": plugin.get("short", pid),
+            "key":       pid,
+            "name":      plugin["name"],
+            "short":     plugin.get("short", pid),
             "level_key": final_key,
-            "level": final_label,
-            "score": rule_score,
+            "level":     final_label,
+            "score":     rule_score,
             "max_score": max_score,
-            "percent": percent,
-            "reasons": reasons,
-            "ml_used": ml_enabled and ml_path.exists(),  # Frontend biết kết quả từ nguồn nào
+            "percent":   round((rule_score / max_score) * 100, 1),
+            "rule_result": {
+                "level":   rule_level,
+                "score":   rule_score,
+                "reasons": rule_reasons,
+            },
+            "ml_result": {
+                "level":       ml_level,
+                "status":      ml_status,
+                "probability": ml_probability,
+                "reasons":     ml_reasons,
+            },
         })
 
     return {
         "user_data": user_data,
         "categories": health_categories(user_data),
         "risks": {
-            "scores": scores_dict, "reasons": reasons_dict,
-            "keys": keys_dict, "labels": labels_dict, "items": items,
+            "scores":  scores_dict,
+            "reasons": reasons_dict,
+            "keys":    keys_dict,
+            "labels":  labels_dict,
+            "items":   items,
         },
         "conclusion": {
-            "high_risks": high_risks, "medium_risks": medium_risks,
+            "high_risks":   high_risks,
+            "medium_risks": medium_risks,
             "status": "high" if high_risks else "medium" if medium_risks else "good",
         }
     }
@@ -3330,9 +3384,10 @@ Quản lý SQLite database cho HealthyAI.
 Schema được quản lý bởi modules/migration.py — không định nghĩa bảng ở đây.
 
 Các hàm CRUD:
-    users          — tạo, xác thực, tra cứu tài khoản
-    health_records — lưu/lấy lịch sử phân tích
-    chat_history   — lưu/lấy lịch sử chat AI
+    users             — tạo, xác thực, tra cứu tài khoản
+    personal_profiles — lưu/lấy 18 chỉ số cố định của bệnh nhân   ← thêm dòng này
+    health_records    — lưu/lấy lịch sử phân tích
+    chat_history      — lưu/lấy lịch sử chat AI
 """
 
 from __future__ import annotations
@@ -3455,6 +3510,42 @@ def list_users(role: str | None = None) -> list[dict]:
         ).fetchall()
     return [dict(r) for r in rows]
 
+# ── Personal Profiles ─────────────────────────────────────────────────────────
+
+def save_personal_profile(user_id: int, data: dict) -> bool:
+    conn = get_conn()
+    conn.execute("""
+        INSERT INTO personal_profiles (user_id, data, updated_at)
+        VALUES (?, ?, datetime('now', 'localtime'))
+        ON CONFLICT(user_id) DO UPDATE SET
+            data       = excluded.data,
+            updated_at = excluded.updated_at
+    """, (user_id, json.dumps(data, ensure_ascii=False)))
+    conn.commit()
+    return True
+ 
+ 
+def get_personal_profile(user_id: int) -> dict | None:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT data, updated_at FROM personal_profiles WHERE user_id = ?",
+        (user_id,)
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        **json.loads(row["data"]),
+        "_updated_at": row["updated_at"],  # Frontend hiển thị "cập nhật lúc..."
+    }
+ 
+ 
+def delete_personal_profile(user_id: int) -> bool:
+    conn = get_conn()
+    cursor = conn.execute(
+        "DELETE FROM personal_profiles WHERE user_id = ?", (user_id,)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
 
 # ── Health Records ────────────────────────────────────────────────────────────
 
