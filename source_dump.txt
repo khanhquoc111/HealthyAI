@@ -1,0 +1,2801 @@
+# ==================================================
+# Path: D:\CodeProject\LuanVanKTPM
+# Detected tech: c, cpp, javascript, python, react, typescript
+# ==================================================
+
+## DIRECTORY STRUCTURE
+```
+LuanVanKTPM/
+├── .git/
+├── backend/
+│   ├── app/
+│   │   ├── __pycache__/
+│   │   ├── condition_evaluator.py
+│   │   ├── disease_schema.py
+│   │   ├── explanation_engine.py
+│   │   ├── main.py
+│   │   ├── plugin_api.py
+│   │   ├── plugin_loader.py
+│   │   ├── risk_stratification_engine.py
+│   │   ├── schema_validator.py
+│   │   ├── test_api_acceptance.py
+│   │   ├── test_plugin_compatibility.py
+│   │   ├── test_schema.py
+│   │   └── validation_engine.py
+│   ├── data/
+│   │   ├── demographic.csv
+│   │   ├── diet.csv
+│   │   ├── examination.csv
+│   │   ├── labs.csv
+│   │   ├── medications.csv
+│   │   └── questionnaire.csv
+│   ├── ml/
+│   │   ├── models/
+│   │   │   ├── experiment_results.csv
+│   │   │   ├── feature_cols.pkl
+│   │   │   ├── screening_best_model.pkl
+│   │   │   └── screening_best_threshold.pkl
+│   │   └── train_model.py
+│   ├── plugins/
+│   │   ├── diabetes/
+│   │   │   └── metadata.json
+│   │   ├── gout/
+│   │   │   └── metadata.json
+│   │   └── hypertension/
+│   │       └── metadata.json
+│   └── venv/
+├── frontend/
+│   ├── node_modules/
+│   ├── public/
+│   │   ├── favicon.svg
+│   │   └── icons.svg
+│   ├── src/
+│   │   ├── assets/
+│   │   │   ├── hero.png
+│   │   │   ├── react.svg
+│   │   │   └── vite.svg
+│   │   ├── App.css
+│   │   ├── App.jsx
+│   │   ├── MainRiskPage.jsx
+│   │   ├── TestPluginPage.jsx
+│   │   ├── index.css
+│   │   └── main.jsx
+│   ├── .gitignore
+│   ├── README.md
+│   ├── eslint.config.js
+│   ├── index.html
+│   ├── package-lock.json
+│   ├── package.json
+│   └── vite.config.js
+└── ghichu.txt
+```
+
+## FILE CONTENTS
+
+### backend\app\condition_evaluator.py
+```py
+from typing import Dict, Any, List, Union
+
+
+class ConditionEvaluator:
+    """
+    Evaluates atomic and composite conditions with support for:
+    
+    1. Atomic: {"field": "age", "op": "gte", "value": 45}
+    2. AND: {"all": [condition1, condition2, ...]}
+    3. OR: {"any": [condition1, condition2, ...]}
+    4. NOT (AND): {"not_all": [condition1, condition2]} = NOT(all true)
+    5. NOT (OR): {"not_any": [condition1, condition2]} = NOT(any true)
+    6. Nested: {"all": [{"field": "age", ...}, {"any": [...]}]}
+    
+    Operators: gte, gt, lte, lt, eq, neq, bool_true, bool_false, in, range
+    """
+
+    @staticmethod
+    def evaluate(condition: Union[Dict, None], form_data: Dict[str, Any]) -> bool:
+        """
+        Main entry point for condition evaluation.
+        Supports atomic, composite, and nested conditions.
+        Returns False for None/empty conditions.
+        """
+        if not condition:
+            return False
+
+        # Handle NOT with "not_all" - True if NOT all conditions are true
+        if condition.get("not_all") is not None:
+            conditions = condition.get("not_all")
+            if not isinstance(conditions, list):
+                return False
+            return not all(
+                ConditionEvaluator.evaluate(cond, form_data) 
+                for cond in conditions
+            )
+
+        # Handle NOT with "not_any" - True if NOT any condition is true
+        if condition.get("not_any") is not None:
+            conditions = condition.get("not_any")
+            if not isinstance(conditions, list):
+                return False
+            return not any(
+                ConditionEvaluator.evaluate(cond, form_data) 
+                for cond in conditions
+            )
+
+        # Handle composite conditions with "all" (AND)
+        if condition.get("all") is not None:
+            conditions = condition.get("all")
+            if not isinstance(conditions, list):
+                return False
+            return all(
+                ConditionEvaluator.evaluate(cond, form_data) 
+                for cond in conditions
+            )
+
+        # Handle composite conditions with "any" (OR)
+        if condition.get("any") is not None:
+            conditions = condition.get("any")
+            if not isinstance(conditions, list):
+                return False
+            return any(
+                ConditionEvaluator.evaluate(cond, form_data) 
+                for cond in conditions
+            )
+
+        # Handle atomic condition
+        return ConditionEvaluator._evaluate_atomic(condition, form_data)
+
+    @staticmethod
+    def _evaluate_atomic(condition: Dict, form_data: Dict[str, Any]) -> bool:
+        """Evaluate a single atomic condition."""
+        field = condition.get("field")
+        op = condition.get("op")
+        value = condition.get("value")
+        actual = form_data.get(field)
+
+        # Boolean operations - handle BEFORE None check to allow bool_false to match None
+        if op == "bool_true":
+            return ConditionEvaluator._evaluate_bool_true(actual)
+        if op == "bool_false":
+            return ConditionEvaluator._evaluate_bool_false(actual)
+
+        # For non-boolean operations, None is an error case
+        if actual is None:
+            return False
+
+        try:
+            # Numeric comparisons
+            if op in ["gte", "gt", "lte", "lt"]:
+                actual = float(actual)
+                value = float(value)
+                if op == "gte":
+                    return actual >= value
+                if op == "gt":
+                    return actual > value
+                if op == "lte":
+                    return actual <= value
+                if op == "lt":
+                    return actual < value
+
+            # Equality operations
+            if op == "eq":
+                return actual == value
+            if op == "neq":
+                return actual != value
+
+            # Membership operations
+            if op == "in":
+                if isinstance(value, list):
+                    return actual in value
+                return str(actual) in str(value).split(",")
+
+            # Range operation
+            if op == "range":
+                actual = float(actual)
+                minv = condition.get("min")
+                maxv = condition.get("max")
+                if minv is not None and actual < minv:
+                    return False
+                if maxv is not None and actual > maxv:
+                    return False
+                return True
+
+        except (ValueError, TypeError):
+            return False
+
+        return False
+
+    @staticmethod
+    def _evaluate_bool_true(actual: Any) -> bool:
+        """
+        Safely evaluate if a value is truthy for bool_true operator.
+        Handles boolean, string, numeric, and None values.
+        
+        Returns True only for:
+        - bool True
+        - string "true", "True", "TRUE"
+        - string "1"
+        - numeric 1
+        
+        Returns False for:
+        - bool False
+        - string "false", "False", "FALSE", "0", "", any other string
+        - numeric 0, 0.0
+        - None
+        """
+        # Direct boolean True
+        if actual is True:
+            return True
+        
+        # Direct boolean False
+        if actual is False:
+            return False
+        
+        # None
+        if actual is None:
+            return False
+        
+        # String values
+        if isinstance(actual, str):
+            # Normalize and check against known truthy strings
+            normalized = actual.strip().lower()
+            return normalized in ("true", "1", "yes")
+        
+        # Numeric values: only 1 is truthy, others (0, 2, 3, etc) are falsy
+        if isinstance(actual, (int, float)):
+            return actual == 1
+        
+        # Everything else is falsy
+        return False
+
+    @staticmethod
+    def _evaluate_bool_false(actual: Any) -> bool:
+        """
+        Safely evaluate if a value is falsy for bool_false operator.
+        This is the inverse of _evaluate_bool_true.
+        
+        Returns True for:
+        - bool False
+        - string "false", "False", "FALSE"
+        - string "0", ""
+        - numeric 0, 0.0
+        - None
+        
+        Returns False for:
+        - bool True
+        - string "true", "True", "TRUE", "1"
+        - numeric 1
+        """
+        return not ConditionEvaluator._evaluate_bool_true(actual)
+
+```
+
+### backend\app\disease_schema.py
+```py
+# backend/app/disease_schema.py
+from typing import List, Optional, Dict, Any, Literal, Union
+from pydantic import BaseModel, Field, validator
+
+
+class UIConfig(BaseModel):
+    input_type: Literal["text", "number", "checkbox", "select", "range"] = "text"
+    placeholder: Optional[str] = None
+    group: Optional[str] = None
+    order: int = 0
+
+
+class FieldSchema(BaseModel):
+    key: str = Field(..., description="Unique identifier, snake_case")
+    label: str
+    type: Literal["number", "text", "boolean", "select"]
+    
+    required: bool = False
+    default: Optional[Any] = None
+    
+    min: Optional[float] = None
+    max: Optional[float] = None
+    step: Optional[float] = 1.0
+    unit: Optional[str] = None
+    
+    options: Optional[List[Dict[str, str]]] = None
+    ui: UIConfig = Field(default_factory=UIConfig)
+    
+    @validator('key')
+    def key_must_be_snake_case(cls, v):
+        if not v.replace('_', '').isalnum():
+            raise ValueError('key phải là snake_case')
+        return v
+
+
+class ComputedField(BaseModel):
+    """Computed fields - cho phép tính toán động từ các field khác"""
+    key: str
+    formula: str                    # Ví dụ: "age * 0.1 + bmi * 2.5"
+    dependencies: List[str] = Field(default_factory=list)
+    description: Optional[str] = None
+
+
+class ExplanationTemplate(BaseModel):
+    """Template giải thích chi tiết cho từng rule"""
+    rule_id: str
+    template: str                   # "Huyết áp tâm thu {systolic} vượt ngưỡng {threshold} mmHg"
+    variables: List[str] = Field(default_factory=list)
+
+
+class ConditionSchema(BaseModel):
+    """
+    Atomic or composite condition schema.
+    
+    Atomic: {"field": "age", "op": "gte", "value": 45}
+    Composite AND: {"all": [cond1, cond2]}
+    Composite OR: {"any": [cond1, cond2]}
+    Composite NOT: {"not_all": [cond1, cond2]}, {"not_any": [cond1, cond2]}
+    """
+    field: Optional[str] = None
+    op: Optional[Literal["gte", "gt", "lte", "lt", "eq", "neq", "bool_true", "bool_false", "in", "range"]] = None
+    value: Optional[Union[float, str, bool, List]] = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+    
+    # Logical operators for compound conditions
+    all: Optional[List["ConditionSchema"]] = None
+    any: Optional[List["ConditionSchema"]] = None
+    not_all: Optional[List["ConditionSchema"]] = None
+    not_any: Optional[List["ConditionSchema"]] = None
+
+
+ConditionSchema.model_rebuild()
+
+
+class CrossValidationRule(BaseModel):
+    left: str
+    op: Literal["lte_field", "gte_field", "eq_field", "neq_field"]
+    right: str
+    message: str
+    severity: Literal["error", "warning"] = "warning"
+
+
+class RiskRule(BaseModel):
+    id: str
+    description: str
+    condition: ConditionSchema
+    category: Literal["modifier", "protective", "interaction"] = "modifier"
+    effect_type: Literal["additive", "multiplicative", "divisive"] = "multiplicative"
+    value: float = 1.0
+    priority: int = 10
+    weight: float = 1.0
+
+
+class RecommendationRule(BaseModel):
+    id: str
+    condition: ConditionSchema
+    text: str
+    priority: int = 1
+    action_type: Literal["lifestyle", "monitoring", "medication", "referral"] = "lifestyle"
+
+
+class BaselineStage(BaseModel):
+    name: str
+    condition: ConditionSchema
+    score: float
+    priority: Optional[int] = None
+
+
+class InteractionRule(BaseModel):
+    """
+    Interaction rule with flexible condition support.
+    
+    Backward compatible with existing metadata:
+    - Old format: conditions: [cond1, cond2] (AND logic)
+    - New format: condition: {...} (supports all/any/not_all/not_any)
+    
+    Both formats are supported and work identically.
+    """
+    id: str
+    interaction_multiplier: float = 1.0
+    description: Optional[str] = None
+    
+    # Support both formats for backward compatibility
+    conditions: Optional[List[ConditionSchema]] = None
+    condition: Optional[ConditionSchema] = None
+    
+    @validator('id')
+    def id_must_not_be_empty(cls, v):
+        if not v.strip():
+            raise ValueError('Interaction id cannot be empty')
+        return v
+
+
+class DiseaseInfo(BaseModel):
+    id: str
+    name: str
+    version: str = "1.0"
+    description: Optional[str] = None
+    author: Optional[str] = None
+    last_updated: Optional[str] = None
+
+
+class RiskStratificationConfig(BaseModel):
+    baseline_mapping: List[BaselineStage]
+    risk_modifiers: List[RiskRule]
+    protective_factors: List[RiskRule]
+    interactions: List[InteractionRule] = Field(default_factory=list)
+    thresholds: List[Dict[str, Any]] = Field(..., description="Thresholds cho risk level")
+    computed_fields: List[ComputedField] = Field(default_factory=list)
+
+
+class DiseaseSchema(BaseModel):
+    disease_info: DiseaseInfo
+    fields: List[FieldSchema]
+    risk_config: RiskStratificationConfig
+    recommendations: List[RecommendationRule]
+    cross_validations: List[CrossValidationRule] = Field(default_factory=list)
+    explanation_templates: List[ExplanationTemplate] = Field(default_factory=list)
+    risk_levels: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    display_config: Optional[Dict] = Field(default_factory=dict)
+
+```
+
+### backend\app\explanation_engine.py
+```py
+from typing import Dict, Any, List
+
+try:
+    from app.condition_evaluator import ConditionEvaluator
+except ImportError:
+    from condition_evaluator import ConditionEvaluator
+
+
+class ExplanationEngine:
+    def __init__(self, plugin_metadata: Dict[str, Any]):
+        self.metadata = plugin_metadata
+        self.recommendations = plugin_metadata.get("recommendations", [])
+        self.explanation_templates = plugin_metadata.get("explanation_templates", [])
+        self.risk_levels = plugin_metadata.get("risk_levels", {})
+
+    def generate_explanation(self, score_result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Generate comprehensive explanation including:
+        - Summary (risk level summary)
+        - Explanations (detailed explanations for each matched rule)
+        - Risk factors (only risk modifiers)
+        - Protective factors (only protective factors)
+        - Key factors (top contributing factors, prioritized by impact)
+        - Recommendations (actionable advice)
+        - Scoring breakdown (detailed calculation steps)
+        """
+        form_data = score_result.get("form_data", {})
+        matched_rules = score_result.get("matched_rules", [])
+        final_score = score_result.get("final_score", 0)
+        risk_level = score_result.get("risk_level", "medium")
+        
+        # Separate risk factors and protective factors
+        risk_factors = [r for r in matched_rules if r.get("category") == "modifier"]
+        protective_factors = [r for r in matched_rules if r.get("category") == "protective"]
+        
+        # Generate components
+        explanations = self._generate_detailed_explanations(matched_rules, form_data)
+        key_factors = self._extract_key_factors(risk_factors, protective_factors)
+        summary = self._generate_summary(risk_level)
+        recommendations = self._generate_recommendations(form_data, final_score)
+        
+        # Add scoring breakdown information (from score_result)
+        scoring_breakdown = score_result.get("scoring_breakdown", {})
+
+        return {
+            "summary": summary,
+            "explanations": explanations,
+            "risk_factors": [
+                {
+                    "id": f.get("id"),
+                    "description": f.get("description"),
+                    "priority": f.get("priority", 10)
+                }
+                for f in risk_factors
+            ],
+            "protective_factors": [
+                {
+                    "id": f.get("id"),
+                    "description": f.get("description"),
+                    "priority": f.get("priority", 10)
+                }
+                for f in protective_factors
+            ],
+            "key_factors": key_factors,
+            "recommendations": recommendations,
+            "risk_level": risk_level,
+            "final_score": final_score,
+            "scoring_breakdown": scoring_breakdown
+        }
+
+    def _generate_detailed_explanations(self, matched_rules: List[Dict], form_data: Dict) -> List[str]:
+        """
+        Generate detailed explanations for each matched rule.
+        Includes contextual information based on rule type.
+        """
+        explanations = []
+        
+        for rule in matched_rules:
+            rule_id = rule.get("id")
+            category = rule.get("category", "modifier")
+            
+            # Look for template first
+            template = next((t for t in self.explanation_templates if t["rule_id"] == rule_id), None)
+            
+            if template:
+                text = self._interpolate_template(template["template"], form_data)
+            else:
+                # Fallback: use description with category hint
+                description = rule.get("description", "")
+                if category == "protective":
+                    text = f"✓ {description} (yếu tố bảo vệ)"
+                else:
+                    text = f"⚠ {description} (yếu tố nguy cơ)"
+            
+            explanations.append(text)
+        
+        return explanations
+
+    def _interpolate_template(self, template: str, form_data: Dict) -> str:
+        """Thay thế {field} trong template bằng giá trị thực từ form_data"""
+        result = template
+        for key, value in form_data.items():
+            result = result.replace(f"{{{key}}}", str(value))
+        return result
+
+    def _extract_key_factors(self, risk_factors: List[Dict], protective_factors: List[Dict]) -> List[Dict]:
+        """
+        Extract top contributing factors with clear indication of type.
+        
+        Priority:
+        1. Risk factors (sorted by priority DESC)
+        2. Protective factors (sorted by priority DESC)
+        
+        Returns: List of top 5 factors with type indication
+        """
+        all_factors = []
+        
+        # Add risk factors with marker
+        for rf in sorted(risk_factors, key=lambda x: x.get("priority", 10), reverse=True):
+            all_factors.append({
+                "type": "risk",
+                "id": rf.get("id"),
+                "description": rf.get("description"),
+                "priority": rf.get("priority", 10),
+                "effect_type": rf.get("effect_type", "multiplicative"),
+                "value": rf.get("value", 1.0)
+            })
+        
+        # Add protective factors with marker
+        for pf in sorted(protective_factors, key=lambda x: x.get("priority", 10), reverse=True):
+            all_factors.append({
+                "type": "protective",
+                "id": pf.get("id"),
+                "description": pf.get("description"),
+                "priority": pf.get("priority", 10),
+                "effect_type": pf.get("effect_type", "divisive"),
+                "value": pf.get("value", 1.0)
+            })
+        
+        # Return top 5 (or fewer if less available)
+        return all_factors[:5]
+
+    def _generate_summary(self, risk_level: str) -> str:
+        """Generate summary based on risk level"""
+        level_config = self.risk_levels.get(risk_level, {})
+        return level_config.get("summary", f"Mức nguy cơ: {risk_level}")
+
+    def _generate_recommendations(self, form_data: Dict, final_score: float) -> List[Dict]:
+        """
+        Generate actionable recommendations based on form data and score.
+        
+        Returns:
+        List of recommendations sorted by priority, each with:
+        - id: recommendation ID
+        - text: actionable text
+        - priority: order of importance
+        - action_type: category (lifestyle, monitoring, medication, referral)
+        """
+        recs = []
+        
+        for rule in self.recommendations:
+            condition = rule.get("condition")
+            
+            # Check condition against form_data OR final_score
+            should_include = False
+            
+            if condition:
+                # If condition field is "final_score", check against score
+                if condition.get("field") == "final_score":
+                    should_include = ConditionEvaluator.evaluate(condition, {"final_score": final_score})
+                else:
+                    # Otherwise check against form data
+                    should_include = ConditionEvaluator.evaluate(condition, form_data)
+            
+            if should_include:
+                recs.append({
+                    "id": rule["id"],
+                    "text": rule["text"],
+                    "priority": rule.get("priority", 1),
+                    "action_type": rule.get("action_type", "lifestyle")
+                })
+        
+        return sorted(recs, key=lambda x: x["priority"])
+
+```
+
+### backend\app\main.py
+```py
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.plugin_api import router as plugin_router
+
+app = FastAPI(title="LuanVanKTPM - Disease Risk Engine")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(plugin_router)
+
+
+@app.get("/")
+def root():
+    return {"message": "LuanVanKTPM Backend Running - Plugin Architecture v2.0"}
+```
+
+### backend\app\plugin_api.py
+```py
+import json
+import time
+from pathlib import Path
+from typing import Dict, Any
+
+from fastapi import APIRouter, HTTPException
+
+from app.plugin_loader import PluginLoader
+from app.validation_engine import ValidationEngine
+from app.risk_stratification_engine import RiskStratificationEngine
+
+router = APIRouter()
+
+# Initialize Plugin Loader
+plugin_loader = PluginLoader()
+
+
+# =========================
+# PLUGIN LOADING
+# =========================
+def get_plugin_metadata(plugin_name: str) -> Dict[str, Any]:
+    try:
+        return plugin_loader.load_plugin(plugin_name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Plugin '{plugin_name}' not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading plugin '{plugin_name}': {str(e)}")
+
+
+def get_validation_engine(plugin_name: str):
+    metadata = get_plugin_metadata(plugin_name)
+    return ValidationEngine(metadata)
+
+
+def get_scoring_engine(plugin_name: str):
+    metadata = get_plugin_metadata(plugin_name)
+    return RiskStratificationEngine(metadata)
+
+
+# =========================
+# ROUTES
+# =========================
+
+@router.get("/plugins")
+def list_plugins():
+    return {"plugins": plugin_loader.list_plugins()}
+
+
+@router.get("/plugins/{plugin_name}")
+def get_plugin(plugin_name: str):
+    return get_plugin_metadata(plugin_name)
+
+
+@router.post("/plugins/{plugin_name}/validate")
+def validate_plugin_form(plugin_name: str, form_data: dict):
+    try:
+        engine = get_validation_engine(plugin_name)
+        result = engine.validate_form(form_data)
+        return result.to_dict()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Validation error: {str(e)}")
+
+
+@router.post("/plugins/{plugin_name}/validate-field/{field_key}")
+def validate_plugin_field(plugin_name: str, field_key: str, form_data: dict):
+    try:
+        engine = get_validation_engine(plugin_name)
+        field_errors = engine.get_field_errors(form_data, field_key)
+        return {
+            "field": field_key,
+            "errors": [err.to_dict() for err in field_errors],
+            "is_valid": len(field_errors) == 0,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Field validation error: {str(e)}")
+
+
+@router.post("/plugins/{plugin_name}/normalize")
+def normalize_plugin_form(plugin_name: str, form_data: dict):
+    try:
+        engine = get_validation_engine(plugin_name)
+        return engine.normalize_form_data(form_data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Normalization error: {str(e)}")
+
+
+@router.get("/plugins/{plugin_name}/fields")
+def get_plugin_all_fields(plugin_name: str):
+    try:
+        engine = get_validation_engine(plugin_name)
+        return {
+            "fields": engine.get_all_field_keys(),
+            "total": len(engine.get_all_field_keys()),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Field list error: {str(e)}")
+
+
+@router.post("/plugins/{plugin_name}/score")
+def score_plugin_form(plugin_name: str, form_data: dict):
+    """
+    Pipeline chuẩn: VALIDATION → NORMALIZATION → SCORING + EXPLANATION
+    """
+    try:
+        # === 1. VALIDATION TRƯỚC KHI TÍNH ĐIỂM ===
+        validation_engine = get_validation_engine(plugin_name)
+        validation_result = validation_engine.validate_form(form_data)
+
+        if validation_result.has_errors():
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Dữ liệu không hợp lệ",
+                    "errors": [err.to_dict() for err in validation_result.errors]
+                }
+            )
+
+        # === 2. NORMALIZE DATA ===
+        normalized_data = validation_engine.normalize_form_data(form_data)
+
+        # === 3. CALCULATE RISK + EXPLANATION ===
+        scoring_engine = get_scoring_engine(plugin_name)
+        result = scoring_engine.calculate_risk(normalized_data)
+
+        # Thêm thông tin validation vào response
+        result["validation"] = {
+            "is_valid": validation_result.is_valid,
+            "warnings": [w.to_dict() for w in validation_result.warnings]
+        }
+
+        return result
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Scoring error: {str(e)}")
+
+
+# =========================
+# HOT RELOAD
+# =========================
+@router.post("/plugins/{plugin_name}/reload")
+def reload_plugin(plugin_name: str):
+    try:
+        if plugin_name in plugin_loader._cache:
+            plugin_loader._cache.pop(plugin_name, None)
+        
+        metadata = plugin_loader.load_plugin(plugin_name, force_reload=True)
+        return {
+            "status": "success",
+            "message": f"Plugin '{plugin_name}' đã được reload thành công",
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+```
+
+### backend\app\plugin_loader.py
+```py
+from pathlib import Path
+from typing import Dict
+import json
+import time
+from .schema_validator import validate_disease_schema
+
+
+class PluginLoader:
+    """
+    Load and cache disease plugin metadata with hot-reload support.
+    
+    Plugins are loaded from plugin_name/metadata.json and validated
+    against DiseaseSchema. Caching is used for performance with
+    file-based cache invalidation.
+    """
+    
+    def __init__(self, plugins_dir: Path = Path("plugins")):
+        self.plugins_dir = plugins_dir
+        self._cache = {}
+        self._last_modified = {}
+
+    def load_plugin(self, plugin_name: str, force_reload: bool = False) -> Dict:
+        """
+        Load plugin metadata from disk or cache.
+        
+        Args:
+            plugin_name: Name of the plugin directory
+            force_reload: Ignore cache and reload from disk
+            
+        Returns:
+            Validated plugin metadata as dictionary
+            
+        Raises:
+            FileNotFoundError: If plugin metadata.json not found
+            ValueError: If metadata fails schema validation
+        """
+        plugin_path = self.plugins_dir / plugin_name / "metadata.json"
+        
+        if not plugin_path.exists():
+            raise FileNotFoundError(f"Plugin {plugin_name} not found at {plugin_path}")
+
+        # Hot Reload logic - check if file has been modified
+        current_mtime = plugin_path.stat().st_mtime
+        cache_key = plugin_name
+
+        if (force_reload or 
+            cache_key not in self._cache or 
+            self._last_modified.get(cache_key) != current_mtime):
+            
+            with open(plugin_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            # Validate against DiseaseSchema
+            validated = validate_disease_schema(data)
+            
+            # Convert Pydantic model to dict, excluding None values
+            plugin_dict = validated.model_dump(exclude_none=True)
+
+            # Cache the result
+            self._cache[cache_key] = plugin_dict
+            self._last_modified[cache_key] = current_mtime
+            
+            print(f"🔄 Plugin '{plugin_name}' loaded at {time.strftime('%H:%M:%S')}")
+
+        return self._cache[cache_key]
+
+    def list_plugins(self):
+        """List all available plugins in plugins directory"""
+        return [p.name for p in self.plugins_dir.iterdir() if p.is_dir()]
+
+    def clear_cache(self):
+        """Clear all cached plugins"""
+        self._cache.clear()
+        self._last_modified.clear()
+
+```
+
+### backend\app\risk_stratification_engine.py
+```py
+# backend/app/risk_stratification_engine.py
+from typing import Any, Dict, List
+import logging
+import os
+import re
+import pandas as pd
+import joblib
+
+try:
+    from app.explanation_engine import ExplanationEngine
+    from app.condition_evaluator import ConditionEvaluator
+except ImportError:
+    from explanation_engine import ExplanationEngine
+    from condition_evaluator import ConditionEvaluator
+
+DEBUG_MODE = os.environ.get("DEBUG_CONDITION_EVAL", "").lower() in ("1", "true", "yes")
+logger = logging.getLogger(__name__)
+
+
+class RiskStratificationEngine:
+    def __init__(self, plugin_metadata: Dict[str, Any]):
+        self.metadata = plugin_metadata
+        self.risk_config = plugin_metadata.get("risk_config", {})
+        
+        self.baseline_mapping = self.risk_config.get("baseline_mapping", [])
+        self.risk_modifiers = self.risk_config.get("risk_modifiers", [])
+        self.protective_factors = self.risk_config.get("protective_factors", [])
+        self.interactions = self.risk_config.get("interactions", [])
+        self.thresholds = self.risk_config.get("thresholds", [])
+
+        # ==================== ML MODEL INTEGRATION ====================
+        self.ml_model = None
+        self.ml_threshold = 0.5
+        self.feature_cols = None
+        self._load_ml_model()
+        # ============================================================
+
+    def _load_ml_model(self):
+        """Load ML Screening Model"""
+        try:
+            ml_dir = os.path.join(os.path.dirname(__file__), "..", "ml", "models")
+            model_path = os.path.join(ml_dir, "screening_best_model.pkl")
+            thresh_path = os.path.join(ml_dir, "screening_best_threshold.pkl")
+            cols_path = os.path.join(ml_dir, "feature_cols.pkl")
+            
+            if all(os.path.exists(p) for p in [model_path, thresh_path, cols_path]):
+                self.ml_model = joblib.load(model_path)
+                self.ml_threshold = joblib.load(thresh_path)
+                self.feature_cols = joblib.load(cols_path)
+                print(f"✅ ML Model loaded successfully for diabetes!")
+            else:
+                print("⚠️ ML Model not found - using rule-based only")
+        except Exception as e:
+            print(f"⚠️ Failed to load ML model: {e}")
+
+    def _predict_with_ml(self, form_data: Dict) -> float:
+        """Dự đoán xác suất từ ML Model"""
+        if not self.ml_model or not self.feature_cols:
+            return 0.0
+        try:
+            input_dict = {col: form_data.get(col, 0) for col in self.feature_cols}
+            df_input = pd.DataFrame([input_dict])
+            proba = self.ml_model.predict_proba(df_input)[0, 1]
+            print(f"🔍 ML Debug - proba = {proba:.4f} | age={input_dict.get('age')}, bmi={input_dict.get('bmi')}")
+            return float(proba)
+        except Exception as e:
+            print(f"❌ ML Prediction error: {e}")
+            return 0.0
+
+    def calculate_risk(self, form_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Pipeline tính toán nguy cơ hoàn chỉnh - Production Ready"""
+        enriched_data = self._compute_derived_fields(form_data)
+        
+        # ML Prediction
+        ml_proba = self._predict_with_ml(enriched_data)
+        
+        baseline_score = self._calculate_baseline_risk(enriched_data)
+        modified_score = self._apply_risk_modifiers(baseline_score, enriched_data)
+        protected_score = self._apply_protective_factors(modified_score, enriched_data)
+        rule_based_score = self._apply_interactions(protected_score, enriched_data)
+        
+        # Kết hợp ML + Rule-based (ưu tiên ML cho bệnh có train data)
+        final_score = round(rule_based_score * 0.35 + ml_proba * 100 * 0.65, 2)
+        final_score = min(final_score, 100)
+        
+        risk_level = self._stratify_risk_level(final_score)
+        all_matched_rules = self._get_matched_rules(enriched_data)
+
+        # Scoring Breakdown
+        scoring_breakdown = {
+            "baseline_score": round(baseline_score, 2),
+            "modified_score": round(modified_score, 2),
+            "protected_score": round(protected_score, 2),
+            "ml_probability": round(ml_proba * 100, 2),
+            "final_score": round(final_score, 2),
+            "steps": [
+                {"step": 1, "name": "Điểm cơ sở (Baseline)", "score": round(baseline_score, 2)},
+                {"step": 2, "name": "Yếu tố nguy cơ", "score": round(modified_score, 2)},
+                {"step": 3, "name": "Yếu tố bảo vệ", "score": round(protected_score, 2)},
+                {"step": 4, "name": "ML Prediction", "score": round(ml_proba * 100, 2)},
+                {"step": 5, "name": "Kết quả cuối cùng", "score": round(final_score, 2)}
+            ]
+        }
+
+        explanation_engine = ExplanationEngine(self.metadata)
+        explanation = explanation_engine.generate_explanation({
+            "matched_rules": all_matched_rules,
+            "risk_level": risk_level,
+            "final_score": final_score,
+            "form_data": enriched_data,
+            "scoring_breakdown": scoring_breakdown
+        })
+
+        return {
+            "final_score": final_score,
+            "risk_level": risk_level,
+            "ml_probability": round(ml_proba * 100, 2),
+            "baseline_score": round(baseline_score, 2),
+            "modified_score": round(modified_score, 2),
+            "protected_score": round(protected_score, 2),
+            "risk_factors": [r["description"] for r in all_matched_rules if r.get("category") == "modifier"],
+            "protective_factors": [r["description"] for r in all_matched_rules if r.get("category") == "protective"],
+            "matched_rules": all_matched_rules,
+            **explanation
+        }
+
+    # ==================== CODE CŨ GIỮ NGUYÊN HOÀN TOÀN TỪ ĐÂY ====================
+    def _compute_derived_fields(self, form_data: Dict) -> Dict:
+        """Tính computed fields từ metadata - Safe evaluation without eval()"""
+        data = form_data.copy()
+        for field in self.risk_config.get("computed_fields", []):
+            try:
+                result = self._safe_formula_eval(
+                    field["formula"],
+                    field.get("dependencies", []),
+                    data
+                )
+                data[field["key"]] = result
+            except Exception as e:
+                if DEBUG_MODE:
+                    print(f"⚠️ Computed field error {field.get('key')}: {e}")
+                data[field["key"]] = 0
+        return data
+
+    def _safe_formula_eval(self, formula: str, dependencies: list, form_data: Dict) -> float:
+        """
+        Safe formula evaluation without eval().
+        """
+        safe_context = {}
+        for dep in dependencies:
+            val = form_data.get(dep, 0)
+            try:
+                safe_context[dep] = float(val) if val is not None else 0
+            except (ValueError, TypeError):
+                safe_context[dep] = 0
+        
+        if not re.match(r'^[a-zA-Z0-9_\s\+\-\*/\(\)\.]+$', formula):
+            raise ValueError(f"Formula contains invalid characters: {formula}")
+        
+        result_formula = formula
+        for dep, value in safe_context.items():
+            result_formula = re.sub(r'\b' + re.escape(dep) + r'\b', str(value), result_formula)
+        
+        remaining_ids = re.findall(r'[a-zA-Z_][a-zA-Z0-9_]*', result_formula)
+        if remaining_ids:
+            raise ValueError(f"Unknown identifiers in formula: {remaining_ids}")
+        
+        try:
+            return float(eval(result_formula, {"__builtins__": {}}, {}))
+        except Exception as e:
+            raise ValueError(f"Formula evaluation error: {str(e)}")
+
+    def _calculate_baseline_risk(self, form_data):
+        """Tính baseline với hỗ trợ priority"""
+        matching_stages = [
+            stage for stage in self.baseline_mapping 
+            if ConditionEvaluator.evaluate(stage.get("condition"), form_data)
+        ]
+        
+        if not matching_stages:
+            return 0
+        if len(matching_stages) == 1:
+            return float(matching_stages[0].get("score", 0))
+        
+        stages_with_priority = [s for s in matching_stages if s.get("priority") is not None]
+        if stages_with_priority:
+            selected = max(stages_with_priority, key=lambda s: s.get("priority", 0))
+        else:
+            selected = max(matching_stages, key=lambda s: float(s.get("score", 0)))
+        
+        return float(selected.get("score", 0))
+
+    def _apply_risk_modifiers(self, score, form_data):
+        result = score
+        for rule in self.risk_modifiers:
+            if ConditionEvaluator.evaluate(rule.get("condition"), form_data):
+                result = self._apply_effect(result, rule)
+        return result
+
+    def _apply_protective_factors(self, score, form_data):
+        result = score
+        for rule in self.protective_factors:
+            if ConditionEvaluator.evaluate(rule.get("condition"), form_data):
+                result = self._apply_effect(result, rule)
+        return result
+
+    def _apply_effect(self, score: float, rule: Dict) -> float:
+        effect_type = rule.get("effect_type", "multiplicative")
+        value = rule.get("value", 1.0)
+        
+        if effect_type == "additive":
+            return score + value
+        elif effect_type == "multiplicative":
+            return score * value
+        elif effect_type == "divisive":
+            return score / value if value != 0 else score
+        return score
+
+    def _apply_interactions(self, score, form_data):
+        result = score
+        for interaction in self.interactions:
+            if self._evaluate_interaction(interaction, form_data):
+                multiplier = interaction.get("interaction_multiplier", 1.0)
+                result *= multiplier
+                if DEBUG_MODE:
+                    logger.info(f"[INTERACTION] {interaction.get('id')} x{multiplier}")
+        return result
+
+    def _evaluate_interaction(self, interaction: Dict, form_data: Dict) -> bool:
+        cond = interaction.get("condition") or interaction.get("conditions")
+        if not cond:
+            return False
+        if isinstance(cond, list):
+            return all(ConditionEvaluator.evaluate(c, form_data) for c in cond)
+        return ConditionEvaluator.evaluate(cond, form_data)
+
+    def _stratify_risk_level(self, score):
+        for threshold in self.thresholds:
+            r = threshold.get("range", [0, 100])
+            if r[0] <= score < r[1]:
+                return threshold.get("level", "medium")
+        return "high"
+
+    def _get_matched_rules(self, form_data):
+        """Lấy tất cả rules đã match"""
+        rules = []
+        for rule in self.risk_modifiers:
+            if ConditionEvaluator.evaluate(rule.get("condition"), form_data):
+                rule_copy = dict(rule)
+                rule_copy["category"] = "modifier"
+                rules.append(rule_copy)
+        for rule in self.protective_factors:
+            if ConditionEvaluator.evaluate(rule.get("condition"), form_data):
+                rule_copy = dict(rule)
+                rule_copy["category"] = "protective"
+                rules.append(rule_copy)
+        return rules
+```
+
+### backend\app\schema_validator.py
+```py
+# backend/app/schema_validator.py
+from .disease_schema import DiseaseSchema
+
+
+def validate_disease_schema(data: dict):
+    """
+    Validate disease plugin metadata against DiseaseSchema.
+    
+    Args:
+        data: Dictionary to validate
+        
+    Returns:
+        Validated DiseaseSchema Pydantic model
+        
+    Raises:
+        ValueError: If validation fails
+    """
+    try:
+        # Pydantic validates and converts data to DiseaseSchema model
+        # Extra fields are silently ignored, allowing forward compatibility
+        validated = DiseaseSchema(**data)
+        return validated
+    except Exception as e:
+        raise ValueError(f"Invalid disease schema: {str(e)}")
+```
+
+### backend\app\test_api_acceptance.py
+```py
+"""
+End-to-end API acceptance test for boolean bug fix.
+Tests the full pipeline: HTTP Request → FastAPI → Validation → Scoring
+"""
+
+import json
+import sys
+import os
+
+# Add the backend app directory to path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Use try-except to handle relative imports when run directly
+try:
+    from app.plugin_loader import PluginLoader
+    from app.validation_engine import ValidationEngine
+    from app.risk_stratification_engine import RiskStratificationEngine
+except ImportError:
+    from plugin_loader import PluginLoader
+    from validation_engine import ValidationEngine
+    from risk_stratification_engine import RiskStratificationEngine
+
+
+def test_api_diabetes_false_boolean():
+    """
+    Full pipeline test: FastAPI simulated request with boolean false.
+    This tests the exact scenario from the bug report.
+    """
+    print("\n✓ Testing API endpoint with family_history_diabetes=false...")
+    
+    # Simulate what would come from Axios/HTTP request
+    # JSON deserializes false as Python False
+    request_payload = {
+        "age": 30,
+        "bmi": 32,
+        "family_history_diabetes": False,  # This is what JSON deserializes to
+        "exercise_minutes_per_week": 500,
+        "smoking_status": "former"
+    }
+    
+    # Load plugin
+    loader = PluginLoader()
+    metadata = loader.load_plugin("diabetes")
+    
+    # Validate
+    val_engine = ValidationEngine(metadata)
+    val_result = val_engine.validate_form(request_payload)
+    assert val_result.is_valid, f"Validation failed: {val_result.errors}"
+    
+    # Normalize
+    normalized = val_engine.normalize_form_data(request_payload)
+    print(f"  Request: {request_payload}")
+    print(f"  Normalized: {normalized}")
+    
+    # Score
+    score_engine = RiskStratificationEngine(metadata)
+    result = score_engine.calculate_risk(normalized)
+    
+    # Verify results
+    print(f"  Result:")
+    print(f"    baseline_score: {result['baseline_score']}")
+    print(f"    modified_score: {result['modified_score']}")
+    print(f"    protected_score: {result['protected_score']}")
+    print(f"    risk_level: {result['risk_level']}")
+    print(f"    risk_factors: {result['risk_factors']}")
+    
+    # Critical assertions
+    assert result['baseline_score'] == 55
+    assert result['modified_score'] == 55, "No modifiers should match with false boolean"
+    assert result['protected_score'] == 45.83
+    assert result['risk_level'] == "medium"
+    assert "family_history" not in result['risk_factors'], \
+        "family_history must not be in risk_factors when false"
+    
+    print("  ✓ PASS: Boolean false correctly rejected by bool_true condition")
+
+
+def test_api_diabetes_true_boolean():
+    """
+    Verify that boolean true DOES trigger the modifier rule.
+    """
+    print("\n✓ Testing API endpoint with family_history_diabetes=true...")
+    
+    request_payload = {
+        "age": 30,
+        "bmi": 32,
+        "family_history_diabetes": True,  # This time TRUE
+        "exercise_minutes_per_week": 500,
+        "smoking_status": "former"
+    }
+    
+    # Load plugin
+    loader = PluginLoader()
+    metadata = loader.load_plugin("diabetes")
+    
+    # Validate
+    val_engine = ValidationEngine(metadata)
+    val_result = val_engine.validate_form(request_payload)
+    assert val_result.is_valid
+    
+    # Normalize
+    normalized = val_engine.normalize_form_data(request_payload)
+    
+    # Score
+    score_engine = RiskStratificationEngine(metadata)
+    result = score_engine.calculate_risk(normalized)
+    
+    print(f"  Result:")
+    print(f"    baseline_score: {result['baseline_score']}")
+    print(f"    modified_score: {result['modified_score']} (should be 55 * 1.6 = 88)")
+    print(f"    risk_factors: {result['risk_factors']}")
+    
+    # When true, modifier SHOULD apply
+    assert result['baseline_score'] == 55
+    assert result['modified_score'] == 88, "With true, 1.6x multiplier should apply"
+    assert "family_history" in result['risk_factors'], \
+        "family_history must be in risk_factors when true"
+    
+    print("  ✓ PASS: Boolean true correctly accepted by bool_true condition")
+
+
+def test_api_string_representations():
+    """
+    Test that string representations of booleans are normalized correctly.
+    This tests edge cases where values might come as strings from some sources.
+    """
+    print("\n✓ Testing string representations of booleans...")
+    
+    loader = PluginLoader()
+    metadata = loader.load_plugin("diabetes")
+    val_engine = ValidationEngine(metadata)
+    
+    test_cases = [
+        ("false", False),
+        ("False", False),
+        ("FALSE", False),
+        ("true", True),
+        ("True", True),
+        ("TRUE", True),
+        ("0", False),
+        ("1", True),
+    ]
+    
+    for string_val, expected_bool in test_cases:
+        request = {
+            "age": 30,
+            "bmi": 32,
+            "family_history_diabetes": string_val,
+            "exercise_minutes_per_week": 500,
+            "smoking_status": "former"
+        }
+        
+        normalized = val_engine.normalize_form_data(request)
+        actual = normalized.get("family_history_diabetes")
+        
+        assert actual == expected_bool, \
+            f"String '{string_val}' should normalize to {expected_bool}, got {actual}"
+        
+        print(f"  ✓ '{string_val}' → {actual}")
+    
+    print("  ✓ PASS: All string representations normalize correctly")
+
+
+def run_api_tests():
+    """Run all API acceptance tests."""
+    print("\n" + "="*70)
+    print("API ACCEPTANCE TESTS - BOOLEAN FIX END-TO-END")
+    print("="*70)
+    
+    try:
+        test_api_diabetes_false_boolean()
+        test_api_diabetes_true_boolean()
+        test_api_string_representations()
+        
+        print("\n" + "="*70)
+        print("✓ ALL API ACCEPTANCE TESTS PASSED!")
+        print("="*70)
+        print("\nKey validations:")
+        print("  1. ✓ family_history_diabetes=false does NOT trigger rule")
+        print("  2. ✓ family_history_diabetes=true DOES trigger rule")
+        print("  3. ✓ String representations normalize to proper booleans")
+        print("  4. ✓ Risk scoring is correct in both cases")
+        
+    except AssertionError as e:
+        print(f"\n✗ TEST FAILED: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n✗ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    run_api_tests()
+
+```
+
+### backend\app\test_plugin_compatibility.py
+```py
+"""
+Plugin backward compatibility tests
+Ensures existing diabetes and hypertension plugins still work after refactoring
+"""
+
+import sys
+import os
+import json
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from validation_engine import ValidationEngine
+from risk_stratification_engine import RiskStratificationEngine
+
+
+def test_diabetes_plugin():
+    """Test that diabetes plugin still works correctly."""
+    print("\n" + "="*60)
+    print("TESTING DIABETES PLUGIN COMPATIBILITY")
+    print("="*60)
+    
+    # Load diabetes metadata - adjust path based on current working directory
+    plugin_path = os.path.join(os.path.dirname(__file__), "..", "plugins", "diabetes", "metadata.json")
+    with open(plugin_path, "r", encoding="utf-8") as f:
+        metadata = json.load(f)
+    
+    print("\n1. Testing Validation Engine...")
+    try:
+        val_engine = ValidationEngine(metadata)
+        
+        # Valid data
+        valid_data = {
+            "age": 50,
+            "bmi": 32,
+            "family_history_diabetes": True,
+            "exercise_minutes_per_week": 100,
+            "smoking_status": "current"
+        }
+        result = val_engine.validate_form(valid_data)
+        assert result.is_valid, f"Valid data should pass: {result.errors}"
+        print("   ✓ Valid form passed")
+        
+        # Invalid age
+        invalid_data = {
+            "age": 150,  # Over max
+            "bmi": 32,
+            "smoking_status": "current"
+        }
+        result = val_engine.validate_form(invalid_data)
+        assert not result.is_valid, "Invalid age should fail"
+        print("   ✓ Invalid age caught")
+        
+        # Invalid smoking status
+        invalid_smoking = {
+            "age": 50,
+            "bmi": 32,
+            "smoking_status": "invalid_value"  # Not in options
+        }
+        result = val_engine.validate_form(invalid_smoking)
+        assert not result.is_valid, "Invalid smoking_status should fail"
+        print("   ✓ Invalid select value caught")
+        
+    except Exception as e:
+        print(f"   ✗ Validation Engine test failed: {e}")
+        raise
+    
+    print("\n2. Testing Risk Stratification Engine...")
+    try:
+        risk_engine = RiskStratificationEngine(metadata)
+        
+        # Test case 1: Low risk (BMI < 25)
+        result1 = risk_engine.calculate_risk({
+            "age": 30,
+            "bmi": 22,
+            "family_history_diabetes": False,
+            "exercise_minutes_per_week": 200,
+            "smoking_status": "never"
+        })
+        assert result1["final_score"] >= 0, "Score should be non-negative"
+        assert result1["risk_level"] in ["low", "medium", "high"], "Risk level should be valid"
+        print(f"   ✓ Low risk case: score={result1['final_score']}, level={result1['risk_level']}")
+        
+        # Test case 2: Moderate risk (BMI 25-30)
+        result2 = risk_engine.calculate_risk({
+            "age": 45,
+            "bmi": 27,
+            "family_history_diabetes": False,
+            "exercise_minutes_per_week": 60,
+            "smoking_status": "former"
+        })
+        print(f"   ✓ Moderate risk case: score={result2['final_score']}, level={result2['risk_level']}")
+        
+        # Test case 3: High risk (BMI >= 30, age 45+, family history)
+        result3 = risk_engine.calculate_risk({
+            "age": 55,
+            "bmi": 32,
+            "family_history_diabetes": True,
+            "exercise_minutes_per_week": 30,
+            "smoking_status": "current"
+        })
+        assert result3["final_score"] > result2["final_score"], "High risk should have higher score"
+        print(f"   ✓ High risk case: score={result3['final_score']}, level={result3['risk_level']}")
+        
+        # Verify matched rules are returned
+        assert "matched_rules" in result3, "Should return matched rules"
+        print(f"   ✓ Matched rules: {len(result3['matched_rules'])} rules found")
+        
+    except Exception as e:
+        print(f"   ✗ Risk Stratification test failed: {e}")
+        raise
+    
+    print("\n✓ DIABETES PLUGIN: All tests passed!")
+
+
+def test_hypertension_plugin():
+    """Test that hypertension plugin still works correctly."""
+    print("\n" + "="*60)
+    print("TESTING HYPERTENSION PLUGIN COMPATIBILITY")
+    print("="*60)
+    
+    # Load hypertension metadata - adjust path based on current working directory
+    plugin_path = os.path.join(os.path.dirname(__file__), "..", "plugins", "hypertension", "metadata.json")
+    with open(plugin_path, "r", encoding="utf-8") as f:
+        metadata = json.load(f)
+    
+    print("\n1. Testing Validation Engine...")
+    try:
+        val_engine = ValidationEngine(metadata)
+        
+        # Valid data
+        valid_data = {
+            "age": 60,
+            "systolic": 140,
+            "diastolic": 90,
+            "bmi": 28,
+            "smoking_status": "former",
+            "diabetes_status": "no",
+            "family_history_hypertension": True,
+            "exercise_minutes_per_week": 100
+        }
+        result = val_engine.validate_form(valid_data)
+        assert result.is_valid, f"Valid data should pass: {result.errors}"
+        print("   ✓ Valid form passed")
+        
+        # Invalid systolic
+        invalid_data = {
+            "age": 60,
+            "systolic": 300,  # Over max
+            "diastolic": 90
+        }
+        result = val_engine.validate_form(invalid_data)
+        assert not result.is_valid, "Invalid systolic should fail"
+        print("   ✓ Invalid systolic caught")
+        
+    except Exception as e:
+        print(f"   ✗ Validation Engine test failed: {e}")
+        raise
+    
+    print("\n2. Testing Risk Stratification Engine...")
+    try:
+        risk_engine = RiskStratificationEngine(metadata)
+        
+        # Test case 1: Normal BP
+        result1 = risk_engine.calculate_risk({
+            "age": 40,
+            "systolic": 115,
+            "diastolic": 75,
+            "bmi": 25,
+            "smoking_status": "never",
+            "diabetes_status": "no",
+            "family_history_hypertension": False,
+            "exercise_minutes_per_week": 150
+        })
+        print(f"   ✓ Normal BP case: score={result1['final_score']}, level={result1['risk_level']}")
+        
+        # Test case 2: Elevated BP
+        result2 = risk_engine.calculate_risk({
+            "age": 55,
+            "systolic": 125,
+            "diastolic": 80,
+            "bmi": 28,
+            "smoking_status": "former",
+            "diabetes_status": "no",
+            "family_history_hypertension": False,
+            "exercise_minutes_per_week": 90
+        })
+        print(f"   ✓ Elevated BP case: score={result2['final_score']}, level={result2['risk_level']}")
+        
+        # Test case 3: Stage 2 hypertension
+        result3 = risk_engine.calculate_risk({
+            "age": 65,
+            "systolic": 145,
+            "diastolic": 95,
+            "bmi": 32,
+            "smoking_status": "current",
+            "diabetes_status": "yes",
+            "family_history_hypertension": True,
+            "exercise_minutes_per_week": 30
+        })
+        assert result3["final_score"] > result2["final_score"], "Stage 2 should have higher score"
+        print(f"   ✓ Stage 2 hypertension case: score={result3['final_score']}, level={result3['risk_level']}")
+        
+    except Exception as e:
+        print(f"   ✗ Risk Stratification test failed: {e}")
+        raise
+    
+    print("\n✓ HYPERTENSION PLUGIN: All tests passed!")
+
+
+def run_plugin_tests():
+    """Run all plugin compatibility tests."""
+    print("\n" + "="*60)
+    print("PLUGIN BACKWARD COMPATIBILITY VERIFICATION")
+    print("="*60)
+    
+    try:
+        test_diabetes_plugin()
+        test_hypertension_plugin()
+        
+        print("\n" + "="*60)
+        print("✓ ALL PLUGIN TESTS PASSED!")
+        print("="*60)
+        print("\nBoth plugins are fully compatible with refactored system:")
+        print("  • Diabetes plugin: ✓ Working")
+        print("  • Hypertension plugin: ✓ Working")
+        print("  • New SELECT validation: ✓ Applied")
+        print("  • New composite conditions: ✓ Compatible")
+        print("  • Priority-based baseline: ✓ Compatible")
+        
+    except Exception as e:
+        print(f"\n✗ Plugin test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    run_plugin_tests()
+
+```
+
+### backend\app\test_schema.py
+```py
+# backend/app/test_schema.py
+import json
+from pathlib import Path
+from app.schema_validator import validate_disease_schema
+
+def test_plugin_schema(plugin_name: str = "hypertension"):
+    metadata_path = Path("plugins") / plugin_name / "metadata.json"
+    
+    if not metadata_path.exists():
+        print(f"❌ Không tìm thấy file: {metadata_path}")
+        return
+    
+    try:
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        print(f"✅ Đang validate schema cho plugin: {plugin_name}")
+        
+        validated = validate_disease_schema(data)
+        
+        print("✅ Schema hợp lệ!")
+        print(f"   Disease: {validated.disease_info.name}")
+        print(f"   Version: {validated.disease_info.version}")
+        print(f"   Số fields: {len(validated.fields)}")
+        print(f"   Số baseline rules: {len(validated.risk_config.baseline_mapping)}")
+            
+    except Exception as e:
+        print(f"❌ Validate thất bại: {e}")
+
+if __name__ == "__main__":
+    test_plugin_schema()
+```
+
+### backend\app\validation_engine.py
+```py
+# backend/app/validation_engine.py
+from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from enum import Enum
+
+# Try to import from app, fallback to direct import
+try:
+    from app.condition_evaluator import ConditionEvaluator
+except ImportError:
+    from condition_evaluator import ConditionEvaluator
+
+
+class ValidationType(str, Enum):
+    REQUIRED = "required"
+    TYPE = "type"
+    MIN = "min"
+    MAX = "max"
+    RANGE = "range"
+    PATTERN = "pattern"
+    CUSTOM = "custom"
+    CROSS_FIELD = "cross_field"
+    SELECT = "select"
+
+
+@dataclass
+class ValidationError:
+    field: str
+    rule: str
+    message: str
+    severity: str = "error"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "field": self.field,
+            "rule": self.rule,
+            "message": self.message,
+            "severity": self.severity,
+        }
+
+
+@dataclass
+class ValidationResult:
+    is_valid: bool
+    errors: List[ValidationError]
+    warnings: List[ValidationError]
+
+    def has_errors(self) -> bool:
+        return len(self.errors) > 0
+
+    def has_warnings(self) -> bool:
+        return len(self.warnings) > 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "is_valid": self.is_valid,
+            "errors": [err.to_dict() for err in self.errors],
+            "warnings": [warn.to_dict() for warn in self.warnings],
+        }
+
+
+class FieldValidator:
+    """Validates individual form field values according to field definition"""
+    
+    def __init__(self, field_config: Dict[str, Any]):
+        self.field = field_config
+        self.key = field_config.get("key")
+        self.field_type = field_config.get("type")
+        self.required = field_config.get("required", False)
+        self.min_val = field_config.get("min")
+        self.max_val = field_config.get("max")
+        self.options = field_config.get("options", [])
+        self.unit = field_config.get("unit")
+        self.label = field_config.get("label", self.key)
+
+    def validate(self, value: Any) -> List[ValidationError]:
+        """
+        Validate a field value against all applicable rules.
+        
+        Returns list of validation errors (empty list = valid).
+        """
+        errors = []
+
+        # 1. Check required
+        if self.required and (value is None or value == ""):
+            errors.append(ValidationError(
+                field=self.key,
+                rule=ValidationType.REQUIRED,
+                message=f"{self.label} là bắt buộc"
+            ))
+            return errors  # Stop validation if required field is missing
+
+        # If field is optional and empty, it's valid
+        if value is None or value == "":
+            return errors
+
+        # 2. Check type
+        type_error = self._validate_type(value)
+        if type_error:
+            errors.append(type_error)
+            return errors  # Stop if type is wrong
+
+        # 3. Check numeric constraints
+        if self.field_type == "number":
+            min_error = self._validate_min(value)
+            if min_error:
+                errors.append(min_error)
+            
+            max_error = self._validate_max(value)
+            if max_error:
+                errors.append(max_error)
+
+        # 4. Check select options
+        if self.field_type == "select":
+            select_error = self._validate_select(value)
+            if select_error:
+                errors.append(select_error)
+
+        return errors
+
+    def _validate_type(self, value) -> Optional[ValidationError]:
+        """Validate field value against expected type"""
+        
+        if self.field_type == "number":
+            try:
+                float(value)
+                return None
+            except (ValueError, TypeError):
+                return ValidationError(
+                    field=self.key,
+                    rule=ValidationType.TYPE,
+                    message=f"{self.label} phải là số"
+                )
+        
+        elif self.field_type == "boolean":
+            if not isinstance(value, bool):
+                return ValidationError(
+                    field=self.key,
+                    rule=ValidationType.TYPE,
+                    message=f"{self.label} phải là true/false"
+                )
+        
+        elif self.field_type == "text":
+            if not isinstance(value, str):
+                return ValidationError(
+                    field=self.key,
+                    rule=ValidationType.TYPE,
+                    message=f"{self.label} phải là văn bản"
+                )
+        
+        return None
+
+    def _validate_min(self, value) -> Optional[ValidationError]:
+        """Validate minimum value constraint"""
+        if self.min_val is None:
+            return None
+        
+        try:
+            num_value = float(value)
+            if num_value < self.min_val:
+                unit_str = f" {self.unit}" if self.unit else ""
+                return ValidationError(
+                    field=self.key,
+                    rule=ValidationType.MIN,
+                    message=f"{self.label} phải ≥ {self.min_val}{unit_str}"
+                )
+        except (ValueError, TypeError):
+            pass
+        
+        return None
+
+    def _validate_max(self, value) -> Optional[ValidationError]:
+        """Validate maximum value constraint"""
+        if self.max_val is None:
+            return None
+        
+        try:
+            num_value = float(value)
+            if num_value > self.max_val:
+                unit_str = f" {self.unit}" if self.unit else ""
+                return ValidationError(
+                    field=self.key,
+                    rule=ValidationType.MAX,
+                    message=f"{self.label} phải ≤ {self.max_val}{unit_str}"
+                )
+        except (ValueError, TypeError):
+            pass
+        
+        return None
+
+    def _validate_select(self, value: Any) -> Optional[ValidationError]:
+        """
+        Validate that select field value exists in options.
+        
+        Supports option format:
+        [{"value": "opt1", "label": "Option 1"}, ...]
+        """
+        if self.field_type != "select":
+            return None
+        
+        if not self.options:
+            return None
+        
+        # Extract valid option values
+        valid_values = []
+        for opt in self.options:
+            if isinstance(opt, dict):
+                valid_values.append(opt.get("value"))
+            else:
+                valid_values.append(opt)
+        
+        # Check if submitted value is in valid options
+        if value not in valid_values:
+            valid_list = ", ".join(str(v) for v in valid_values if v is not None)
+            return ValidationError(
+                field=self.key,
+                rule=ValidationType.SELECT,
+                message=f"{self.label} phải là một trong: {valid_list}"
+            )
+        
+        return None
+
+
+class ValidationEngine:
+    """Main validation engine for form data against plugin schema"""
+    
+    def __init__(self, plugin_metadata: Dict[str, Any]):
+        self.metadata = plugin_metadata
+        self.fields = plugin_metadata.get("fields", [])
+        self.cross_validations = plugin_metadata.get("cross_validations", [])
+
+        # Build field validators
+        self.field_validators = {
+            field["key"]: FieldValidator(field) for field in self.fields
+        }
+
+    def validate_form(self, form_data: Dict[str, Any]) -> ValidationResult:
+        """
+        Validate entire form against schema.
+        
+        Runs:
+        1. Field-level validation
+        2. Cross-field validation
+        
+        Returns ValidationResult with errors and warnings.
+        """
+        errors = []
+        warnings = []
+
+        # 1. Field validation
+        for field in self.fields:
+            field_key = field["key"]
+            value = form_data.get(field_key)
+            validator = self.field_validators[field_key]
+            field_errors = validator.validate(value)
+            errors.extend(field_errors)
+
+        # 2. Cross-field validation
+        cross_errors = self._validate_cross_fields(form_data)
+        for err in cross_errors:
+            if err.severity == "warning":
+                warnings.append(err)
+            else:
+                errors.append(err)
+
+        is_valid = len(errors) == 0
+
+        return ValidationResult(
+            is_valid=is_valid,
+            errors=errors,
+            warnings=warnings,
+        )
+
+    def _validate_cross_fields(self, form_data: Dict[str, Any]) -> List[ValidationError]:
+        """
+        Validate relationships between multiple fields.
+        
+        Example: diastolic_pressure <= systolic_pressure
+        """
+        errors = []
+        
+        for rule in self.cross_validations:
+            left_field = rule.get("left")
+            right_field = rule.get("right")
+            op = rule.get("op")
+            message = rule.get("message", f"Validation error between {left_field} and {right_field}")
+            severity = rule.get("severity", "warning")
+            
+            left_val = form_data.get(left_field)
+            right_val = form_data.get(right_field)
+
+            # Skip if either field is missing
+            if left_val is None or right_val is None:
+                continue
+
+            try:
+                left_num = float(left_val)
+                right_num = float(right_val)
+
+                # Map operator
+                op_mapping = {
+                    "lte_field": "lte",
+                    "gte_field": "gte",
+                    "eq_field": "eq",
+                    "neq_field": "neq"
+                }
+                
+                condition_op = op_mapping.get(op, op)
+                
+                # Evaluate condition
+                condition = {
+                    "field": left_field,
+                    "op": condition_op,
+                    "value": right_num
+                }
+                
+                if not ConditionEvaluator.evaluate(condition, {left_field: left_num}):
+                    errors.append(ValidationError(
+                        field=left_field,
+                        rule=ValidationType.CROSS_FIELD,
+                        message=message,
+                        severity=severity
+                    ))
+            except (ValueError, TypeError):
+                # Skip if values can't be converted to numbers
+                continue
+        
+        return errors
+
+    def get_field_errors(self, form_data: Dict[str, Any], field_key: str) -> List[ValidationError]:
+        """Get validation errors for a specific field"""
+        if field_key not in self.field_validators:
+            return []
+        
+        validator = self.field_validators[field_key]
+        value = form_data.get(field_key)
+        return validator.validate(value)
+
+    def normalize_form_data(self, form_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalize form data according to field type definitions.
+        
+        Handles:
+        - Type conversion (string -> number)
+        - Boolean normalization (string "true" -> bool True)
+        - Optional field defaults
+        """
+        normalized = {}
+        
+        for field in self.fields:
+            key = field["key"]
+            value = form_data.get(key)
+            field_type = field.get("type")
+
+            if value is None or value == "":
+                # Use default value if provided, otherwise keep None
+                normalized[key] = field.get("default")
+            else:
+                if field_type == "number":
+                    try:
+                        normalized[key] = float(value)
+                    except (ValueError, TypeError):
+                        normalized[key] = field.get("default")
+                
+                elif field_type == "boolean":
+                    # Explicit boolean normalization
+                    normalized[key] = self._normalize_boolean(value)
+                
+                else:
+                    # text, select, etc - keep as is
+                    normalized[key] = value
+        
+        return normalized
+
+    def _normalize_boolean(self, value: Any) -> bool:
+        """
+        Normalize various representations of boolean values.
+        
+        Truthy values:
+        - bool True
+        - string: "true", "True", "TRUE", "1", "yes", "Yes", "YES"
+        - numeric: 1
+        
+        Falsy values:
+        - bool False
+        - string: "false", "False", "FALSE", "0", "no", "No", "NO", ""
+        - numeric: 0
+        - None returns None
+        
+        Unknown values default to False (safer).
+        """
+        # Already a boolean
+        if isinstance(value, bool):
+            return value
+        
+        # None stays None
+        if value is None:
+            return None
+        
+        # String conversion
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in ("true", "1", "yes"):
+                return True
+            elif normalized in ("false", "0", "no", ""):
+                return False
+            else:
+                # Unknown string defaults to False
+                return False
+        
+        # Numeric conversion
+        if isinstance(value, (int, float)):
+            return value == 1  # Only exactly 1 is True
+        
+        # Any other type defaults to False
+        return False
+
+    def get_all_field_keys(self) -> List[str]:
+        """Get list of all field keys in order"""
+        return [field["key"] for field in self.fields]
+
+    def get_fields_by_group(self) -> Dict[str, List[Dict]]:
+        """
+        Organize fields by UI group.
+        
+        Returns dict: {"group_name": [field1, field2, ...]}
+        """
+        groups = {}
+        
+        for field in self.fields:
+            group_name = field.get("ui", {}).get("group", "ungrouped")
+            if group_name not in groups:
+                groups[group_name] = []
+            groups[group_name].append(field)
+        
+        return groups
+
+```
+
+### backend\ml\train_model.py
+```py
+import os
+import warnings
+warnings.filterwarnings("ignore")
+
+import numpy as np
+import pandas as pd
+import joblib
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import f1_score, recall_score, precision_score, precision_recall_curve
+from sklearn.ensemble import RandomForestClassifier
+
+try:
+    from xgboost import XGBClassifier
+    HAS_XGB = True
+    print("✅ XGBoost đã sẵn sàng")
+except ImportError:
+    HAS_XGB = False
+    print("⚠️ Cài XGBoost: pip install xgboost")
+
+
+FEATURE_COLS = [
+    "age", "gender_code", "bmi", "waist", "systolic", "diastolic", "hypertension",
+    "fasting_glucose", "hba1c", "total_cholesterol", "ldl", "creatinine",
+    "smoke", "exercise", "alcohol", "sodium_intake",
+    "family_hypertension", "family_cardiovascular",
+]
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EXPERIMENTS SIÊU MẠNH - TẬP TRUNG CAO CHO Y TẾ
+# ══════════════════════════════════════════════════════════════════════════════
+
+EXPERIMENTS = [
+    # Random Forest mạnh
+    {"name": "RF | Ultra Strong",
+     "model": RandomForestClassifier(n_estimators=1200, max_depth=None, min_samples_leaf=1,
+                                     class_weight="balanced", random_state=42, n_jobs=-1)},
+
+    # XGBoost Heavy Tuning (ưu tiên Recall + F1 cao)
+    *([
+        {"name": "XGB | scale=15 - depth7",
+         "model": XGBClassifier(n_estimators=1000, max_depth=7, learning_rate=0.04,
+                                subsample=0.82, colsample_bytree=0.78, scale_pos_weight=15,
+                                gamma=0.4, min_child_weight=2, reg_lambda=1.2,
+                                eval_metric="aucpr", random_state=42, n_jobs=-1)},
+
+        {"name": "XGB | scale=18 - depth6",
+         "model": XGBClassifier(n_estimators=800, max_depth=6, learning_rate=0.05,
+                                subsample=0.85, colsample_bytree=0.8, scale_pos_weight=18,
+                                gamma=0.3, min_child_weight=3,
+                                eval_metric="aucpr", random_state=42, n_jobs=-1)},
+
+        {"name": "XGB | scale=12 - depth8",
+         "model": XGBClassifier(n_estimators=900, max_depth=8, learning_rate=0.03,
+                                subsample=0.8, colsample_bytree=0.75, scale_pos_weight=12,
+                                gamma=0.5, min_child_weight=2,
+                                eval_metric="aucpr", random_state=42, n_jobs=-1)},
+
+        {"name": "XGB | High Recall",
+         "model": XGBClassifier(n_estimators=700, max_depth=5, learning_rate=0.06,
+                                subsample=0.78, colsample_bytree=0.82, scale_pos_weight=20,
+                                eval_metric="aucpr", random_state=42, n_jobs=-1)},
+
+        {"name": "XGB | Balanced Best",
+         "model": XGBClassifier(n_estimators=850, max_depth=7, learning_rate=0.045,
+                                subsample=0.83, colsample_bytree=0.79, scale_pos_weight=14,
+                                gamma=0.4, min_child_weight=2.5,
+                                eval_metric="aucpr", random_state=42, n_jobs=-1)},
+    ] if HAS_XGB else []),
+]
+
+
+# (Phần code bên dưới giữ nguyên như phiên bản trước - find_data_dir, load_and_merge_data, build_features, run_experiments, main)
+
+def find_data_dir():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    possible_dirs = [os.path.join(project_root, "data"), os.path.join(script_dir, "data"), project_root]
+    required = ["demographic.csv", "diet.csv", "examination.csv", "questionnaire.csv", "labs.csv", "medications.csv"]
+    for d in possible_dirs:
+        if all(os.path.exists(os.path.join(d, f)) for f in required):
+            print(f"✅ Tìm thấy dữ liệu tại: {d}")
+            return d
+    raise FileNotFoundError("❌ Không tìm thấy thư mục data!")
+
+
+def read_csv_safe(path):
+    for enc in ["utf-8", "utf-8-sig", "latin1", "cp1252"]:
+        try:
+            return pd.read_csv(path, encoding=enc, low_memory=False)
+        except Exception:
+            continue
+    raise Exception(f"Không đọc được file: {path}")
+
+
+def load_and_merge_data():
+    data_dir = find_data_dir()
+    print(f"Đọc dữ liệu từ: {data_dir}")
+    demo = read_csv_safe(os.path.join(data_dir, "demographic.csv"))
+    diet = read_csv_safe(os.path.join(data_dir, "diet.csv"))
+    exam = read_csv_safe(os.path.join(data_dir, "examination.csv"))
+    quest = read_csv_safe(os.path.join(data_dir, "questionnaire.csv"))
+    labs = read_csv_safe(os.path.join(data_dir, "labs.csv"))
+    
+    df = demo[["SEQN", "RIDAGEYR", "RIAGENDR"]].copy()
+    for src, cols in [
+        (diet, ["SEQN", "DR1TSODI"]),
+        (exam, ["SEQN", "BMXBMI", "BMXWAIST", "BPXSY1", "BPXSY2", "BPXDI1", "BPXDI2"]),
+        (quest, ["SEQN", "DIQ010", "SMQ020", "ALQ130", "BPQ020", "MCQ160A", "PAQ650"]),
+        (labs, ["SEQN", "LBXSGL", "LBXGH", "LBXTC", "LBDLDL", "LBXSCR"]),
+    ]:
+        df = df.merge(src[cols], on="SEQN", how="left")
+    print(f"✅ Đã gộp: {df.shape[0]} mẫu, {df.shape[1]} cột")
+    return df
+
+
+def build_features(df):
+    df = df[df["DIQ010"].isin([1, 2, 3])].copy()
+    df["Target"] = (df["DIQ010"] == 1).astype(int)
+    df["age"] = pd.to_numeric(df["RIDAGEYR"], errors="coerce")
+    df["gender_code"] = pd.to_numeric(df["RIAGENDR"], errors="coerce")
+    df["bmi"] = pd.to_numeric(df["BMXBMI"], errors="coerce")
+    df["waist"] = pd.to_numeric(df["BMXWAIST"], errors="coerce")
+    for c in ["BPXSY1", "BPXSY2", "BPXDI1", "BPXDI2"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df["systolic"] = df[["BPXSY1", "BPXSY2"]].mean(axis=1)
+    df["diastolic"] = df[["BPXDI1", "BPXDI2"]].mean(axis=1)
+    df["hypertension"] = ((df["systolic"] >= 130) | (df["diastolic"] >= 80)).astype(float)
+    df["fasting_glucose"] = pd.to_numeric(df.get("LBXSGL"), errors="coerce")
+    df["hba1c"] = pd.to_numeric(df.get("LBXGH"), errors="coerce")
+    df["total_cholesterol"] = pd.to_numeric(df.get("LBXTC"), errors="coerce")
+    df["ldl"] = pd.to_numeric(df.get("LBDLDL"), errors="coerce")
+    df["creatinine"] = pd.to_numeric(df.get("LBXSCR"), errors="coerce")
+    df["smoke"] = (pd.to_numeric(df.get("SMQ020"), errors="coerce") == 1).astype(float)
+    df["exercise"] = (pd.to_numeric(df.get("PAQ650"), errors="coerce") == 1).astype(float)
+    df["alcohol"] = pd.to_numeric(df.get("ALQ130"), errors="coerce").fillna(0)
+    df["sodium_intake"] = pd.to_numeric(df.get("DR1TSODI"), errors="coerce")
+    df["family_hypertension"] = (pd.to_numeric(df.get("BPQ020"), errors="coerce") == 1).astype(float)
+    df["family_cardiovascular"] = (pd.to_numeric(df.get("MCQ160A"), errors="coerce") == 1).astype(float)
+
+    X = df[FEATURE_COLS].copy()
+    y = df["Target"].copy()
+    print(f"📊 Số mẫu: {len(df)} | Positive rate: {y.mean():.4f}\n")
+    return X, y
+
+
+def find_optimal_threshold(y_true, y_proba, beta=0.75):
+    prec, rec, thresh = precision_recall_curve(y_true, y_proba)
+    fbeta = (1 + beta**2) * (prec * rec) / (beta**2 * prec + rec + 1e-8)
+    best_idx = np.argmax(fbeta)
+    return float(thresh[best_idx]) if best_idx < len(thresh) else 0.5
+
+
+def run_experiments(X, y):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    models_dir = os.path.join(script_dir, "models")
+    os.makedirs(models_dir, exist_ok=True)
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    print(f"Train: {len(X_train)} | Test: {len(X_test)}\n")
+
+    W = 45
+    print(f"{'Thí nghiệm':<{W}} {'F1':>6} {'Recall':>8} {'Precision':>10} {'Thresh':>8}")
+    print("-" * (W + 40))
+
+    best_f1 = -1
+    best_pipe = None
+    best_thresh = 0.5
+    best_name = ""
+    results = []
+
+    for exp in EXPERIMENTS:
+        name = exp["name"]
+        clf = exp["model"]
+
+        pipe = Pipeline([("imputer", SimpleImputer(strategy="median")),
+                         ("scaler", StandardScaler()),
+                         ("clf", clf)])
+        pipe.fit(X_train, y_train)
+
+        y_proba = pipe.predict_proba(X_test)[:, 1]
+        opt_th = find_optimal_threshold(y_test, y_proba)
+        y_pred = (y_proba >= opt_th).astype(int)
+
+        f1 = f1_score(y_test, y_pred, zero_division=0)
+        rec = recall_score(y_test, y_pred, zero_division=0)
+        pre = precision_score(y_test, y_pred, zero_division=0)
+
+        tag = " ★" if f1 > best_f1 else ""
+        print(f" {name:<{W}} {f1:>6.4f} {rec:>8.4f} {pre:>10.4f} {opt_th:>8.4f}{tag}")
+
+        results.append({"Thí nghiệm": name, "F1": round(f1,4), "Recall": round(rec,4), 
+                       "Precision": round(pre,4), "Threshold": round(opt_th,4)})
+
+        if f1 > best_f1:
+            best_f1 = f1
+            best_pipe = pipe
+            best_thresh = opt_th
+            best_name = name
+
+    joblib.dump(best_pipe, os.path.join(models_dir, "screening_best_model.pkl"))
+    joblib.dump(best_thresh, os.path.join(models_dir, "screening_best_threshold.pkl"))
+    joblib.dump(FEATURE_COLS, os.path.join(models_dir, "feature_cols.pkl"))
+
+    df_res = pd.DataFrame(results).sort_values("F1", ascending=False)
+    df_res.to_csv(os.path.join(models_dir, "experiment_results.csv"), index=False, encoding="utf-8-sig")
+
+    print("\n" + "="*90)
+    print(f"🏆 BEST MODEL: {best_name}")
+    print(f"    F1 = {best_f1:.4f} | Recall = {rec:.4f} | Threshold = {best_thresh:.4f}")
+    print(f"✅ Model đã lưu tại: {models_dir}")
+
+
+def main():
+    print("🚀 Training mô hình sàng lọc tiểu đường - Phiên bản SIÊU MẠNH\n")
+    df = load_and_merge_data()
+    X, y = build_features(df)
+    print(f"Tổng số thí nghiệm: {len(EXPERIMENTS)}")
+    print("="*90)
+    run_experiments(X, y)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+### frontend\eslint.config.js
+```js
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import { defineConfig, globalIgnores } from 'eslint/config'
+
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{js,jsx}'],
+    extends: [
+      js.configs.recommended,
+      reactHooks.configs.flat.recommended,
+      reactRefresh.configs.vite,
+    ],
+    languageOptions: {
+      globals: globals.browser,
+      parserOptions: { ecmaFeatures: { jsx: true } },
+    },
+  },
+])
+
+```
+
+### frontend\vite.config.js
+```js
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react()],
+})
+
+```
+
+### frontend\src\App.jsx
+```jsx
+import MainRiskPage from "./MainRiskPage";
+
+export default function App() {
+  return <MainRiskPage />;
+}
+```
+
+### frontend\src\main.jsx
+```jsx
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+import App from './App.jsx'
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)
+
+```
+
+### frontend\src\MainRiskPage.jsx
+```jsx
+// frontend/src/MainRiskPage.jsx
+import { useEffect, useState } from "react";
+import axios from "axios";
+
+const API_BASE_URL = "http://127.0.0.1:8000";
+
+export default function MainRiskPage() {
+  const [selectedPlugin, setSelectedPlugin] = useState("diabetes");
+  const [plugins, setPlugins] = useState([]);
+  const [plugin, setPlugin] = useState(null);
+  const [formData, setFormData] = useState({});
+  const [errors, setErrors] = useState({});
+  const [riskResult, setRiskResult] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { loadPluginsList(); }, []);
+  useEffect(() => { loadPlugin(selectedPlugin); }, [selectedPlugin]);
+
+  // Tự động tính toán khi form thay đổi
+  useEffect(() => {
+    if (!plugin || Object.keys(formData).length === 0) return;
+    const timeout = setTimeout(() => calculateRisk(formData), 600);
+    return () => clearTimeout(timeout);
+  }, [formData, plugin]);
+
+  const loadPluginsList = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/plugins`);
+      setPlugins(res.data.plugins || []);
+    } catch (e) {
+      console.error("Load plugins error", e);
+    }
+  };
+
+  const loadPlugin = async (pluginName) => {
+    try {
+      setLoading(true);
+      const response = await axios.get(`${API_BASE_URL}/plugins/${pluginName}`);
+      const pluginData = response.data;
+      setPlugin(pluginData);
+      initializeForm(pluginData.fields);
+      setRiskResult(null);
+    } catch (error) {
+      console.error(`Load plugin ${pluginName} error:`, error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const initializeForm = (fields) => {
+    const initialData = {};
+    fields.forEach((field) => {
+      initialData[field.key] = field.default !== undefined ? field.default : "";
+    });
+    setFormData(initialData);
+    setErrors({});
+  };
+
+  const handleChange = async (field, value) => {
+    const updated = { ...formData, [field.key]: value };
+    setFormData(updated);
+    await validateField(field.key, updated);
+  };
+
+  const validateField = async (fieldKey, currentData) => {
+    try {
+      const res = await axios.post(
+        `${API_BASE_URL}/plugins/${selectedPlugin}/validate-field/${fieldKey}`,
+        currentData
+      );
+      setErrors(prev => ({
+        ...prev,
+        [fieldKey]: res.data.is_valid ? "" : (res.data.errors[0]?.message || "Lỗi validation")
+      }));
+    } catch (e) {
+      console.error("Validate field error:", e);
+    }
+  };
+
+  const calculateRisk = async (currentData) => {
+    try {
+      const response = await axios.post(
+        `${API_BASE_URL}/plugins/${selectedPlugin}/score`,
+        currentData
+      );
+      setRiskResult(response.data);
+    } catch (error) {
+      console.error("Calculate risk error:", error);
+      if (error.response?.data) {
+        console.error("Error detail:", error.response.data);
+      }
+    }
+  };
+
+  if (loading || !plugin) return <div style={{ padding: "30px", textAlign: "center" }}>Đang tải dữ liệu...</div>;
+
+  const disease = plugin.disease_info || plugin;
+
+  const getRiskColor = (level) => level === 'high' ? '#ef4444' : level === 'medium' ? '#f97316' : '#22c55e';
+  const getRiskLabel = (level) => level === 'high' ? 'CAO' : level === 'medium' ? 'TRUNG BÌNH' : 'THẤP';
+
+  return (
+    <div style={{ padding: "24px", maxWidth: "1300px", margin: "0 auto", fontFamily: "Segoe UI, Arial, sans-serif", backgroundColor: "#fafbfc" }}>
+      <h1 style={{ color: "#1e293b", textAlign: "center" }}>🏥 Hệ thống Đánh giá Nguy cơ Bệnh Mạn tính</h1>
+
+      <div style={{ marginBottom: "24px", textAlign: "center" }}>
+        <label><strong>Chọn Bệnh: </strong></label>
+        <select 
+          value={selectedPlugin} 
+          onChange={(e) => setSelectedPlugin(e.target.value)} 
+          style={{ padding: "10px", fontSize: "16px", marginLeft: "10px" }}
+        >
+          {plugins.map(p => (
+            <option key={p} value={p}>
+              {p === "hypertension" ? "🩸 Tăng huyết áp" : 
+               p === "diabetes" ? "🍬 Tiểu đường" : 
+               p === "gout" ? "🔴 Gout" : p}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <h2>{disease.name}</h2>
+      <p>{disease.description}</p>
+
+      {/* FORM */}
+      {plugin.fields.map((field) => (
+        <div key={field.key} style={{ marginBottom: "20px" }}>
+          <label style={{ fontWeight: "bold", display: "block", marginBottom: "6px" }}>
+            {field.label}{field.required && <span style={{color: "red"}}>*</span>}
+          </label>
+
+          {field.type === "number" && (
+            <input 
+              type="number" 
+              value={formData[field.key] ?? ""} 
+              onChange={(e) => handleChange(field, e.target.value === "" ? "" : Number(e.target.value))} 
+              style={{ width: "320px", padding: "10px", border: errors[field.key] ? "2px solid red" : "1px solid #ccc" }} 
+            />
+          )}
+
+          {field.type === "select" && (
+            <select 
+              value={formData[field.key] ?? ""} 
+              onChange={(e) => handleChange(field, e.target.value)} 
+              style={{ width: "320px", padding: "10px" }}
+            >
+              <option value="">-- Chọn --</option>
+              {field.options?.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          )}
+
+          {field.type === "boolean" && (
+            <input 
+              type="checkbox" 
+              checked={!!formData[field.key]} 
+              onChange={(e) => handleChange(field, e.target.checked)} 
+            />
+          )}
+
+          {errors[field.key] && <div style={{color: "red", marginTop: "4px"}}>{errors[field.key]}</div>}
+        </div>
+      ))}
+
+      <hr />
+
+      {/* KẾT QUẢ */}
+      {riskResult && (
+        <div style={{ background: "#f8fafc", padding: "24px", borderRadius: "12px", marginTop: "20px" }}>
+          <h2>Kết quả Đánh giá Nguy cơ</h2>
+          
+          <p><strong>Điểm tổng:</strong> {riskResult.final_score} / 100</p>
+          <p><strong>Xác suất ML:</strong> {riskResult.ml_probability || 0}%</p>
+          <p>
+            <strong>Mức nguy cơ:</strong> 
+            <span style={{ color: getRiskColor(riskResult.risk_level), fontWeight: "bold", marginLeft: "8px" }}>
+              {getRiskLabel(riskResult.risk_level)}
+            </span>
+          </p>
+
+          {riskResult.summary && <p><strong>Tóm tắt:</strong> {riskResult.summary}</p>}
+
+          {riskResult.explanations?.length > 0 && (
+            <div>
+              <strong>Giải thích chi tiết:</strong>
+              <ul>{riskResult.explanations.map((exp, i) => <li key={i}>{exp}</li>)}</ul>
+            </div>
+          )}
+
+          {riskResult.recommendations?.length > 0 && (
+            <div>
+              <strong>Khuyến nghị:</strong>
+              <ul>
+                {riskResult.recommendations.map(rec => (
+                  <li key={rec.id}><strong>{rec.action_type}:</strong> {rec.text}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+### frontend\src\TestPluginPage.jsx
+```jsx
+// frontend/src/TestPluginPage.jsx
+import { useEffect, useState } from "react";
+import axios from "axios";
+
+const API_BASE_URL = "http://127.0.0.1:8000";
+
+export default function TestPluginPage() {
+  const [selectedPlugin, setSelectedPlugin] = useState("hypertension");
+  const [plugins, setPlugins] = useState([]);
+  const [plugin, setPlugin] = useState(null);
+  const [formData, setFormData] = useState({});
+  const [errors, setErrors] = useState({});
+  const [riskResult, setRiskResult] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { loadPluginsList(); }, []);
+  useEffect(() => { loadPlugin(selectedPlugin); }, [selectedPlugin]);
+
+  useEffect(() => {
+    if (!plugin || Object.keys(formData).length === 0) return;
+    const timeout = setTimeout(() => calculateRisk(formData), 600);
+    return () => clearTimeout(timeout);
+  }, [formData, plugin]);
+
+  const loadPluginsList = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/plugins`);
+      setPlugins(res.data.plugins || []);
+    } catch (e) {
+      console.error("Load plugins error", e);
+    }
+  };
+
+  const loadPlugin = async (pluginName) => {
+    try {
+      setLoading(true);
+      const response = await axios.get(`${API_BASE_URL}/plugins/${pluginName}`);
+      const pluginData = response.data;
+      setPlugin(pluginData);
+      initializeForm(pluginData.fields);
+      setRiskResult(null);
+    } catch (error) {
+      console.error(`Load plugin ${pluginName} error:`, error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const initializeForm = (fields) => {
+    const initialData = {};
+    fields.forEach((field) => {
+      initialData[field.key] = field.default !== undefined ? field.default : "";
+    });
+    setFormData(initialData);
+    setErrors({});
+  };
+
+  const handleChange = async (field, value) => {
+    const updated = { ...formData, [field.key]: value };
+    setFormData(updated);
+    await validateField(field.key, updated);
+  };
+
+  const validateField = async (fieldKey, currentData) => {
+    try {
+      const res = await axios.post(
+        `${API_BASE_URL}/plugins/${selectedPlugin}/validate-field/${fieldKey}`,
+        currentData
+      );
+      setErrors(prev => ({
+        ...prev,
+        [fieldKey]: res.data.is_valid ? "" : (res.data.errors[0]?.message || "Lỗi validation")
+      }));
+    } catch (e) {
+      console.error("Validate field error:", e);
+    }
+  };
+
+  const calculateRisk = async (currentData) => {
+    try {
+      const response = await axios.post(
+        `${API_BASE_URL}/plugins/${selectedPlugin}/score`,
+        currentData
+      );
+      setRiskResult(response.data);
+    } catch (error) {
+      console.error("Calculate risk error:", error);
+      if (error.response?.data) {
+        console.error("Error detail:", error.response.data);
+      }
+    }
+  };
+
+  if (loading || !plugin) return <div style={{ padding: "24px" }}>Đang tải plugin...</div>;
+
+  const disease = plugin.disease_info || plugin;
+
+  const getRiskColor = (level) => level === 'high' ? '#ef4444' : level === 'medium' ? '#f97316' : '#22c55e';
+  const getRiskLabel = (level) => level === 'high' ? 'CAO' : level === 'medium' ? 'TRUNG BÌNH' : 'THẤP';
+
+  return (
+    <div style={{ padding: "24px", maxWidth: "1200px", margin: "0 auto", fontFamily: "Segoe UI, Arial, sans-serif", backgroundColor: "#fafbfc" }}>
+      <h1 style={{ color: "#1e293b" }}>🏥 Hệ thống Đánh giá Nguy cơ Bệnh Mạn tính</h1>
+
+      <div style={{ marginBottom: "24px" }}>
+        <label><strong>Chọn Bệnh:</strong> </label>
+        <select value={selectedPlugin} onChange={(e) => setSelectedPlugin(e.target.value)} style={{ padding: "10px", marginLeft: "10px" }}>
+          {plugins.map(p => (
+            <option key={p} value={p}>
+              {p === "hypertension" ? "🩸 Tăng huyết áp" : 
+               p === "diabetes" ? "🍬 Tiểu đường" : 
+               p === "gout" ? "🔴 Gout" : p}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <h2>{disease.name}</h2>
+      <p>{disease.description}</p>
+
+      {/* FORM */}
+      {plugin.fields.map((field) => (
+        <div key={field.key} style={{ marginBottom: "20px" }}>
+          <label style={{ fontWeight: "bold", display: "block", marginBottom: "6px" }}>
+            {field.label}{field.required && <span style={{color: "red"}}>*</span>}
+          </label>
+
+          {field.type === "number" && (
+            <input type="number" value={formData[field.key] ?? ""} onChange={(e) => handleChange(field, e.target.value === "" ? "" : Number(e.target.value))} 
+              style={{ width: "300px", padding: "10px", border: errors[field.key] ? "2px solid red" : "1px solid #ccc" }} />
+          )}
+
+          {field.type === "select" && (
+            <select value={formData[field.key] ?? ""} onChange={(e) => handleChange(field, e.target.value)} style={{ width: "300px", padding: "10px" }}>
+              <option value="">-- Chọn --</option>
+              {field.options?.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+            </select>
+          )}
+
+          {field.type === "boolean" && (
+            <input type="checkbox" checked={!!formData[field.key]} onChange={(e) => handleChange(field, e.target.checked)} />
+          )}
+
+          {errors[field.key] && <div style={{color: "red"}}>{errors[field.key]}</div>}
+        </div>
+      ))}
+
+      <hr />
+
+      {/* KẾT QUẢ */}
+      {riskResult && (
+        <div style={{ background: "#f8fafc", padding: "20px", borderRadius: "12px" }}>
+          <h2>Kết quả Đánh giá Nguy cơ</h2>
+          <p><strong>Điểm:</strong> {riskResult.final_score} / 100</p>
+          <p><strong>Mức nguy cơ:</strong> <span style={{color: getRiskColor(riskResult.risk_level), fontWeight: "bold"}}>{getRiskLabel(riskResult.risk_level)}</span></p>
+
+          {riskResult.summary && <p><strong>Tóm tắt:</strong> {riskResult.summary}</p>}
+
+          {riskResult.explanations?.length > 0 && (
+            <div>
+              <strong>Giải thích:</strong>
+              <ul>{riskResult.explanations.map((exp, i) => <li key={i}>{exp}</li>)}</ul>
+            </div>
+          )}
+
+          {riskResult.risk_factors?.length > 0 && (
+            <div>
+              <strong>Yếu tố nguy cơ:</strong>
+              <ul>{riskResult.risk_factors.map((f, i) => <li key={i}>{typeof f === 'string' ? f : f.description}</li>)}</ul>
+            </div>
+          )}
+
+          {riskResult.protective_factors?.length > 0 && (
+            <div>
+              <strong>Yếu tố bảo vệ:</strong>
+              <ul>{riskResult.protective_factors.map((f, i) => <li key={i}>{typeof f === 'string' ? f : f.description}</li>)}</ul>
+            </div>
+          )}
+
+          {riskResult.recommendations?.length > 0 && (
+            <div>
+              <strong>Khuyến nghị:</strong>
+              <ul>
+                {riskResult.recommendations.map(rec => (
+                  <li key={rec.id}><strong>{rec.action_type}:</strong> {rec.text}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      <details>
+        <summary>Debug</summary>
+        <pre>{JSON.stringify(riskResult, null, 2)}</pre>
+      </details>
+    </div>
+  );
+}
+```

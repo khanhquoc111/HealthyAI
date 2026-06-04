@@ -1,0 +1,147 @@
+{
+  "disease_info": {
+    "id": "diabetes",
+    "name": "Đánh giá Nguy cơ Tiểu đường Type 2",
+    "version": "1.1",
+    "description": "Công cụ đánh giá nguy cơ phát triển tiểu đường type 2 dựa trên các yếu tố nguy cơ.",
+    "author": "LuanVanKTPM",
+    "last_updated": "2026-06-02"
+  },
+  "fields": [
+    {
+      "key": "age",
+      "label": "Tuổi",
+      "type": "number",
+      "required": true,
+      "min": 18,
+      "max": 100,
+      "unit": "tuổi"
+    },
+    {
+      "key": "bmi",
+      "label": "Chỉ số khối cơ thể (BMI)",
+      "type": "number",
+      "required": true,
+      "min": 15,
+      "max": 50,
+      "unit": "kg/m²"
+    },
+    {
+      "key": "family_history_diabetes",
+      "label": "Tiền sử gia đình bị tiểu đường",
+      "type": "boolean",
+      "required": false
+    },
+    {
+      "key": "exercise_minutes_per_week",
+      "label": "Số phút tập thể dục mỗi tuần",
+      "type": "number",
+      "required": false,
+      "min": 0,
+      "max": 1000,
+      "unit": "phút"
+    },
+    {
+      "key": "smoking_status",
+      "label": "Tình trạng hút thuốc",
+      "type": "select",
+      "required": false,
+      "options": [
+        { "value": "never", "label": "Chưa bao giờ" },
+        { "value": "former", "label": "Đã bỏ" },
+        { "value": "current", "label": "Đang hút" }
+      ]
+    }
+  ],
+  "risk_config": {
+    "baseline_mapping": [
+      { "name": "Low Risk", "condition": { "field": "bmi", "op": "lt", "value": 25 }, "score": 15 },
+      { "name": "Moderate Risk", "condition": { "field": "bmi", "op": "range", "min": 25, "max": 30 }, "score": 35 },
+      { "name": "High Risk", "condition": { "field": "bmi", "op": "gte", "value": 30 }, "score": 55 }
+    ],
+    "risk_modifiers": [
+      {
+        "id": "age_high",
+        "description": "Tuổi cao (>45)",
+        "condition": { "field": "age", "op": "gte", "value": 45 },
+        "effect_type": "multiplicative",
+        "value": 1.4,
+        "category": "modifier",
+        "priority": 20
+      },
+      {
+        "id": "family_history",
+        "description": "Có tiền sử gia đình",
+        "condition": { "field": "family_history_diabetes", "op": "bool_true" },
+        "effect_type": "multiplicative",
+        "value": 1.6,
+        "category": "modifier",
+        "priority": 25
+      },
+      {
+        "id": "smoking",
+        "description": "Đang hút thuốc",
+        "condition": { "field": "smoking_status", "op": "eq", "value": "current" },
+        "effect_type": "multiplicative",
+        "value": 1.25,
+        "category": "modifier",
+        "priority": 15
+      }
+    ],
+    "protective_factors": [
+      {
+        "id": "regular_exercise",
+        "description": "Tập thể dục đều đặn",
+        "condition": { "field": "exercise_minutes_per_week", "op": "gte", "value": 150 },
+        "effect_type": "divisive",
+        "value": 1.2,
+        "category": "protective",
+        "priority": 10
+      }
+    ],
+    "interactions": [],
+    "thresholds": [
+      { "range": [0, 40], "level": "low" },
+      { "range": [40, 70], "level": "medium" },
+      { "range": [70, 100], "level": "high" }
+    ],
+    "computed_fields": [
+      {
+        "key": "risk_score_base",
+        "formula": "bmi * 1.8 + (age - 30) * 0.5",
+        "dependencies": ["bmi", "age"]
+      }
+    ]
+  },
+  "explanation_templates": [
+    {
+      "rule_id": "family_history",
+      "template": "Có tiền sử gia đình bị tiểu đường - tăng nguy cơ đáng kể"
+    },
+    {
+      "rule_id": "age_high",
+      "template": "Tuổi {age} là yếu tố nguy cơ quan trọng"
+    }
+  ],
+  "risk_levels": {
+    "low": { "summary": "Nguy cơ thấp. Duy trì lối sống hiện tại." },
+    "medium": { "summary": "Nguy cơ trung bình. Cần cải thiện chế độ ăn và tập luyện." },
+    "high": { "summary": "Nguy cơ cao. Nên kiểm tra đường huyết và gặp bác sĩ." }
+  },
+  "recommendations": [
+    {
+      "id": "lifestyle",
+      "condition": { "field": "final_score", "op": "gte", "value": 40 },
+      "text": "Tập thể dục ít nhất 150 phút/tuần, giảm cân và ăn uống lành mạnh.",
+      "priority": 1,
+      "action_type": "lifestyle"
+    },
+    {
+      "id": "screening",
+      "condition": { "field": "final_score", "op": "gte", "value": 60 },
+      "text": "Nên đi xét nghiệm đường huyết sớm.",
+      "priority": 2,
+      "action_type": "monitoring"
+    }
+  ]
+}

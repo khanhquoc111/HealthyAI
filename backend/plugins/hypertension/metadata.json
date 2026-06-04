@@ -1,0 +1,195 @@
+{
+  "disease_info": {
+    "id": "hypertension",
+    "name": "Đánh giá Nguy cơ Tăng huyết áp",
+    "version": "1.2",
+    "description": "Công cụ đánh giá nguy cơ phát triển tăng huyết áp và biến chứng tim mạch dựa trên các yếu tố nguy cơ chính.",
+    "author": "LuanVanKTPM",
+    "last_updated": "2026-06-02"
+  },
+  "fields": [
+    {
+      "key": "age",
+      "label": "Tuổi",
+      "type": "number",
+      "required": true,
+      "min": 18,
+      "max": 100,
+      "unit": "tuổi",
+      "ui": { "group": "demographics", "order": 1 }
+    },
+    {
+      "key": "systolic",
+      "label": "Huyết áp tâm thu",
+      "type": "number",
+      "required": true,
+      "min": 70,
+      "max": 250,
+      "unit": "mmHg",
+      "ui": { "group": "vital_signs", "order": 2 }
+    },
+    {
+      "key": "diastolic",
+      "label": "Huyết áp tâm trương",
+      "type": "number",
+      "required": true,
+      "min": 40,
+      "max": 150,
+      "unit": "mmHg",
+      "ui": { "group": "vital_signs", "order": 3 }
+    },
+    {
+      "key": "bmi",
+      "label": "Chỉ số khối cơ thể (BMI)",
+      "type": "number",
+      "required": false,
+      "min": 15,
+      "max": 50,
+      "unit": "kg/m²",
+      "ui": { "group": "lifestyle", "order": 4 }
+    },
+    {
+      "key": "smoking_status",
+      "label": "Tình trạng hút thuốc",
+      "type": "select",
+      "required": false,
+      "options": [
+        { "value": "never", "label": "Chưa bao giờ" },
+        { "value": "former", "label": "Đã bỏ" },
+        { "value": "current", "label": "Đang hút" }
+      ],
+      "ui": { "group": "lifestyle", "order": 5 }
+    },
+    {
+      "key": "diabetes_status",
+      "label": "Có bị tiểu đường không?",
+      "type": "select",
+      "required": false,
+      "options": [
+        { "value": "yes", "label": "Có" },
+        { "value": "no", "label": "Không" }
+      ],
+      "ui": { "group": "medical_history", "order": 6 }
+    },
+    {
+      "key": "family_history_hypertension",
+      "label": "Tiền sử gia đình bị tăng huyết áp",
+      "type": "boolean",
+      "required": false,
+      "ui": { "group": "medical_history", "order": 7 }
+    },
+    {
+      "key": "exercise_minutes_per_week",
+      "label": "Số phút tập thể dục mỗi tuần",
+      "type": "number",
+      "required": false,
+      "min": 0,
+      "max": 1000,
+      "unit": "phút",
+      "ui": { "group": "lifestyle", "order": 8 }
+    }
+  ],
+  "risk_config": {
+    "baseline_mapping": [
+      { "name": "Normal", "condition": { "field": "systolic", "op": "range", "min": 90, "max": 120 }, "score": 10 },
+      { "name": "Elevated", "condition": { "field": "systolic", "op": "range", "min": 120, "max": 130 }, "score": 25 },
+      { "name": "Stage 1", "condition": { "field": "systolic", "op": "range", "min": 130, "max": 140 }, "score": 45 },
+      { "name": "Stage 2", "condition": { "field": "systolic", "op": "gte", "value": 140 }, "score": 70 }
+    ],
+    "risk_modifiers": [
+      {
+        "id": "age_high",
+        "description": "Tuổi cao (>60)",
+        "condition": { "field": "age", "op": "gte", "value": 60 },
+        "effect_type": "multiplicative",
+        "value": 1.25,
+        "category": "modifier",
+        "priority": 20
+      },
+      {
+        "id": "obesity",
+        "description": "Béo phì (BMI ≥ 30)",
+        "condition": { "field": "bmi", "op": "gte", "value": 30 },
+        "effect_type": "multiplicative",
+        "value": 1.2,
+        "category": "modifier",
+        "priority": 15
+      },
+      {
+        "id": "smoking",
+        "description": "Đang hút thuốc",
+        "condition": { "field": "smoking_status", "op": "eq", "value": "current" },
+        "effect_type": "multiplicative",
+        "value": 1.3,
+        "category": "modifier",
+        "priority": 25
+      }
+    ],
+    "protective_factors": [
+      {
+        "id": "regular_exercise",
+        "description": "Tập thể dục đều đặn",
+        "condition": { "field": "exercise_minutes_per_week", "op": "gte", "value": 150 },
+        "effect_type": "divisive",
+        "value": 1.15,
+        "category": "protective",
+        "priority": 10
+      }
+    ],
+    "interactions": [],
+    "thresholds": [
+      { "range": [0, 40], "level": "low" },
+      { "range": [40, 70], "level": "medium" },
+      { "range": [70, 100], "level": "high" }
+    ],
+    "computed_fields": [
+      {
+        "key": "bp_category",
+        "formula": "systolic * 0.7 + diastolic * 0.3",
+        "dependencies": ["systolic", "diastolic"],
+        "description": "Huyết áp trung bình có trọng số"
+      }
+    ]
+  },
+  "explanation_templates": [
+    {
+      "rule_id": "age_high",
+      "template": "Tuổi {age} thuộc nhóm nguy cơ cao (>60 tuổi)",
+      "variables": ["age"]
+    },
+    {
+      "rule_id": "obesity",
+      "template": "BMI {bmi} thuộc mức béo phì, tăng nguy cơ tăng huyết áp",
+      "variables": ["bmi"]
+    },
+    {
+      "rule_id": "smoking",
+      "template": "Đang hút thuốc lá - yếu tố nguy cơ mạnh",
+      "variables": []
+    }
+  ],
+  "risk_levels": {
+    "low": { "summary": "Nguy cơ thấp. Tiếp tục duy trì lối sống lành mạnh." },
+    "medium": { "summary": "Nguy cơ trung bình. Nên cải thiện lối sống và theo dõi định kỳ." },
+    "high": { "summary": "Nguy cơ cao. Khuyến nghị gặp bác sĩ sớm." }
+  },
+  "recommendations": [
+    {
+      "id": "lifestyle_change",
+      "condition": { "field": "final_score", "op": "gte", "value": 40 },
+      "text": "Tăng cường tập thể dục ít nhất 150 phút/tuần và giảm muối.",
+      "priority": 1,
+      "action_type": "lifestyle"
+    },
+    {
+      "id": "medical_consult",
+      "condition": { "field": "final_score", "op": "gte", "value": 60 },
+      "text": "Nên gặp bác sĩ để kiểm tra và có thể dùng thuốc kiểm soát huyết áp.",
+      "priority": 2,
+      "action_type": "referral"
+    }
+  ],
+  "display_config": {
+    "primary_color": "#e53e3e"
+  }
+}

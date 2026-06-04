@@ -1,0 +1,7 @@
+﻿Thí nghiệm,F1,Recall,Precision,Threshold
+XGB | scale=12 - depth8,0.7267,0.7415,0.7124,0.6448
+RF | Ultra Strong,0.7213,0.7483,0.6962,0.5275
+XGB | scale=15 - depth7,0.7167,0.7143,0.7192,0.7107
+XGB | Balanced Best,0.7167,0.7143,0.7192,0.7169
+XGB | High Recall,0.7105,0.7347,0.6879,0.5995
+XGB | scale=18 - depth6,0.698,0.7075,0.6887,0.6965
