@@ -53,6 +53,7 @@ LuanVanKTPM/
 │   │       └── metadata.json
 │   ├── venv/
 │   ├── main.py
+│   ├── requirements.txt
 │   └── test_db.py
 ├── frontend/
 │   ├── node_modules/
@@ -67,6 +68,7 @@ LuanVanKTPM/
 │   │   ├── App.css
 │   │   ├── App.jsx
 │   │   ├── MainRiskPage.jsx
+│   │   ├── TrangChu.jsx
 │   │   ├── cs_suckhoe.jsx
 │   │   ├── dang_ky.jsx
 │   │   ├── dang_nhap.jsx
@@ -82,7 +84,9 @@ LuanVanKTPM/
 ├── .gitignore
 ├── README.md
 ├── content.sql
-└── ghichu.txt
+├── ghichu.txt
+├── problem.txt
+└── requirements.txt
 ```
 
 ## FILE CONTENTS
@@ -384,7 +388,6 @@ class ExplanationTemplate(BaseModel):
 class ConditionSchema(BaseModel):
     """
     Atomic or composite condition schema.
-    
     Atomic: {"field": "age", "op": "gte", "value": 45}
     Composite AND: {"all": [cond1, cond2]}
     Composite OR: {"any": [cond1, cond2]}
@@ -443,18 +446,11 @@ class BaselineStage(BaseModel):
 class InteractionRule(BaseModel):
     """
     Interaction rule with flexible condition support.
-    
-    Backward compatible with existing metadata:
-    - Old format: conditions: [cond1, cond2] (AND logic)
-    - New format: condition: {...} (supports all/any/not_all/not_any)
-    
-    Both formats are supported and work identically.
     """
     id: str
     interaction_multiplier: float = 1.0
     description: Optional[str] = None
     
-    # Support both formats for backward compatibility
     conditions: Optional[List[ConditionSchema]] = None
     condition: Optional[ConditionSchema] = None
     
@@ -492,7 +488,9 @@ class DiseaseSchema(BaseModel):
     explanation_templates: List[ExplanationTemplate] = Field(default_factory=list)
     risk_levels: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     display_config: Optional[Dict] = Field(default_factory=dict)
-
+    
+    # Kích hoạt tính năng State Pattern cho ML Engine
+    ml_required_features: List[str] = Field(default_factory=list)
 ```
 
 ### backend\app\explanation_engine.py
@@ -685,47 +683,196 @@ class ExplanationEngine:
 
 ### backend\app\plugin_api.py
 ```py
-from fastapi import APIRouter, HTTPException, Query
-from .plugin_loader import PluginLoader
-from .validation_engine import ValidationEngine
-from .risk_stratification_engine import RiskStratificationEngine
+# backend/app/plugin_api.py
+import json
+import time
+from pathlib import Path
+from typing import Dict, Any
+
+from fastapi import APIRouter, HTTPException, Query, Depends 
+from sqlalchemy.orm import Session 
+
+from app.plugin_loader import PluginLoader
+from app.validation_engine import ValidationEngine
+from app.risk_stratification_engine import RiskStratificationEngine
+
+from database.database import SessionLocal
+from database.nguoi_dung import NguoiDung
+from database.lich_su_danh_gia import LichSuDanhGia
+from database.cs_suc_khoe import CsSucKhoe
 
 router = APIRouter()
+
 plugin_loader = PluginLoader()
 
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def get_plugin_metadata(plugin_name: str) -> Dict[str, Any]:
+    try:
+        return plugin_loader.load_plugin(plugin_name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Plugin '{plugin_name}' not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading plugin '{plugin_name}': {str(e)}")
+
+def get_validation_engine(plugin_name: str):
+    metadata = get_plugin_metadata(plugin_name)
+    return ValidationEngine(metadata)
+
+def get_scoring_engine(plugin_name: str):
+    metadata = get_plugin_metadata(plugin_name)
+    return RiskStratificationEngine(metadata)
+
 @router.get("/plugins")
-async def list_plugins():
+def list_plugins():
     return {"plugins": plugin_loader.list_plugins()}
 
 @router.get("/plugins/{plugin_name}")
-async def get_plugin(plugin_name: str):
-    return plugin_loader.load_plugin(plugin_name)
+def get_plugin(plugin_name: str):
+    return get_plugin_metadata(plugin_name)
+
+@router.post("/plugins/{plugin_name}/validate")
+def validate_plugin_form(plugin_name: str, form_data: dict):
+    try:
+        engine = get_validation_engine(plugin_name)
+        result = engine.validate_form(form_data)
+        return result.to_dict()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Validation error: {str(e)}")
+
+@router.post("/plugins/{plugin_name}/validate-field/{field_key}")
+def validate_plugin_field(plugin_name: str, field_key: str, form_data: dict):
+    try:
+        engine = get_validation_engine(plugin_name)
+        field_errors = engine.get_field_errors(form_data, field_key)
+        return {
+            "field": field_key,
+            "errors": [err.to_dict() for err in field_errors],
+            "is_valid": len(field_errors) == 0,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Field validation error: {str(e)}")
+
+@router.post("/plugins/{plugin_name}/normalize")
+def normalize_plugin_form(plugin_name: str, form_data: dict):
+    try:
+        engine = get_validation_engine(plugin_name)
+        return engine.normalize_form_data(form_data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Normalization error: {str(e)}")
+
+@router.get("/plugins/{plugin_name}/fields")
+def get_plugin_all_fields(plugin_name: str):
+    try:
+        engine = get_validation_engine(plugin_name)
+        return {
+            "fields": engine.get_all_field_keys(),
+            "total": len(engine.get_all_field_keys()),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Field list error: {str(e)}")
 
 @router.post("/plugins/{plugin_name}/score")
-async def score_plugin(
+def score_plugin_form(
     plugin_name: str, 
     form_data: dict,
-    ten_dang_nhap: str = Query(None)
+    ten_dang_nhap: str = Query(None), 
+    db: Session = Depends(get_db)   
 ):
     try:
-        metadata = plugin_loader.load_plugin(plugin_name)
-        validation = ValidationEngine(metadata)
-        
-        # Validate
-        val_result = validation.validate_form(form_data)
-        if val_result.has_errors():
-            raise HTTPException(400, {"errors": [e.to_dict() for e in val_result.errors]})
+        # 1. Trích xuất dữ liệu Hồ sơ sức khỏe từ Database để hợp nhất
+        health_profile_dict = {}
+        if ten_dang_nhap:
+            user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == ten_dang_nhap).first()
+            if user:
+                profile = db.query(CsSucKhoe).filter(CsSucKhoe.idNguoiDung == user.idNguoiDung).first()
+                if profile:
+                    health_profile_dict = {k: v for k, v in profile.__dict__.items() if not k.startswith('_') and v is not None}
 
-        normalized = validation.normalize_form_data(form_data)
+        # Tạo payload hợp nhất (Ưu tiên form hiện tại hơn DB)
+        unified_payload = {**health_profile_dict, **form_data}
 
-        # Tính risk (đã có merge Health Profile bên trong)
-        engine = RiskStratificationEngine(metadata)
-        result = engine.calculate_risk(normalized, None)  # Health profile sẽ tự fetch bên trong nếu cần
+        # 2. VALIDATION ĐỐI VỚI FORM GỐC (Chỉ validate các trường mà plugin hiện tại quản lý)
+        validation_engine = get_validation_engine(plugin_name)
+        validation_result = validation_engine.validate_form(form_data)
+
+        if validation_result.has_errors():
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Dữ liệu không hợp lệ",
+                    "errors": [err.to_dict() for err in validation_result.errors]
+                }
+            )
+
+        normalized_data = validation_engine.normalize_form_data(unified_payload)
+
+        # 3. CALCULATE RISK KÉP DUAL-ENGINE 
+        scoring_engine = get_scoring_engine(plugin_name)
+        result = scoring_engine.calculate_risk(normalized_data)
+
+        result["validation"] = {
+            "is_valid": validation_result.is_valid,
+            "warnings": [w.to_dict() for w in validation_result.warnings]
+        }
+
+        # 4. TỰ ĐỘNG TÍCH LŨY DỮ LIỆU & LƯU LỊCH SỬ
+        if ten_dang_nhap:
+            user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == ten_dang_nhap).first()
+            if user:
+                # Tự động lưu form hiện tại vào Hồ sơ sức khỏe để làm giàu dữ liệu
+                profile_record = db.query(CsSucKhoe).filter(CsSucKhoe.idNguoiDung == user.idNguoiDung).first()
+                if not profile_record:
+                    profile_record = CsSucKhoe(idNguoiDung=user.idNguoiDung)
+                    db.add(profile_record)
+
+                for key, value in form_data.items():
+                    if value not in [None, ""] and hasattr(profile_record, key):
+                        setattr(profile_record, key, value)
+                
+                # Lưu log phân tích
+                metadata = get_plugin_metadata(plugin_name)
+                ten_benh = metadata.get("disease_info", {}).get("name", plugin_name)
+
+                lich_su = LichSuDanhGia(
+                    idNguoiDung=user.idNguoiDung,
+                    tenBenh=ten_benh,
+                    diemRule=float(result.get("rule_based", {}).get("score", 0.0)),
+                    diemML=float(result.get("ai_based", {}).get("score", 0.0)),
+                    diemTong=float(result.get("rule_based", {}).get("score", 0.0)),
+                    mucNguyCo=str(result.get("rule_based", {}).get("risk_level", "low")),
+                    ketQuaJSON=result  
+                )
+                db.add(lich_su)
+                db.commit()
 
         return result
 
+    except HTTPException as he:
+        raise he
     except Exception as e:
-        raise HTTPException(500, str(e))
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Scoring error: {str(e)}")
+
+@router.post("/plugins/{plugin_name}/reload")
+def reload_plugin(plugin_name: str):
+    try:
+        if plugin_name in plugin_loader._cache:
+            plugin_loader._cache.pop(plugin_name, None)
+        
+        metadata = plugin_loader.load_plugin(plugin_name, force_reload=True)
+        return {
+            "status": "success",
+            "message": f"Plugin '{plugin_name}' đã được reload thành công",
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 ```
 
 ### backend\app\plugin_loader.py
@@ -810,10 +957,9 @@ class PluginLoader:
 ### backend\app\risk_stratification_engine.py
 ```py
 # backend/app/risk_stratification_engine.py
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import logging
 import os
-import re
 import pandas as pd
 import joblib
 
@@ -824,48 +970,13 @@ except ImportError:
     from explanation_engine import ExplanationEngine
     from condition_evaluator import ConditionEvaluator
 
-from database.database import SessionLocal
-from database.nguoi_dung import NguoiDung
-from database.cs_suc_khoe import CsSucKhoe
-
-DEBUG_MODE = os.environ.get("DEBUG_CONDITION_EVAL", "").lower() in ("1", "true", "yes")
 logger = logging.getLogger(__name__)
-
-FEATURE_COLS = [
-    "age", "gender_code", "bmi", "waist", "systolic", "diastolic", "hypertension",
-    "fasting_glucose", "hba1c", "total_cholesterol", "ldl", "creatinine",
-    "smoke", "exercise", "alcohol", "sodium_intake",
-    "family_hypertension", "family_cardiovascular",
-]
-
-DEFAULT_FEATURES = {
-    "age": 45.0, "gender_code": 1.0, "bmi": 24.0, "waist": 85.0,
-    "systolic": 120.0, "diastolic": 80.0, "hypertension": 0.0,
-    "fasting_glucose": 92.0, "hba1c": 5.4, "total_cholesterol": 180.0,
-    "ldl": 100.0, "creatinine": 0.9, "smoke": 0.0, "exercise": 1.0,
-    "alcohol": 0.0, "sodium_intake": 3200.0,
-    "family_hypertension": 0.0, "family_cardiovascular": 0.0,
-}
-
-COMMON_FIELD_MAPPING = {
-    "tuoi": "age",
-    "bmi": "bmi",
-    "vongEo": "waist",
-    "huyetApTamThu": "systolic",
-    "huyetApTamTruong": "diastolic",
-    "hutThuoc": "smoke",
-    "giaDinhCaoHuyetAp": "family_hypertension",
-    "giaDinhTimMach": "family_cardiovascular",
-    "caoHuyetAp": "hypertension",
-    "tieuDuong": "hypertension",
-    "giaDinhTieuDuong": "family_cardiovascular",
-}
-
 
 class RiskStratificationEngine:
     def __init__(self, plugin_metadata: Dict[str, Any]):
         self.metadata = plugin_metadata
         self.risk_config = plugin_metadata.get("risk_config", {})
+        self.ml_required_features = plugin_metadata.get("ml_required_features", [])
         
         self.baseline_mapping = self.risk_config.get("baseline_mapping", [])
         self.risk_modifiers = self.risk_config.get("risk_modifiers", [])
@@ -888,130 +999,119 @@ class RiskStratificationEngine:
         except Exception as e:
             print(f"⚠️ Failed to load ML model: {e}")
 
-    def _merge_with_health_profile(self, form_data: Dict, health_profile: Dict = None) -> Dict:
-        merged = form_data.copy()
-        health_profile = health_profile or {}
-
-        # Merge fields từ Health Profile
-        for db_key, ml_key in COMMON_FIELD_MAPPING.items():
-            if db_key in health_profile and ml_key and ml_key not in merged:
-                merged[ml_key] = health_profile[db_key]
-
-        # Convert special fields
-        merged = self._convert_special_fields(merged)
-
-        # Fill defaults cho đủ 18 features
-        for col in FEATURE_COLS:
-            if col not in merged or merged[col] is None:
-                merged[col] = DEFAULT_FEATURES.get(col, 0.0)
-
-        return merged
-
-    def _convert_special_fields(self, data: Dict) -> Dict:
-        """Convert string sang numeric cho ML"""
-        converted = data.copy()
+    def _convert_to_ml_format(self, unified_data: Dict) -> Dict:
+        """Chuyển đổi dữ liệu thô (tiếng Việt/tiếng Anh) sang định dạng thuộc tính ML định kiểu số"""
+        ml_data = {}
         
-        # hutThuoc -> smoke
-        if "hutThuoc" in converted:
-            val = str(converted.get("hutThuoc", "")).strip().lower()
-            converted["smoke"] = 1.0 if val in ["đang hút", "current", "yes", "1"] else 0.0
+        # Mapping từ form DB/tiếng Việt sang thuộc tính tiếng Anh của ML
+        mapping = {
+            "tuoi": "age", "bmi": "bmi", "vongEo": "waist",
+            "huyetApTamThu": "systolic", "huyetApTamTruong": "diastolic",
+            "duongHuyet": "fasting_glucose", "hba1c": "hba1c",
+            "cholesterol": "total_cholesterol", "ldl": "ldl", "creatinine": "creatinine",
+            "caoHuyetAp": "hypertension", "tieuDuong": "hypertension"
+        }
+        
+        for src_key, target_key in mapping.items():
+            if src_key in unified_data and unified_data[src_key] not in [None, ""]:
+                ml_data[target_key] = unified_data[src_key]
 
-        # soPhutVanDongMoiTuan -> exercise (1 nếu >= 150 phút)
-        if "soPhutVanDongMoiTuan" in converted:
-            try:
-                mins = float(converted["soPhutVanDongMoiTuan"])
-                converted["exercise"] = 1.0 if mins >= 150 else 0.0
-            except:
-                converted["exercise"] = 0.0
+        # Giữ nguyên nếu có sẵn key tiếng Anh hợp lệ
+        for col in self.ml_required_features:
+            if col in unified_data and unified_data[col] not in [None, ""]:
+                ml_data[col] = unified_data[col]
 
-        # Boolean fields
-        for field in ["caoHuyetAp", "tieuDuong", "giaDinhCaoHuyetAp", "giaDinhTimMach", "giaDinhTieuDuong"]:
-            if field in converted:
-                val = converted[field]
-                if isinstance(val, bool):
-                    converted[field] = 1.0 if val else 0.0
-                elif isinstance(val, str):
-                    converted[field] = 1.0 if val.lower() in ["true", "yes", "1"] else 0.0
-                else:
-                    converted[field] = float(val) if val else 0.0
-
-        return converted
-
-    def _predict_with_ml(self, form_data: Dict) -> Dict:
-        if not self.ml_model:
-            return {"probability": 0.0, "score": 0.0, "risk_level": "low", "confidence": 0.0}
-
-        try:
-            input_dict = {}
-            for col in FEATURE_COLS:
-                val = form_data.get(col)
-                try:
-                    input_dict[col] = float(val) if val is not None else DEFAULT_FEATURES.get(col, 0.0)
-                except (ValueError, TypeError):
-                    input_dict[col] = DEFAULT_FEATURES.get(col, 0.0)
-
-            df_input = pd.DataFrame([input_dict])
-            proba = self.ml_model.predict_proba(df_input)[0, 1]
-            score = round(proba * 100, 2)
+        # Chuẩn hóa các trường thói quen & phân loại
+        if "gioiTinh" in unified_data:
+            ml_data["gender_code"] = 1.0 if unified_data["gioiTinh"] == "Nam" else 2.0
             
-            return {
-                "probability": round(proba, 4),
-                "score": score,
-                "risk_level": "high" if score >= 60 else "medium" if score >= 30 else "low",
-                "confidence": 80
-            }
-        except Exception as e:
-            print(f"ML Error: {e}")
-            return {"probability": 0.0, "score": 0.0, "risk_level": "low", "confidence": 0.0}
+        if "hutThuoc" in unified_data:
+            ml_data["smoke"] = 1.0 if str(unified_data["hutThuoc"]).strip().lower() in ["đang hút", "yes", "1"] else 0.0
 
-    def calculate_risk(self, form_data: Dict[str, Any], health_profile: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Pipeline tính toán nguy cơ hoàn chỉnh - Đánh giá Kép (Dual-Engine)
+        if "soPhutVanDongMoiTuan" in unified_data:
+            try:
+                ml_data["exercise"] = 1.0 if float(unified_data["soPhutVanDongMoiTuan"]) >= 150 else 0.0
+            except:
+                ml_data["exercise"] = 0.0
+
+        # Ép kiểu dữ liệu về số thực (Float)
+        final_ml = {}
+        for k, v in ml_data.items():
+            if v is True: final_ml[k] = 1.0
+            elif v is False: final_ml[k] = 0.0
+            else:
+                try: final_ml[k] = float(v)
+                except (ValueError, TypeError): continue
+                
+        return final_ml
+
+    def calculate_risk(self, unified_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Luồng tính toán mới xử lý phân tầng trạng thái ML"""
         
-        Auto fetch health profile từ user để augment dữ liệu cho ML model
-        - Form data: từ JSON của doctor (có thể thiếu dữ liệu)
-        - Health profile: dữ liệu cá nhân đã lưu (đầy đủ 18 chỉ số)
-        - Merged data: form_data + health_profile (ưu tiên form_data)
-        """
-        # Step 1: Merge với health profile để đủ 18 features cho ML
-        enriched_data = self._merge_with_health_profile(form_data, health_profile or {})
+        # 1. TÍNH ĐIỂM CHUYÊN GIA (RULE-BASED ENGINE)
+        baseline_score = self._calculate_baseline_risk(unified_data)
+        modified_score = self._apply_risk_modifiers(baseline_score, unified_data)
+        protected_score = self._apply_protective_factors(modified_score, unified_data)
+        rule_score = self._apply_interactions(protected_score, unified_data)
         
-        # 1. ĐÁNH GIÁ TỪ CHUYÊN GIA (RULE-BASED)
-        baseline_score = self._calculate_baseline_risk(enriched_data)
-        modified_score = self._apply_risk_modifiers(baseline_score, enriched_data)
-        protected_score = self._apply_protective_factors(modified_score, enriched_data)
-        rule_score = self._apply_interactions(protected_score, enriched_data)
-        
-        # [SỬA Ở ĐÂY] Ép kiểu float() gốc của Python để tránh lỗi JSON
         rule_score = float(min(round(rule_score, 2), 100))
         rule_risk_level = self._stratify_risk_level(rule_score)
 
-        # 2. ĐÁNH GIÁ TỪ AI (MACHINE LEARNING)
-        if self.ml_model:
-            ml_result = self._predict_with_ml(enriched_data)
+        # 2. XÁC THỰC TRẠNG THÁI MÔ HÌNH HỌC MÁY (ML ENGINE)
+        ai_status = "UNAVAILABLE"
+        ai_score = 0.0
+        ai_risk_level = "N/A"
+        ai_proba = 0.0
+        ai_confidence = 0
+        missing_fields = []
+
+        # Nghịch đảo mapping để hiển thị lỗi thân thiện
+        inverse_mapping = {
+            "age": "Tuổi", "bmi": "Chỉ số BMI", "waist": "Vòng eo",
+            "systolic": "Huyết áp tâm thu", "diastolic": "Huyết áp tâm trương",
+            "fasting_glucose": "Đường huyết đói", "hba1c": "Chỉ số HbA1c",
+            "total_cholesterol": "Cholesterol toàn phần", "ldl": "Chỉ số LDL",
+            "creatinine": "Chỉ số Creatinine máu", "smoke": "Tình trạng hút thuốc",
+            "exercise": "Thời gian vận động thể chất",
+            "gender_code": "Giới tính"
+        }
+
+        if self.ml_model and self.ml_required_features:
+            ml_ready_features = self._convert_to_ml_format(unified_data)
             
-            # ml_result là dict: {"probability": 0.42, "score": 42, "risk_level": "low", "confidence": 80}
-            ai_score = float(ml_result.get("score", 0.0))
-            ai_risk_level = ml_result.get("risk_level", "low")
-            has_ai = True
-            ai_confidence = ml_result.get("confidence", 0)
+            # Kiểm đếm các feature bị thiếu
+            for feature in self.ml_required_features:
+                if feature not in ml_ready_features:
+                    missing_fields.append(inverse_mapping.get(feature, feature))
+
+            if len(missing_fields) == 0:
+                ai_status = "READY"
+                try:
+                    df_input = pd.DataFrame([{col: ml_ready_features[col] for col in self.ml_required_features}])
+                    proba = self.ml_model.predict_proba(df_input)[0, 1]
+                    ai_score = round(proba * 100, 2)
+                    ai_proba = round(proba, 4)
+                    ai_confidence = 85
+                    ai_risk_level = "high" if ai_score >= 60 else "medium" if ai_score >= 30 else "low"
+                except Exception as e:
+                    ai_status = "PARTIAL"
+                    ai_risk_level = f"Lỗi thực thi mô hình AI: {str(e)}"
+            else:
+                ai_status = "PARTIAL"
+                ai_risk_level = "Thiếu dữ liệu để thực hiện đánh giá bằng AI"
         else:
-            ai_score = 0.0
-            ai_risk_level = "Chưa có dữ liệu để xác minh"
-            has_ai = False
-            ai_confidence = 0
+            ai_risk_level = "Chưa có mô hình trí tuệ nhân tạo được huấn luyện cho bệnh này"
 
-        all_matched_rules = self._get_matched_rules(enriched_data)
+        all_matched_rules = self._get_matched_rules(unified_data)
 
-        # Giải thích kết quả
         explanation_engine = ExplanationEngine(self.metadata)
         explanation = explanation_engine.generate_explanation({
             "matched_rules": all_matched_rules,
             "risk_level": rule_risk_level,
             "final_score": rule_score,
-            "form_data": enriched_data
+            "form_data": unified_data
         })
 
-        # TRẢ VỀ CẤU TRÚC KÉP RÕ RÀNG
         return {
             "rule_based": {
                 "score": rule_score,
@@ -1019,16 +1119,19 @@ class RiskStratificationEngine:
                 "matched_rules": all_matched_rules
             },
             "ai_based": {
-                "model_available": has_ai,
+                "status": ai_status,
                 "score": ai_score,
                 "risk_level": ai_risk_level,
-                "confidence": ai_confidence if has_ai else 0
+                "probability": ai_proba,
+                "confidence": ai_confidence,
+                "missing_features": missing_fields
             },
+            "final_score": rule_score,
             "matched_rules": all_matched_rules,
             **explanation
         }
 
-    # ==================== CÁC HÀM CŨ ====================
+    # CÁC HÀM XỬ LÝ RULE-BASED GIỮ NGUYÊN BÊN DƯỚI
     def _calculate_baseline_risk(self, form_data):
         matching_stages = [stage for stage in self.baseline_mapping if ConditionEvaluator.evaluate(stage.get("condition"), form_data)]
         if not matching_stages:
@@ -2234,8 +2337,6 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import datetime
-
 from database.database import SessionLocal
 from database.nguoi_dung import NguoiDung
 from database.cs_suc_khoe import CsSucKhoe
@@ -2251,48 +2352,39 @@ def get_db():
 
 class HealthProfileSchema(BaseModel):
     tenDangNhap: str
-    
-    # Thông tin nhân khẩu học
     tuoi: Optional[int] = None
     gioiTinh: Optional[str] = "Nam"
     chieuCao: Optional[float] = None
     canNang: Optional[float] = None
     bmi: Optional[float] = None
     vongEo: Optional[float] = None
-    
-    # Chỉ số huyết áp
     huyetApTamThu: Optional[float] = None
     huyetApTamTruong: Optional[float] = None
     
-    # Thói quen sống
+    # Sinh hóa đồng bộ mở rộng
+    duongHuyet: Optional[float] = None
+    hba1c: Optional[float] = None
+    cholesterol: Optional[float] = None
+    ldl: Optional[float] = None
+    hdl: Optional[float] = None
+    triglyceride: Optional[float] = None
+    creatinine: Optional[float] = None
+    acidUric: Optional[float] = None
+    
     hutThuoc: Optional[str] = "Không"
     uongRuouBia: Optional[str] = "Không"
     soPhutVanDongMoiTuan: Optional[int] = None
     mucDoAnMan: Optional[str] = "Vừa"
     
-    # Tiền sử bệnh
     caoHuyetAp: Optional[bool] = False
+    tieuDuong: Optional[bool] = False
+    benhTimMach: Optional[bool] = False
+    gout: Optional[bool] = False
+    
     giaDinhCaoHuyetAp: Optional[bool] = False
+    giaDinhTieuDuong: Optional[bool] = False
     giaDinhTimMach: Optional[bool] = False
-    tieuDuong: Optional[bool] = False           # Bản thân tiểu đường
-    giaDinhTieuDuong: Optional[bool] = False    # Gia đình tiểu đường
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "tenDangNhap": "user123",
-                "tuoi": 45,
-                "chieuCao": 170,
-                "canNang": 75,
-                "bmi": 25.95,
-                "vongEo": 90,
-                "huyetApTamThu": 135,
-                "huyetApTamTruong": 85,
-                "hutThuoc": "Đang hút",
-                "tieuDuong": True,
-                "giaDinhTieuDuong": False
-            }
-        }
+    giaDinhGout: Optional[bool] = False
 
 @router.get("/{ten_dang_nhap}")
 def get_health_profile(ten_dang_nhap: str, db: Session = Depends(get_db)):
@@ -2300,18 +2392,13 @@ def get_health_profile(ten_dang_nhap: str, db: Session = Depends(get_db)):
         user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == ten_dang_nhap).first()
         if not user:
             raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
-
         profile = db.query(CsSucKhoe).filter(CsSucKhoe.idNguoiDung == user.idNguoiDung).first()
         if not profile:
             return {"message": "Chưa có hồ sơ", "data": None}
-        
-        profile_dict = {k: v for k, v in profile.__dict__.items() 
-                       if not k.startswith('_') and v is not None}
-        
+        profile_dict = {k: v for k, v in profile.__dict__.items() if not k.startswith('_') and v is not None}
         return {"message": "Thành công", "data": profile_dict}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi lấy hồ sơ: {str(e)}")
-
 
 @router.post("/")
 def upsert_health_profile(profile_data: HealthProfileSchema, db: Session = Depends(get_db)):
@@ -2319,20 +2406,17 @@ def upsert_health_profile(profile_data: HealthProfileSchema, db: Session = Depen
         user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == profile_data.tenDangNhap).first()
         if not user:
             raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
-
         existing_profile = db.query(CsSucKhoe).filter(CsSucKhoe.idNguoiDung == user.idNguoiDung).first()
-
+        
+        # Chuyển đổi dữ liệu, loại bỏ key định danh
+        update_data = profile_data.dict(exclude={"tenDangNhap"})
         if existing_profile:
-            for key, value in profile_data.dict(exclude={"tenDangNhap"}).items():
+            for key, value in update_data.items():
                 if value is not None:
                     setattr(existing_profile, key, value)
         else:
-            new_profile = CsSucKhoe(
-                idNguoiDung=user.idNguoiDung,
-                **profile_data.dict(exclude={"tenDangNhap"})
-            )
+            new_profile = CsSucKhoe(idNguoiDung=user.idNguoiDung, **update_data)
             db.add(new_profile)
-
         db.commit()
         return {"message": "Đã lưu chỉ số sức khỏe cá nhân thành công!", "status": "success"}
     except Exception as e:
@@ -2342,222 +2426,233 @@ def upsert_health_profile(profile_data: HealthProfileSchema, db: Session = Depen
 
 ### backend\ml\train_model.py
 ```py
-# ============================================================
-# PATCH: backend/ml/train_model.py - Fix predict_risk_ml function
-# ============================================================
-# Add or REPLACE the predict_risk_ml function with this:
-
-import pickle
-import numpy as np
 import os
-from typing import Dict, Any
+import warnings
+warnings.filterwarnings("ignore")
 
-# ============================================================
-# ✅ MAIN PREDICTION FUNCTION (được gọi từ plugin_api.py)
-# ============================================================
+import numpy as np
+import pandas as pd
+import joblib
 
-def predict_risk_ml(plugin_name: str, user_data: Dict[str, Any]) -> float:
-    """
-    ✅ Predict risk probability using ML model
-    
-    Args:
-        plugin_name: "diabetes", "hypertension", "gout"
-        user_data: Dictionary with user metrics
-    
-    Returns:
-        probability: float between 0 and 1
-    """
-    try:
-        # ✅ 1. Load model từ file
-        model = load_model(plugin_name)
-        if model is None:
-            print(f"⚠️ Model for {plugin_name} not found, returning 0.0")
-            return 0.0
-        
-        # ✅ 2. Load feature columns để đúng thứ tự
-        feature_cols = load_feature_columns(plugin_name)
-        if not feature_cols:
-            print(f"⚠️ Feature columns for {plugin_name} not found")
-            return 0.0
-        
-        # ✅ 3. Prepare features từ user_data
-        X = prepare_features(user_data, feature_cols, plugin_name)
-        
-        if X is None or len(X) == 0:
-            print(f"⚠️ Failed to prepare features for {plugin_name}")
-            return 0.0
-        
-        # ✅ 4. Make prediction
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import f1_score, recall_score, precision_score, precision_recall_curve
+from sklearn.ensemble import RandomForestClassifier
+
+try:
+    from xgboost import XGBClassifier
+    HAS_XGB = True
+    print("✅ XGBoost đã sẵn sàng")
+except ImportError:
+    HAS_XGB = False
+    print("⚠️ Cài XGBoost: pip install xgboost")
+
+
+FEATURE_COLS = [
+    "age", "gender_code", "bmi", "waist", "systolic", "diastolic", "hypertension",
+    "fasting_glucose", "hba1c", "total_cholesterol", "ldl", "creatinine",
+    "smoke", "exercise", "alcohol", "sodium_intake",
+    "family_hypertension", "family_cardiovascular",
+]
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EXPERIMENTS SIÊU MẠNH - TẬP TRUNG CAO CHO Y TẾ
+# ══════════════════════════════════════════════════════════════════════════════
+
+EXPERIMENTS = [
+    # Random Forest mạnh
+    {"name": "RF | Ultra Strong",
+     "model": RandomForestClassifier(n_estimators=1200, max_depth=None, min_samples_leaf=1,
+                                     class_weight="balanced", random_state=42, n_jobs=-1)},
+
+    # XGBoost Heavy Tuning (ưu tiên Recall + F1 cao)
+    *([
+        {"name": "XGB | scale=15 - depth7",
+         "model": XGBClassifier(n_estimators=1000, max_depth=7, learning_rate=0.04,
+                                subsample=0.82, colsample_bytree=0.78, scale_pos_weight=15,
+                                gamma=0.4, min_child_weight=2, reg_lambda=1.2,
+                                eval_metric="aucpr", random_state=42, n_jobs=-1)},
+
+        {"name": "XGB | scale=18 - depth6",
+         "model": XGBClassifier(n_estimators=800, max_depth=6, learning_rate=0.05,
+                                subsample=0.85, colsample_bytree=0.8, scale_pos_weight=18,
+                                gamma=0.3, min_child_weight=3,
+                                eval_metric="aucpr", random_state=42, n_jobs=-1)},
+
+        {"name": "XGB | scale=12 - depth8",
+         "model": XGBClassifier(n_estimators=900, max_depth=8, learning_rate=0.03,
+                                subsample=0.8, colsample_bytree=0.75, scale_pos_weight=12,
+                                gamma=0.5, min_child_weight=2,
+                                eval_metric="aucpr", random_state=42, n_jobs=-1)},
+
+        {"name": "XGB | High Recall",
+         "model": XGBClassifier(n_estimators=700, max_depth=5, learning_rate=0.06,
+                                subsample=0.78, colsample_bytree=0.82, scale_pos_weight=20,
+                                eval_metric="aucpr", random_state=42, n_jobs=-1)},
+
+        {"name": "XGB | Balanced Best",
+         "model": XGBClassifier(n_estimators=850, max_depth=7, learning_rate=0.045,
+                                subsample=0.83, colsample_bytree=0.79, scale_pos_weight=14,
+                                gamma=0.4, min_child_weight=2.5,
+                                eval_metric="aucpr", random_state=42, n_jobs=-1)},
+    ] if HAS_XGB else []),
+]
+
+
+# (Phần code bên dưới giữ nguyên như phiên bản trước - find_data_dir, load_and_merge_data, build_features, run_experiments, main)
+
+def find_data_dir():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    possible_dirs = [os.path.join(project_root, "data"), os.path.join(script_dir, "data"), project_root]
+    required = ["demographic.csv", "diet.csv", "examination.csv", "questionnaire.csv", "labs.csv", "medications.csv"]
+    for d in possible_dirs:
+        if all(os.path.exists(os.path.join(d, f)) for f in required):
+            print(f"✅ Tìm thấy dữ liệu tại: {d}")
+            return d
+    raise FileNotFoundError("❌ Không tìm thấy thư mục data!")
+
+
+def read_csv_safe(path):
+    for enc in ["utf-8", "utf-8-sig", "latin1", "cp1252"]:
         try:
-            # Ensure X is 2D array for sklearn models
-            if X.ndim == 1:
-                X = X.reshape(1, -1)
-            
-            probability = model.predict_proba(X)[0][1]  # Class 1 probability
-            probability = float(probability)
-            
-            # Clamp to 0-1 range
-            probability = max(0.0, min(1.0, probability))
-            
-            print(f"✅ ML Prediction for {plugin_name}: {probability:.3f}")
-            return probability
-        
-        except AttributeError:
-            # Model doesn't have predict_proba, try predict
-            prediction = model.predict(X)[0]
-            return float(prediction)
+            return pd.read_csv(path, encoding=enc, low_memory=False)
+        except Exception:
+            continue
+    raise Exception(f"Không đọc được file: {path}")
+
+
+def load_and_merge_data():
+    data_dir = find_data_dir()
+    print(f"Đọc dữ liệu từ: {data_dir}")
+    demo = read_csv_safe(os.path.join(data_dir, "demographic.csv"))
+    diet = read_csv_safe(os.path.join(data_dir, "diet.csv"))
+    exam = read_csv_safe(os.path.join(data_dir, "examination.csv"))
+    quest = read_csv_safe(os.path.join(data_dir, "questionnaire.csv"))
+    labs = read_csv_safe(os.path.join(data_dir, "labs.csv"))
     
-    except Exception as e:
-        print(f"❌ ML prediction error for {plugin_name}: {e}")
-        return 0.0
+    df = demo[["SEQN", "RIDAGEYR", "RIAGENDR"]].copy()
+    for src, cols in [
+        (diet, ["SEQN", "DR1TSODI"]),
+        (exam, ["SEQN", "BMXBMI", "BMXWAIST", "BPXSY1", "BPXSY2", "BPXDI1", "BPXDI2"]),
+        (quest, ["SEQN", "DIQ010", "SMQ020", "ALQ130", "BPQ020", "MCQ160A", "PAQ650"]),
+        (labs, ["SEQN", "LBXSGL", "LBXGH", "LBXTC", "LBDLDL", "LBXSCR"]),
+    ]:
+        df = df.merge(src[cols], on="SEQN", how="left")
+    print(f"✅ Đã gộp: {df.shape[0]} mẫu, {df.shape[1]} cột")
+    return df
 
 
-# ============================================================
-# ✅ HELPER FUNCTION: Load Model
-# ============================================================
+def build_features(df):
+    df = df[df["DIQ010"].isin([1, 2, 3])].copy()
+    df["Target"] = (df["DIQ010"] == 1).astype(int)
+    df["age"] = pd.to_numeric(df["RIDAGEYR"], errors="coerce")
+    df["gender_code"] = pd.to_numeric(df["RIAGENDR"], errors="coerce")
+    df["bmi"] = pd.to_numeric(df["BMXBMI"], errors="coerce")
+    df["waist"] = pd.to_numeric(df["BMXWAIST"], errors="coerce")
+    for c in ["BPXSY1", "BPXSY2", "BPXDI1", "BPXDI2"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df["systolic"] = df[["BPXSY1", "BPXSY2"]].mean(axis=1)
+    df["diastolic"] = df[["BPXDI1", "BPXDI2"]].mean(axis=1)
+    df["hypertension"] = ((df["systolic"] >= 130) | (df["diastolic"] >= 80)).astype(float)
+    df["fasting_glucose"] = pd.to_numeric(df.get("LBXSGL"), errors="coerce")
+    df["hba1c"] = pd.to_numeric(df.get("LBXGH"), errors="coerce")
+    df["total_cholesterol"] = pd.to_numeric(df.get("LBXTC"), errors="coerce")
+    df["ldl"] = pd.to_numeric(df.get("LBDLDL"), errors="coerce")
+    df["creatinine"] = pd.to_numeric(df.get("LBXSCR"), errors="coerce")
+    df["smoke"] = (pd.to_numeric(df.get("SMQ020"), errors="coerce") == 1).astype(float)
+    df["exercise"] = (pd.to_numeric(df.get("PAQ650"), errors="coerce") == 1).astype(float)
+    df["alcohol"] = pd.to_numeric(df.get("ALQ130"), errors="coerce").fillna(0)
+    df["sodium_intake"] = pd.to_numeric(df.get("DR1TSODI"), errors="coerce")
+    df["family_hypertension"] = (pd.to_numeric(df.get("BPQ020"), errors="coerce") == 1).astype(float)
+    df["family_cardiovascular"] = (pd.to_numeric(df.get("MCQ160A"), errors="coerce") == 1).astype(float)
 
-def load_model(plugin_name: str):
-    """
-    Load ML model from pickle file
-    """
-    try:
-        model_path = f"backend/ml/models/{plugin_name}_best_model.pkl"
-        
-        # Try different path variations
-        if not os.path.exists(model_path):
-            model_path = f"ml/models/{plugin_name}_best_model.pkl"
-        
-        if not os.path.exists(model_path):
-            model_path = f"app/../ml/models/{plugin_name}_best_model.pkl"
-        
-        if not os.path.exists(model_path):
-            print(f"❌ Model file not found: {model_path}")
-            return None
-        
-        with open(model_path, 'rb') as f:
-            model = pickle.load(f)
-        
-        print(f"✅ Loaded model from {model_path}")
-        return model
-    
-    except Exception as e:
-        print(f"❌ Error loading model: {e}")
-        return None
+    X = df[FEATURE_COLS].copy()
+    y = df["Target"].copy()
+    print(f"📊 Số mẫu: {len(df)} | Positive rate: {y.mean():.4f}\n")
+    return X, y
 
 
-# ============================================================
-# ✅ HELPER FUNCTION: Load Feature Columns
-# ============================================================
-
-def load_feature_columns(plugin_name: str):
-    """
-    Load feature column names from pickle file
-    """
-    try:
-        # Try different path variations
-        paths = [
-            f"backend/ml/models/feature_cols.pkl",
-            f"ml/models/feature_cols.pkl",
-            f"backend/ml/models/{plugin_name}_feature_cols.pkl",
-        ]
-        
-        feature_path = None
-        for path in paths:
-            if os.path.exists(path):
-                feature_path = path
-                break
-        
-        if not feature_path:
-            print(f"⚠️ Feature columns file not found")
-            return None
-        
-        with open(feature_path, 'rb') as f:
-            feature_cols = pickle.load(f)
-        
-        print(f"✅ Loaded {len(feature_cols)} feature columns")
-        return feature_cols
-    
-    except Exception as e:
-        print(f"❌ Error loading feature columns: {e}")
-        return None
+def find_optimal_threshold(y_true, y_proba, beta=0.75):
+    prec, rec, thresh = precision_recall_curve(y_true, y_proba)
+    fbeta = (1 + beta**2) * (prec * rec) / (beta**2 * prec + rec + 1e-8)
+    best_idx = np.argmax(fbeta)
+    return float(thresh[best_idx]) if best_idx < len(thresh) else 0.5
 
 
-# ============================================================
-# ✅ HELPER FUNCTION: Prepare Features
-# ============================================================
+def run_experiments(X, y):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    models_dir = os.path.join(script_dir, "models")
+    os.makedirs(models_dir, exist_ok=True)
 
-def prepare_features(user_data: Dict[str, Any], feature_cols: list, plugin_name: str) -> np.ndarray:
-    """
-    Convert user input dict to feature array matching model's expected columns
-    
-    Maps Vietnamese field names to English feature names
-    """
-    try:
-        # ✅ Vietnamese to English field mapping
-        field_mapping = {
-            "tuoi": "age",
-            "gioi": "gender",
-            "bmi": "bmi",
-            "vongEo": "waist_circumference",
-            "huyetApTamThu": "systolic_bp",
-            "huyetApTamTruong": "diastolic_bp",
-            "caoHuyetAp": "hypertension",
-            "tieuDuong": "diabetes",
-            "hutThuoc": "smoking",
-            "soPhutVanDongMoiTuan": "physical_activity_minutes",
-            "giaDinhCaoHuyetAp": "family_hypertension",
-            "giaDinhTieuDuong": "family_diabetes",
-            "giaDinhTimMach": "family_heart_disease",
-            "canNang": "weight",
-            "chieuCao": "height",
-        }
-        
-        # ✅ Map fields and handle missing values
-        X = []
-        for feature in feature_cols:
-            # Try to find the Vietnamese field name
-            vietnamese_name = None
-            for vn_name, en_name in field_mapping.items():
-                if en_name == feature or feature == vn_name:
-                    vietnamese_name = vn_name
-                    break
-            
-            # Get value from user_data
-            if vietnamese_name and vietnamese_name in user_data:
-                value = user_data[vietnamese_name]
-            elif feature in user_data:
-                value = user_data[feature]
-            else:
-                # ❌ Missing feature - use default
-                print(f"⚠️ Missing feature: {feature}, using default")
-                value = 0 if feature not in ["gender"] else 0
-            
-            # Convert boolean to int if needed
-            if isinstance(value, bool):
-                value = int(value)
-            
-            # Convert to float
-            try:
-                value = float(value) if value is not None else 0.0
-            except:
-                value = 0.0
-            
-            X.append(value)
-        
-        return np.array([X])  # Return 2D array
-    
-    except Exception as e:
-        print(f"❌ Error preparing features: {e}")
-        return None
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    print(f"Train: {len(X_train)} | Test: {len(X_test)}\n")
+
+    W = 45
+    print(f"{'Thí nghiệm':<{W}} {'F1':>6} {'Recall':>8} {'Precision':>10} {'Thresh':>8}")
+    print("-" * (W + 40))
+
+    best_f1 = -1
+    best_pipe = None
+    best_thresh = 0.5
+    best_name = ""
+    results = []
+
+    for exp in EXPERIMENTS:
+        name = exp["name"]
+        clf = exp["model"]
+
+        pipe = Pipeline([("imputer", SimpleImputer(strategy="median")),
+                         ("scaler", StandardScaler()),
+                         ("clf", clf)])
+        pipe.fit(X_train, y_train)
+
+        y_proba = pipe.predict_proba(X_test)[:, 1]
+        opt_th = find_optimal_threshold(y_test, y_proba)
+        y_pred = (y_proba >= opt_th).astype(int)
+
+        f1 = f1_score(y_test, y_pred, zero_division=0)
+        rec = recall_score(y_test, y_pred, zero_division=0)
+        pre = precision_score(y_test, y_pred, zero_division=0)
+
+        tag = " ★" if f1 > best_f1 else ""
+        print(f" {name:<{W}} {f1:>6.4f} {rec:>8.4f} {pre:>10.4f} {opt_th:>8.4f}{tag}")
+
+        results.append({"Thí nghiệm": name, "F1": round(f1,4), "Recall": round(rec,4), 
+                       "Precision": round(pre,4), "Threshold": round(opt_th,4)})
+
+        if f1 > best_f1:
+            best_f1 = f1
+            best_pipe = pipe
+            best_thresh = opt_th
+            best_name = name
+
+    joblib.dump(best_pipe, os.path.join(models_dir, "screening_best_model.pkl"))
+    joblib.dump(best_thresh, os.path.join(models_dir, "screening_best_threshold.pkl"))
+    joblib.dump(FEATURE_COLS, os.path.join(models_dir, "feature_cols.pkl"))
+
+    df_res = pd.DataFrame(results).sort_values("F1", ascending=False)
+    df_res.to_csv(os.path.join(models_dir, "experiment_results.csv"), index=False, encoding="utf-8-sig")
+
+    print("\n" + "="*90)
+    print(f"🏆 BEST MODEL: {best_name}")
+    print(f"    F1 = {best_f1:.4f} | Recall = {rec:.4f} | Threshold = {best_thresh:.4f}")
+    print(f"✅ Model đã lưu tại: {models_dir}")
 
 
-# ============================================================
-# Legacy functions (keep existing code):
-# - train_model(...)
-# - evaluate_model(...)
-# - save_model(...)
-# ============================================================
-# These should remain unchanged
+def main():
+    print("🚀 Training mô hình sàng lọc tiểu đường - Phiên bản SIÊU MẠNH\n")
+    df = load_and_merge_data()
+    X, y = build_features(df)
+    print(f"Tổng số thí nghiệm: {len(EXPERIMENTS)}")
+    print("="*90)
+    run_experiments(X, y)
+
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### frontend\eslint.config.js
@@ -2600,26 +2695,36 @@ export default defineConfig({
 
 ### frontend\src\App.jsx
 ```jsx
+// frontend/src/App.jsx
 import { useState, useEffect } from "react";
 import MainRiskPage from "./MainRiskPage";
 import DangNhap from "./dang_nhap";
 import DangKy from "./dang_ky";
-import ChiSoSucKhoe from "./cs_suckhoe"; // [THÊM DÒNG NÀY] Import Component mới
+import ChiSoSucKhoe from "./cs_suckhoe";
+import TrangChu from "./TrangChu"; // <-- [THÊM MỚI] Import trang chủ vừa tạo
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userEmail, setUserEmail] = useState("");
-  const [authMode, setAuthMode] = useState("login");
   
-  // [THÊM DÒNG NÀY] Biến để chuyển đổi giữa trang Khám Bệnh và trang Hồ Sơ
+  // SỬA ĐỔI QUAN TRỌNG: Mặc định chế độ auth ban đầu là "welcome" 
+  // thay vì nhảy bổ trực tiếp vào form đăng nhập để tránh bug tự động lấy dữ liệu lỗi.
+  const [authMode, setAuthMode] = useState("welcome"); // "welcome", "login", "register"
   const [currentView, setCurrentView] = useState("risk"); // "risk" hoặc "profile"
 
   useEffect(() => {
     const token = localStorage.getItem("token");
-    const email = localStorage.getItem("userName"); // Lưu ý: ở trước bạn đã đổi thành userName
-    if (token) {
+    const email = localStorage.getItem("userName");
+    if (token && email) {
       setIsAuthenticated(true);
       setUserEmail(email);
+    } else {
+      // Nếu không có token hợp lệ, làm sạch bộ nhớ tránh bẫy dữ liệu cũ
+      localStorage.removeItem("token");
+      localStorage.removeItem("userName");
+      setIsAuthenticated(false);
+      setUserEmail("");
+      setAuthMode("welcome");
     }
   }, []);
 
@@ -2633,11 +2738,16 @@ export default function App() {
     localStorage.removeItem("userName");
     setIsAuthenticated(false);
     setUserEmail("");
-    setAuthMode("login");
-    setCurrentView("risk"); // Reset view
+    setAuthMode("welcome"); // Reset về trang chủ welcome ban đầu có chữ Hello
+    setCurrentView("risk"); 
   };
 
+  // ==================== ĐIỀU PHỐI LUỒNG CHƯA ĐĂNG NHẬP ====================
   if (!isAuthenticated) {
+    if (authMode === "welcome") {
+      return <TrangChu onGoToLogin={() => setAuthMode("login")} />;
+    }
+    
     return (
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", backgroundColor: "#f1f5f9" }}>
         {authMode === "login" ? (
@@ -2654,15 +2764,18 @@ export default function App() {
     );
   }
 
+  // ==================== DIỆN MẠO SAU KHI ĐĂNG NHẬP THÀNH CÔNG ====================
   return (
     <div>
-      {/* Navbar cập nhật thêm Menu điều hướng */}
+      {/* Navbar Menu điều hướng hệ thống */}
       <div style={{ backgroundColor: "#ffffff", padding: "12px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e2e8f0", boxShadow: "0 1px 2px 0 rgba(0, 0, 0, 0.05)" }}>
         
         <div style={{ display: "flex", alignItems: "center", gap: "30px" }}>
-          <div style={{ fontWeight: "bold", color: "#0f172a", fontSize: "18px" }}>Risk Engine</div>
+          <div style={{ fontWeight: "bold", color: "#0f172a", fontSize: "18px", cursor: "pointer" }} onClick={() => setAuthMode("welcome")}>
+            Risk Engine
+          </div>
           
-          {/* CÁC NÚT ĐIỀU HƯỚNG */}
+          {/* CÁC NÚT TẢI CÔNG CỤ DUAL-ENGINE */}
           <div style={{ display: "flex", gap: "10px" }}>
             <button 
               onClick={() => setCurrentView("risk")}
@@ -2689,11 +2802,10 @@ export default function App() {
         </div>
       </div>
 
-      {/* RENDER DỰA TRÊN TAB ĐANG CHỌN */}
+      {/* HIỂN THỊ PHÂN VÙNG CHỨC NĂNG */}
       <div style={{ padding: "20px" }}>
         {currentView === "risk" ? <MainRiskPage /> : <ChiSoSucKhoe />}
       </div>
-
     </div>
   );
 }
@@ -2709,25 +2821,13 @@ const API_BASE_URL = "http://127.0.0.1:8000";
 
 export default function ChiSoSucKhoe() {
   const [formData, setFormData] = useState({
-    tuoi: "",
-    gioiTinh: "Nam",
-    chieuCao: "",
-    canNang: "",
-    bmi: "",
-    vongEo: "",
-    huyetApTamThu: "",
-    huyetApTamTruong: "",
-    hutThuoc: "Không",
-    uongRuouBia: "Không",
-    soPhutVanDongMoiTuan: "",
-    mucDoAnMan: "Vừa",
-    caoHuyetAp: false,
-    giaDinhCaoHuyetAp: false,
-    giaDinhTimMach: false,
-    tieuDuong: false,           // Bản thân tiểu đường
-    giaDinhTieuDuong: false,    // Gia đình tiểu đường
-    duongHuyet: "",
-    cholesterol: ""
+    tuoi: "", gioiTinh: "Nam", chieuCao: "", canNang: "", bmi: "", vongEo: "",
+    huyetApTamThu: "", huyetApTamTruong: "",
+    // Nhóm Sinh hóa bổ sung đồng bộ DB
+    duongHuyet: "", hba1c: "", cholesterol: "", ldl: "", hdl: "", triglyceride: "", creatinine: "", acidUric: "",
+    hutThuoc: "Không", uongRuouBia: "Không", soPhutVanDongMoiTuan: "", mucDoAnMan: "Vừa",
+    caoHuyetAp: false, tieuDuong: false, benhTimMach: false, gout: false,
+    giaDinhCaoHuyetAp: false, giaDinhTieuDuong: false, giaDinhTimMach: false, giaDinhGout: false
   });
 
   const [message, setMessage] = useState("");
@@ -2735,7 +2835,6 @@ export default function ChiSoSucKhoe() {
   const [completionRate, setCompletionRate] = useState(0);
   const tenDangNhap = localStorage.getItem("userName");
 
-  // Tính completion rate
   useEffect(() => {
     const nonEmptyFields = Object.values(formData).filter(v => 
       v !== "" && v !== false && v !== null && v !== undefined
@@ -2744,12 +2843,10 @@ export default function ChiSoSucKhoe() {
     setCompletionRate(rate);
   }, [formData]);
 
-  // Load health profile
   useEffect(() => {
     if (tenDangNhap) fetchHealthProfile();
   }, [tenDangNhap]);
 
-  // Tự động tính BMI
   useEffect(() => {
     if (formData.chieuCao && formData.canNang) {
       const heightInM = formData.chieuCao / 100;
@@ -2773,15 +2870,8 @@ export default function ChiSoSucKhoe() {
     const { name, value, type, checked } = e.target;
     const newValue = type === "checkbox" ? checked : value;
     
-    setFormData((prev) => ({
-      ...prev,
-      [name]: newValue
-    }));
-    
-    // Auto-save single field
-    if (tenDangNhap) {
-      autoSaveField(name, newValue);
-    }
+    setFormData((prev) => ({ ...prev, [name]: newValue }));
+    if (tenDangNhap) autoSaveField(name, newValue);
   };
 
   const autoSaveField = async (fieldName, fieldValue) => {
@@ -2797,7 +2887,6 @@ export default function ChiSoSucKhoe() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
     if (!tenDangNhap) {
       setMessage("⚠️ Vui lòng đăng nhập trước!");
       return;
@@ -2805,52 +2894,35 @@ export default function ChiSoSucKhoe() {
 
     try {
       setSaving(true);
-      const payload = {
-        tenDangNhap: tenDangNhap,
-        tuoi: formData.tuoi ? Number(formData.tuoi) : null,
-        chieuCao: formData.chieuCao ? Number(formData.chieuCao) : null,
-        canNang: formData.canNang ? Number(formData.canNang) : null,
-        bmi: formData.bmi ? Number(formData.bmi) : null,
-        vongEo: formData.vongEo ? Number(formData.vongEo) : null,
-        huyetApTamThu: formData.huyetApTamThu ? Number(formData.huyetApTamThu) : null,
-        huyetApTamTruong: formData.huyetApTamTruong ? Number(formData.huyetApTamTruong) : null,
-        soPhutVanDongMoiTuan: formData.soPhutVanDongMoiTuan ? Number(formData.soPhutVanDongMoiTuan) : null,
-        duongHuyet: formData.duongHuyet ? Number(formData.duongHuyet) : null,
-        cholesterol: formData.cholesterol ? Number(formData.cholesterol) : null,
-        
-        gioiTinh: formData.gioiTinh,
-        hutThuoc: formData.hutThuoc,
-        uongRuouBia: formData.uongRuouBia,
-        mucDoAnMan: formData.mucDoAnMan,
-        
-        caoHuyetAp: formData.caoHuyetAp,
-        giaDinhCaoHuyetAp: formData.giaDinhCaoHuyetAp,
-        giaDinhTimMach: formData.giaDinhTimMach,
-        tieuDuong: formData.tieuDuong,
-        giaDinhTieuDuong: formData.giaDinhTieuDuong
-      };
+      const payload = { tenDangNhap };
+      
+      // Chuyển đổi định dạng số cho các chỉ số quan trọng
+      const numericFields = [
+        "tuoi", "chieuCao", "canNang", "bmi", "vongEo", "huyetApTamThu", "huyetApTamTruong",
+        "duongHuyet", "hba1c", "cholesterol", "ldl", "hdl", "triglyceride", "creatinine", "acidUric", "soPhutVanDongMoiTuan"
+      ];
+      
+      Object.keys(formData).forEach(key => {
+        if (numericFields.includes(key)) {
+          payload[key] = formData[key] ? Number(formData[key]) : null;
+        } else {
+          payload[key] = formData[key];
+        }
+      });
 
       await axios.post(`${API_BASE_URL}/health-profile/`, payload);
-      setMessage("✅ Lưu dữ liệu thành công!");
+      setMessage("✅ Lưu dữ liệu hồ sơ sức khỏe thành công!");
       setTimeout(() => setMessage(""), 3000);
     } catch (error) {
       setMessage("❌ Lỗi khi lưu dữ liệu!");
-      console.error(error);
-      setTimeout(() => setMessage(""), 3000);
     } finally {
       setSaving(false);
     }
   };
 
-  const getCompletionColor = () => {
-    if (completionRate < 33) return "#ef4444";
-    if (completionRate < 67) return "#f97316";
-    return "#22c55e";
-  };
-
   const BMI_CATEGORY = (bmi) => {
     const b = Number(bmi);
-    if (isNaN(b)) return "-";
+    if (isNaN(b) || b === 0) return "-";
     if (b < 18.5) return "Gầy";
     if (b < 25) return "Bình thường";
     if (b < 30) return "Thừa cân";
@@ -2858,232 +2930,96 @@ export default function ChiSoSucKhoe() {
   };
 
   return (
-    <div style={{ maxWidth: "700px", margin: "0 auto", padding: "20px", fontFamily: "Segoe UI, Arial, sans-serif" }}>
-      <h2 style={{ color: "#1e293b", marginTop: 0 }}>📋 Nhập Chỉ Số Sức Khỏe Cá Nhân</h2>
-      <p style={{ color: "#64748b", marginBottom: "24px" }}>
-        <i>👤 Tài khoản: <strong>{tenDangNhap || "Chưa đăng nhập"}</strong></i>
-      </p>
+    <div style={{ maxWidth: "750px", margin: "0 auto", padding: "20px", fontFamily: "Segoe UI, sans-serif" }}>
+      <h2 style={{ color: "#1e293b", marginTop: 0 }}>📋 Đồng Bộ Chỉ Số Sức Khỏe Cá Nhân</h2>
+      <p style={{ color: "#64748b" }}><i>👤 Tài khoản: <strong>{tenDangNhap || "Chưa đăng nhập"}</strong></i></p>
 
-      {/* PROGRESS BAR */}
+      {/* THANH TIẾN TRÌNH HỒ SƠ */}
       <div style={{ marginBottom: "24px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
-          <span style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>Hoàn thành hồ sơ</span>
-          <span style={{ fontSize: "12px", fontWeight: "bold", color: getCompletionColor() }}>
-            {completionRate}%
-          </span>
+          <span style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>Mức độ điền đầy đủ dữ liệu AI</span>
+          <span style={{ fontSize: "12px", fontWeight: "bold", color: completionRate > 70 ? '#22c55e' : '#f97316' }}>{completionRate}%</span>
         </div>
-        <div style={{
-          width: "100%",
-          height: "8px",
-          backgroundColor: "#e2e8f0",
-          borderRadius: "4px",
-          overflow: "hidden"
-        }}>
-          <div style={{
-            height: "100%",
-            width: `${completionRate}%`,
-            backgroundColor: getCompletionColor(),
-            transition: "width 0.3s ease"
-          }} />
+        <div style={{ width: "100%", height: "8px", backgroundColor: "#e2e8f0", borderRadius: "4px", overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${completionRate}%`, backgroundColor: completionRate > 70 ? '#22c55e' : '#f97316', transition: "width 0.3s" }} />
         </div>
       </div>
 
-      {/* MESSAGE */}
-      {message && (
-        <div style={{
-          padding: "12px",
-          marginBottom: "16px",
-          borderRadius: "6px",
-          backgroundColor: message.includes("✅") ? "#dcfce7" : "#fee2e2",
-          color: message.includes("✅") ? "#166534" : "#991b1b",
-          fontSize: "14px",
-          fontWeight: "500"
-        }}>
-          {message}
-        </div>
-      )}
+      {message && <div style={{ padding: "12px", marginBottom: "16px", borderRadius: "6px", backgroundColor: message.includes("✅") ? "#dcfce7" : "#fee2e2", color: message.includes("✅") ? "#166534" : "#991b1b" }}>{message}</div>}
 
       <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-        
-        {/* SECTION 1: Thể chất & Sinh tồn */}
+        {/* KHỐI 1 */}
         <fieldset style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", backgroundColor: "#f8fafc" }}>
           <legend style={{ fontWeight: "bold", color: "#0f766e", padding: "0 8px" }}>📏 1. Thể chất & Sinh tồn</legend>
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div>
-              <label style={{ fontWeight: "600", color: "#334155", display: "block", marginBottom: "4px" }}>Tuổi (năm)</label>
-              <input type="number" name="tuoi" value={formData.tuoi} onChange={handleChange} style={inputStyle} min="0" max="150" />
-            </div>
-
-            <div>
-              <label style={{ fontWeight: "600", color: "#334155", display: "block", marginBottom: "4px" }}>Giới tính</label>
-              <select name="gioiTinh" value={formData.gioiTinh} onChange={handleChange} style={selectStyle}>
-                <option value="Nam">Nam</option>
-                <option value="Nữ">Nữ</option>
-              </select>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <div>
-                <label style={{ fontWeight: "600", color: "#334155", display: "block", marginBottom: "4px" }}>Chiều cao (cm)</label>
-                <input type="number" name="chieuCao" value={formData.chieuCao} onChange={handleChange} style={inputStyle} min="100" max="250" />
-              </div>
-              <div>
-                <label style={{ fontWeight: "600", color: "#334155", display: "block", marginBottom: "4px" }}>Cân nặng (kg)</label>
-                <input type="number" name="canNang" value={formData.canNang} onChange={handleChange} style={inputStyle} min="20" max="300" />
-              </div>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <div>
-                <label style={{ fontWeight: "600", color: "#334155", display: "block", marginBottom: "4px" }}>BMI</label>
-                <input type="number" name="bmi" value={formData.bmi} readOnly style={{ ...inputStyle, backgroundColor: "#e2e8f0", cursor: "not-allowed" }} />
-                <span style={{ fontSize: "12px", color: "#64748b", marginTop: "4px", display: "block" }}>
-                  → {BMI_CATEGORY(formData.bmi)}
-                </span>
-              </div>
-              <div>
-                <label style={{ fontWeight: "600", color: "#334155", display: "block", marginBottom: "4px" }}>Vòng eo (cm)</label>
-                <input type="number" name="vongEo" value={formData.vongEo} onChange={handleChange} style={inputStyle} min="40" max="200" />
-              </div>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <div>
-                <label style={{ fontWeight: "600", color: "#334155", display: "block", marginBottom: "4px" }}>HA Tâm thu (mmHg)</label>
-                <input type="number" name="huyetApTamThu" value={formData.huyetApTamThu} onChange={handleChange} style={inputStyle} min="80" max="200" />
-              </div>
-              <div>
-                <label style={{ fontWeight: "600", color: "#334155", display: "block", marginBottom: "4px" }}>HA Tâm trương (mmHg)</label>
-                <input type="number" name="huyetApTamTruong" value={formData.huyetApTamTruong} onChange={handleChange} style={inputStyle} min="40" max="130" />
-              </div>
-            </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div><label>Tuổi (năm)</label><input type="number" name="tuoi" value={formData.tuoi} onChange={handleChange} style={inputStyle}/></div>
+            <div><label>Giới tính</label><select name="gioiTinh" value={formData.gioiTinh} onChange={handleChange} style={inputStyle}><option value="Nam">Nam</option><option value="Nữ">Nữ</option></select></div>
+            <div><label>Chiều cao (cm)</label><input type="number" name="chieuCao" value={formData.chieuCao} onChange={handleChange} style={inputStyle}/></div>
+            <div><label>Cân nặng (kg)</label><input type="number" name="canNang" value={formData.canNang} onChange={handleChange} style={inputStyle}/></div>
+            <div><label>BMI: {BMI_CATEGORY(formData.bmi)}</label><input type="number" name="bmi" value={formData.bmi} readOnly style={{...inputStyle, backgroundColor: "#e2e8f0"}}/></div>
+            <div><label>Vòng eo (cm)</label><input type="number" name="vongEo" value={formData.vongEo} onChange={handleChange} style={inputStyle}/></div>
+            <div><label>HA Tâm thu (mmHg)</label><input type="number" name="huyetApTamThu" value={formData.huyetApTamThu} onChange={handleChange} style={inputStyle}/></div>
+            <div><label>HA Tâm trương (mmHg)</label><input type="number" name="huyetApTamTruong" value={formData.huyetApTamTruong} onChange={handleChange} style={inputStyle}/></div>
           </div>
         </fieldset>
 
-        {/* SECTION 2: Lối sống */}
-        <fieldset style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", backgroundColor: "#f8fafc" }}>
-          <legend style={{ fontWeight: "bold", color: "#7c3aed", padding: "0 8px" }}>🏃 2. Lối sống</legend>
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div>
-              <label style={{ fontWeight: "600", color: "#334155", display: "block", marginBottom: "4px" }}>Hút thuốc</label>
-              <select name="hutThuoc" value={formData.hutThuoc} onChange={handleChange} style={selectStyle}>
-                <option value="Không">Không</option>
-                <option value="Đã bỏ">Đã bỏ</option>
-                <option value="Đang hút">Đang hút</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={{ fontWeight: "600", color: "#334155", display: "block", marginBottom: "4px" }}>Uống rượu/bia</label>
-              <select name="uongRuouBia" value={formData.uongRuouBia} onChange={handleChange} style={selectStyle}>
-                <option value="Không">Không</option>
-                <option value="Thỉnh thoảng">Thỉnh thoảng</option>
-                <option value="Thường xuyên">Thường xuyên</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={{ fontWeight: "600", color: "#334155", display: "block", marginBottom: "4px" }}>Mức độ ăn mặn</label>
-              <select name="mucDoAnMan" value={formData.mucDoAnMan} onChange={handleChange} style={selectStyle}>
-                <option value="Nhạt">Nhạt</option>
-                <option value="Vừa">Vừa</option>
-                <option value="Mặn">Mặn</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={{ fontWeight: "600", color: "#334155", display: "block", marginBottom: "4px" }}>Phút vận động/tuần</label>
-              <input type="number" name="soPhutVanDongMoiTuan" value={formData.soPhutVanDongMoiTuan} onChange={handleChange} style={inputStyle} min="0" max="10000" />
-            </div>
+        {/* KHỐI 2: XÉT NGHIỆM SINH HÓA NÂNG CAO */}
+        <fieldset style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", backgroundColor: "#f0fdf4" }}>
+          <legend style={{ fontWeight: "bold", color: "#166534", padding: "0 8px" }}>🔬 2. Chỉ số Sinh hóa (Bổ sung dữ liệu mô hình AI)</legend>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div><label>Đường huyết đói (mg/dL)</label><input type="number" name="duongHuyet" value={formData.duongHuyet} onChange={handleChange} style={inputStyle}/></div>
+            <div><label>HbA1c (%)</label><input type="number" step="0.1" name="hba1c" value={formData.hba1c} onChange={handleChange} style={inputStyle}/></div>
+            <div><label>Cholesterol toàn phần (mg/dL)</label><input type="number" name="cholesterol" value={formData.cholesterol} onChange={handleChange} style={inputStyle}/></div>
+            <div><label>LDL-Cholesterol (mg/dL)</label><input type="number" name="ldl" value={formData.ldl} onChange={handleChange} style={inputStyle}/></div>
+            <div><label>HDL-Cholesterol (mg/dL)</label><input type="number" name="hdl" value={formData.hdl} onChange={handleChange} style={inputStyle}/></div>
+            <div><label>Triglyceride (mg/dL)</label><input type="number" name="triglyceride" value={formData.triglyceride} onChange={handleChange} style={inputStyle}/></div>
+            <div><label>Creatinine máu (mg/dL)</label><input type="number" step="0.01" name="creatinine" value={formData.creatinine} onChange={handleChange} style={inputStyle}/></div>
+            <div><label>Acid Uric (mg/dL)</label><input type="number" step="0.1" name="acidUric" value={formData.acidUric} onChange={handleChange} style={inputStyle}/></div>
           </div>
         </fieldset>
 
-        {/* SECTION 3: Tiền sử bệnh - ĐÃ CẬP NHẬT */}
+        {/* KHỐI 3 */}
         <fieldset style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", backgroundColor: "#f8fafc" }}>
-          <legend style={{ fontWeight: "bold", color: "#dc2626", padding: "0 8px" }}>⚠️ 3. Tiền sử bệnh</legend>
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontWeight: "500", color: "#334155" }}>
-              <input type="checkbox" name="caoHuyetAp" checked={formData.caoHuyetAp} onChange={handleChange} style={{ width: "18px", height: "18px" }} />
-              <span>Bản thân bị cao huyết áp</span>
-            </label>
-
-            <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontWeight: "500", color: "#334155" }}>
-              <input type="checkbox" name="giaDinhCaoHuyetAp" checked={formData.giaDinhCaoHuyetAp} onChange={handleChange} style={{ width: "18px", height: "18px" }} />
-              <span>Gia đình có người cao huyết áp</span>
-            </label>
-
-            <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontWeight: "500", color: "#334155" }}>
-              <input type="checkbox" name="giaDinhTimMach" checked={formData.giaDinhTimMach} onChange={handleChange} style={{ width: "18px", height: "18px" }} />
-              <span>Gia đình có người tim mạch</span>
-            </label>
-
-            <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontWeight: "500", color: "#334155" }}>
-              <input type="checkbox" name="tieuDuong" checked={formData.tieuDuong} onChange={handleChange} style={{ width: "18px", height: "18px" }} />
-              <span>Bản thân mắc tiểu đường</span>
-            </label>
-
-            <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontWeight: "500", color: "#334155" }}>
-              <input type="checkbox" name="giaDinhTieuDuong" checked={formData.giaDinhTieuDuong} onChange={handleChange} style={{ width: "18px", height: "18px" }} />
-              <span>Gia đình có người mắc tiểu đường</span>
-            </label>
+          <legend style={{ fontWeight: "bold", color: "#7c3aed", padding: "0 8px" }}>🏃 3. Lối sống</legend>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div><label>Hút thuốc</label><select name="hutThuoc" value={formData.hutThuoc} onChange={handleChange} style={inputStyle}><option value="Không">Không</option><option value="Đã bỏ">Đã bỏ</option><option value="Đang hút">Đang hút</option></select></div>
+            <div><label>Uống rượu/bia</label><select name="uongRuouBia" value={formData.uongRuouBia} onChange={handleChange} style={inputStyle}><option value="Không">Không</option><option value="Thỉnh thoảng">Thỉnh thoảng</option><option value="Thường xuyên">Thường xuyên</option></select></div>
+            <div><label>Mức độ ăn mặn</label><select name="mucDoAnMan" value={formData.mucDoAnMan} onChange={handleChange} style={inputStyle}><option value="Nhạt">Nhạt</option><option value="Vừa">Vừa</option><option value="Mặn">Mặn</option></select></div>
+            <div><label>Phút vận động/tuần</label><input type="number" name="soPhutVanDongMoiTuan" value={formData.soPhutVanDongMoiTuan} onChange={handleChange} style={inputStyle}/></div>
           </div>
         </fieldset>
 
-        {/* SECTION 4: Chỉ số sinh hóa */}
-        <fieldset style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", backgroundColor: "#f8fafc" }}>
-          <legend style={{ fontWeight: "bold", color: "#0284c7", padding: "0 8px" }}>🔬 4. Chỉ số sinh hóa (Tùy chọn)</legend>
+        {/* KHỐI 4 */}
+        <fieldset style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", backgroundColor: "#fff5f5" }}>
+          <legend style={{ fontWeight: "bold", color: "#dc2626", padding: "0 8px" }}>⚠️ 4. Tiền sử bệnh lý (Cá nhân & Gia đình)</legend>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
-              <label style={{ fontWeight: "600", color: "#334155", display: "block", marginBottom: "4px" }}>Đường huyết (mg/dL)</label>
-              <input type="number" name="duongHuyet" value={formData.duongHuyet} onChange={handleChange} style={inputStyle} min="50" max="500" />
+              <h4 style={{ margin: "5px 0" }}>Bản thân bị:</h4>
+              <label style={checkLabel}><input type="checkbox" name="caoHuyetAp" checked={formData.caoHuyetAp} onChange={handleChange}/> Cao huyết áp</label>
+              <label style={checkLabel}><input type="checkbox" name="tieuDuong" checked={formData.tieuDuong} onChange={handleChange}/> Tiểu đường</label>
+              <label style={checkLabel}><input type="checkbox" name="benhTimMach" checked={formData.benhTimMach} onChange={handleChange}/> Tim mạch</label>
+              <label style={checkLabel}><input type="checkbox" name="gout" checked={formData.gout} onChange={formData.gout} onChange={handleChange}/> Bệnh Gout</label>
             </div>
             <div>
-              <label style={{ fontWeight: "600", color: "#334155", display: "block", marginBottom: "4px" }}>Cholesterol (mg/dL)</label>
-              <input type="number" name="cholesterol" value={formData.cholesterol} onChange={handleChange} style={inputStyle} min="100" max="400" />
+              <h4 style={{ margin: "5px 0" }}>Gia đình cận huyết bị:</h4>
+              <label style={checkLabel}><input type="checkbox" name="giaDinhCaoHuyetAp" checked={formData.giaDinhCaoHuyetAp} onChange={handleChange}/> Cao huyết áp GD</label>
+              <label style={checkLabel}><input type="checkbox" name="giaDinhTieuDuong" checked={formData.giaDinhTieuDuong} onChange={handleChange}/> Tiểu đường GD</label>
+              <label style={checkLabel}><input type="checkbox" name="giaDinhTimMach" checked={formData.giaDinhTimMach} onChange={handleChange}/> Tim mạch GD</label>
+              <label style={checkLabel}><input type="checkbox" name="giaDinhGout" checked={formData.giaDinhGout} onChange={handleChange}/> Gout GD</label>
             </div>
           </div>
         </fieldset>
 
-        {/* BUTTONS */}
-        <div style={{ display: "flex", gap: "12px", marginTop: "24px" }}>
-          <button 
-            type="submit" 
-            disabled={saving}
-            style={{
-              flex: 1,
-              padding: "12px",
-              backgroundColor: saving ? "#cbd5e1" : "#0284c7",
-              color: "white",
-              fontWeight: "600",
-              border: "none",
-              borderRadius: "6px",
-              cursor: saving ? "not-allowed" : "pointer",
-              fontSize: "14px"
-            }}
-          >
-            {saving ? "⏳ Đang lưu..." : "💾 LƯU CHỈ SỐ"}
-          </button>
-        </div>
+        <button type="submit" disabled={saving} style={{ padding: "12px", backgroundColor: saving ? "#cbd5e1" : "#0284c7", color: "white", fontWeight: "600", border: "none", borderRadius: "6px", cursor: saving ? "not-allowed" : "pointer" }}>
+          {saving ? "⏳ Đang đồng bộ..." : "💾 LƯU TOÀN BỘ CHỈ SỐ LÊN ĐỒNG BỘ AI"}
+        </button>
       </form>
     </div>
   );
 }
 
-// Styles
-const inputStyle = {
-  width: "100%",
-  padding: "10px",
-  border: "1px solid #cbd5e1",
-  borderRadius: "6px",
-  fontFamily: "inherit",
-  fontSize: "14px",
-  boxSizing: "border-box"
-};
-
-const selectStyle = {
-  ...inputStyle,
-  cursor: "pointer"
-};
+const inputStyle = { width: "100%", padding: "8px", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box", marginTop: "4px" };
+const checkLabel = { display: "flex", alignItems: "center", gap: "8px", margin: "8px 0", cursor: "pointer" };
 ```
 
 ### frontend\src\dang_ky.jsx
@@ -3315,15 +3251,38 @@ export default function MainRiskPage() {
   const [riskResult, setRiskResult] = useState(null);
   const [loading, setLoading] = useState(true);
   const [healthProfile, setHealthProfile] = useState(null);
+  const [profileLoaded, setProfileLoaded] = useState(false);
 
   const tenDangNhap = localStorage.getItem("userName");
 
   useEffect(() => { loadPluginsList(); }, []);
-  useEffect(() => { if (tenDangNhap) fetchHealthProfile(); }, [tenDangNhap]);
-  useEffect(() => { loadPlugin(selectedPlugin); }, [selectedPlugin]);
+
+  useEffect(() => { 
+    if (tenDangNhap) {
+      fetchHealthProfile(); 
+    } else {
+      setProfileLoaded(true);
+    }
+  }, [tenDangNhap]);
+
+  useEffect(() => { 
+    if (profileLoaded) {
+      loadPlugin(selectedPlugin); 
+    }
+  }, [selectedPlugin, profileLoaded, healthProfile]);
 
   useEffect(() => {
     if (!plugin || Object.keys(formData).length === 0) return;
+    
+    const hasMissingRequired = plugin.fields.some(field => {
+      return field.required && (formData[field.key] === undefined || formData[field.key] === "");
+    });
+
+    if (hasMissingRequired) {
+      console.log("⚠️ Kháng tiến trình: Form chưa điền đủ các trường bắt buộc (*). Chờ người dùng nhập...");
+      return;
+    }
+
     const timeout = setTimeout(() => calculateRisk(formData), 800);
     return () => clearTimeout(timeout);
   }, [formData, plugin]);
@@ -3336,6 +3295,8 @@ export default function MainRiskPage() {
       }
     } catch (error) {
       console.error("Lỗi lấy hồ sơ:", error);
+    } finally {
+      setProfileLoaded(true);
     }
   };
 
@@ -3354,7 +3315,6 @@ export default function MainRiskPage() {
       const response = await axios.get(`${API_BASE_URL}/plugins/${pluginName}`);
       const pluginData = response.data;
       setPlugin(pluginData);
-      
       const mergedForm = mergeWithHealthProfile(pluginData.fields);
       setFormData(mergedForm);
       setRiskResult(null);
@@ -3365,43 +3325,52 @@ export default function MainRiskPage() {
     }
   };
 
-  // ==================== MERGE TỐT HƠN ====================
   const mergeWithHealthProfile = (fields) => {
     const initialData = {};
-
-    // Default từ plugin
     fields.forEach((field) => {
       initialData[field.key] = field.default !== undefined ? field.default : "";
     });
 
     if (!healthProfile) return initialData;
 
-    // Force merge tất cả field chung từ Health Profile
     const commonFields = {
       "tuoi": "tuoi",
       "soPhutVanDongMoiTuan": "soPhutVanDongMoiTuan",
       "hutThuoc": "hutThuoc",
+      "uongRuouBia": "uongRuouBia",
+      "mucDoAnMan": "mucDoAnMan",
       "bmi": "bmi",
       "vongEo": "vongEo",
+      "chieuCao": "chieuCao",
+      "canNang": "canNang",
       "huyetApTamThu": "huyetApTamThu",
       "huyetApTamTruong": "huyetApTamTruong",
+      "duongHuyet": "duongHuyet",
+      "hba1c": "hba1c",
+      "cholesterol": "cholesterol",
+      "ldl": "ldl",
+      "hdl": "hdl",
+      "triglyceride": "triglyceride",
+      "creatinine": "creatinine",
+      "acidUric": "acidUric",
       "caoHuyetAp": "caoHuyetAp",
+      "tieuDuong": "tieuDuong",
+      "benhTimMach": "benhTimMach",
+      "gout": "gout",
       "giaDinhCaoHuyetAp": "giaDinhCaoHuyetAp",
       "giaDinhTimMach": "giaDinhTimMach",
-      "tieuDuong": "tieuDuong",
-      "giaDinhTieuDuong": "giaDinhTieuDuong"
+      "giaDinhTieuDuong": "giaDinhTieuDuong",
+      "giaDinhGout": "giaDinhGout"
     };
 
     Object.keys(commonFields).forEach(healthKey => {
       if (healthProfile[healthKey] !== undefined && healthProfile[healthKey] !== null) {
         const formKey = commonFields[healthKey];
-        // Chỉ gán nếu field tồn tại trong form plugin hoặc là field chung
-        if (fields.some(f => f.key === formKey) || ["tuoi", "soPhutVanDongMoiTuan"].includes(formKey)) {
+        if (fields.some(f => f.key === formKey)) {
           initialData[formKey] = healthProfile[healthKey];
         }
       }
     });
-
     return initialData;
   };
 
@@ -3409,26 +3378,6 @@ export default function MainRiskPage() {
     const updated = { ...formData, [field.key]: value };
     setFormData(updated);
     await validateField(field.key, updated);
-
-    const commonFields = ["tuoi", "soPhutVanDongMoiTuan", "hutThuoc", "bmi", "vongEo",
-                         "huyetApTamThu", "huyetApTamTruong", "caoHuyetAp", 
-                         "giaDinhCaoHuyetAp", "giaDinhTimMach", "tieuDuong", "giaDinhTieuDuong"];
-
-    if (commonFields.includes(field.key) && tenDangNhap) {
-      updateHealthProfile({ [field.key]: value });
-    }
-  };
-
-  const updateHealthProfile = async (newData) => {
-    try {
-      await axios.post(`${API_BASE_URL}/health-profile/`, {
-        tenDangNhap: tenDangNhap,
-        ...newData
-      });
-      setHealthProfile(prev => ({ ...prev, ...newData }));
-    } catch (error) {
-      console.error("Cập nhật Health Profile lỗi:", error);
-    }
   };
 
   const validateField = async (fieldKey, currentData) => {
@@ -3447,31 +3396,34 @@ export default function MainRiskPage() {
   };
 
   const calculateRisk = async (currentData) => {
-  try {
-    // ✅ Merge saved health profile vào form data
-    const dataToSend = {
-      ...currentData,
-      ...(healthProfile || {})  // Thêm saved metrics
-    };
- 
-    console.log("Sending to API:", dataToSend);
- 
-    const response = await axios.post(
-      `${API_BASE_URL}/plugins/${selectedPlugin}/score?ten_dang_nhap=${tenDangNhap || ''}`,
-      dataToSend
-    );
-    
-    console.log("Risk result:", response.data);
-    setRiskResult(response.data);
-  } catch (error) {
-    console.error("Calculate risk error:", error);
-    // Optional: Show error to user
-    setRiskResult(null);
-  }
-};
+    try {
+      console.log("Gửi dữ liệu hợp lệ chuẩn Form Plugin lên API:", currentData);
+      const response = await axios.post(
+        `${API_BASE_URL}/plugins/${selectedPlugin}/score?ten_dang_nhap=${tenDangNhap || ''}`,
+        currentData
+      );
+      console.log("Kết quả Dual-Engine trả về:", response.data);
+      setRiskResult(response.data);
+    } catch (error) {
+      console.error("Calculate risk error:", error);
+      setRiskResult(null);
+    }
+  };
 
-  const getRiskColor = (level) => level === 'high' ? '#ef4444' : level === 'medium' ? '#f97316' : '#22c55e';
-  const getRiskLabel = (level) => level === 'high' ? 'CAO ⚠️' : level === 'medium' ? 'TRUNG BÌNH ⚡' : 'THẤP ✓';
+  const getRiskColor = (level) => {
+    const l = String(level).toLowerCase();
+    if (l === 'high' || l === 'rất cao' || l === 'cao') return '#ef4444';
+    if (l === 'medium' || l === 'trung bình') return '#f97316';
+    return '#22c55e';
+  };
+
+  const getRiskLabel = (level) => {
+    const l = String(level).toLowerCase();
+    if (l === 'high' || l === 'rất cao' || l === 'cao') return 'CAO ⚠️';
+    if (l === 'medium' || l === 'trung bình') return 'TRUNG BÌNH ⚡';
+    if (l === 'low' || l === 'thấp') return 'THẤP ✓';
+    return level; 
+  };
 
   if (loading || !plugin) return <div style={{ padding: "40px", textAlign: "center" }}>Đang tải dữ liệu...</div>;
 
@@ -3487,79 +3439,183 @@ export default function MainRiskPage() {
 
       <div style={{ marginBottom: "24px", textAlign: "center" }}>
         <label><strong>Chọn Bệnh: </strong></label>
-        <select value={selectedPlugin} onChange={(e) => setSelectedPlugin(e.target.value)} style={{ padding: "10px", fontSize: "16px" }}>
+        <select value={selectedPlugin} onChange={(e) => setSelectedPlugin(e.target.value)} style={{ padding: "10px", fontSize: "16px", borderRadius: "6px" }}>
           {plugins.map(p => (
             <option key={p} value={p}>
-              {p === "diabetes" ? "🍬 Tiểu đường" : p === "hypertension" ? "🩸 Tăng huyết áp" : p}
+              {p === "diabetes" ? "🍬 Tiểu đường" : p === "hypertension" ? "🩸 Tăng huyết áp" : p === "gout" ? "🦶 Bệnh Gout" : p}
             </option>
           ))}
         </select>
       </div>
 
-      <h2>{disease.name}</h2>
-      <p>{disease.description}</p>
+      <h2 style={{ textAlign: "center", color: "#334155" }}>{disease.name}</h2>
+      <p style={{ textAlign: "center", color: "#64748b", fontStyle: "italic", marginBottom: "30px" }}>{disease.description}</p>
 
-      {/* FORM */}
-      {plugin.fields.map((field) => (
-        <div key={field.key} style={{ marginBottom: "20px" }}>
-          <label style={{ fontWeight: "bold", display: "block", marginBottom: "6px" }}>
-            {field.label}{field.required && <span style={{color: "red"}}>*</span>}
-          </label>
+      {/* KHU VỰC HIỂN THỊ CÁC Ô NHẬP LIỆU ĐỘNG */}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px", background: "white", padding: "30px", borderRadius: "12px", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", maxWidth: "600px", margin: "0 auto" }}>
+        {plugin.fields.map((field) => (
+          <div key={field.key} style={{ width: "100%", display: "flex", flexDirection: "column", gap: "6px" }}>
+            <label style={{ fontWeight: "bold", color: "#475569" }}>
+              {field.label}{field.required && <span style={{color: "red"}}> *</span>}
+            </label>
 
-          {field.type === "number" && (
-            <input 
-              type="number" 
-              value={formData[field.key] ?? ""} 
-              onChange={(e) => handleChange(field, e.target.value === "" ? "" : Number(e.target.value))} 
-              style={{ width: "320px", padding: "10px", border: errors[field.key] ? "2px solid red" : "1px solid #ccc" }} 
-            />
-          )}
+            {field.type === "number" && (
+              <input 
+                type="number" 
+                value={formData[field.key] ?? ""} 
+                onChange={(e) => handleChange(field, e.target.value === "" ? "" : Number(e.target.value))} 
+                style={{ width: "100%", padding: "12px", border: errors[field.key] ? "2px solid red" : "1px solid #cbd5e1", borderRadius: "8px", fontSize: "15px", boxSizing: "border-box" }} 
+              />
+            )}
 
-          {field.type === "select" && (
-            <select 
-              value={formData[field.key] ?? ""} 
-              onChange={(e) => handleChange(field, e.target.value)} 
-              style={{ width: "320px", padding: "10px" }}
-            >
-              <option value="">-- Chọn --</option>
-              {field.options?.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-            </select>
-          )}
+            {field.type === "select" && (
+              <select 
+                value={formData[field.key] ?? ""} 
+                onChange={(e) => handleChange(field, e.target.value)} 
+                style={{ width: "100%", padding: "12px", border: "1px solid #cbd5e1", borderRadius: "8px", fontSize: "15px", boxSizing: "border-box", cursor: "pointer" }}
+              >
+                <option value="">-- Chọn --</option>
+                {field.options?.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            )}
 
-          {field.type === "boolean" && (
-            <input 
-              type="checkbox" 
-              checked={!!formData[field.key]} 
-              onChange={(e) => handleChange(field, e.target.checked)} 
-            />
-          )}
+            {field.type === "boolean" && (
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "4px" }}>
+                <input 
+                  type="checkbox" 
+                  checked={!!formData[field.key]} 
+                  onChange={(e) => handleChange(field, e.target.checked)} 
+                  style={{ width: "20px", height: "20px", cursor: "pointer" }}
+                />
+                <span style={{ color: "#64748b", fontSize: "14px" }}>Kích hoạt yếu tố này</span>
+              </div>
+            )}
 
-          {errors[field.key] && <div style={{color: "red", marginTop: "4px"}}>{errors[field.key]}</div>}
-        </div>
-      ))}
+            {errors[field.key] && <div style={{color: "#ef4444", fontSize: "13px", fontWeight: "500"}}>{errors[field.key]}</div>}
+          </div>
+        ))}
+      </div>
 
-      {/* KẾT QUẢ */}
+      {/* ==================== HIỂN THỊ KẾT QUẢ KÉP DUAL-ENGINE ==================== */}
       {riskResult && (
-        <div style={{ marginTop: "40px", background: "#f8fafc", padding: "24px", borderRadius: "12px" }}>
-          <h2>Kết quả Đánh giá Nguy cơ</h2>
+        <div style={{ marginTop: "40px", background: "#f8fafc", padding: "24px", borderRadius: "12px", border: "1px solid #e2e8f0" }}>
+          <h2 style={{ marginTop: 0, color: "#0f172a" }}>📊 Kết quả Đánh giá Nguy cơ Song song (Dual-Engine)</h2>
           
           <div style={{ display: "flex", gap: "30px", margin: "20px 0" }}>
-            <div style={{ flex: 1, padding: "15px", background: "#f0f9ff", borderRadius: "8px" }}>
-              <h3>📋 Rule-based</h3>
-              <p><strong>Điểm:</strong> {riskResult.rule_based?.score || 0}</p>
-              <p><strong>Mức:</strong> <span style={{color: getRiskColor(riskResult.rule_based?.risk_level)}}>{getRiskLabel(riskResult.rule_based?.risk_level)}</span></p>
+            {/* CỘT 1: HỆ CHUYÊN GIA (RULE-BASED) */}
+            <div style={{ flex: 1, padding: "20px", background: "#f0f9ff", borderRadius: "8px", border: "1px solid #bae6fd" }}>
+              <h3 style={{ marginTop: 0, color: "#0369a1" }}>📋 Rule-based Engine</h3>
+              <p><strong>Điểm số nguy cơ:</strong> {riskResult.rule_based?.score ?? 0} / 100</p>
+              <p><strong>Mức độ đánh giá:</strong> <span style={{ fontWeight: "bold", color: getRiskColor(riskResult.rule_based?.risk_level) }}>{getRiskLabel(riskResult.rule_based?.risk_level)}</span></p>
             </div>
 
-            <div style={{ flex: 1, padding: "15px", background: "#faf5ff", borderRadius: "8px" }}>
-              <h3>🧠 ML Model</h3>
-              <p><strong>Xác suất:</strong> {(riskResult.ml_based?.probability * 100 || 0).toFixed(1)}%</p>
-              <p><strong>Mức:</strong> <span style={{color: getRiskColor(riskResult.ml_based?.risk_level)}}>{getRiskLabel(riskResult.ml_based?.risk_level)}</span></p>
+            {/* CỘT 2: PHÂN CHIA THEO TRẠNG THÁI MÔ HÌNH AI */}
+            <div style={{ flex: 1, padding: "20px", background: "#faf5ff", borderRadius: "8px", border: "1px solid #e9d5ff" }}>
+              <h3 style={{ marginTop: 0, color: "#6b21a8" }}>🧠 Học máy AI Model</h3>
+              
+              {/* TRẠNG THÁI 1: READY */}
+              {riskResult.ai_based?.status === "READY" && (
+                <>
+                  <p><strong>Xác suất mô hình dự đoán:</strong> {(riskResult.ai_based?.probability * 100).toFixed(1)}%</p>
+                  <p><strong>Mức độ đánh giá:</strong> <span style={{ fontWeight: "bold", color: getRiskColor(riskResult.ai_based?.risk_level) }}>{getRiskLabel(riskResult.ai_based?.risk_level)}</span></p>
+                  <div style={{ marginTop: "10px", padding: "8px", background: "#f3e8ff", color: "#6b21a8", borderRadius: "4px", fontSize: "13px", fontWeight: "600" }}>
+                    ✓ Đã đối chiếu chéo thành công với AI!
+                  </div>
+                </>
+              )}
+
+              {/* TRẠNG THÁI 2: PARTIAL */}
+              {riskResult.ai_based?.status === "PARTIAL" && (
+                <>
+                  <p style={{ color: "#b45309", fontWeight: "600", margin: "0 0 10px 0" }}>⚠️ Thiếu dữ liệu phân tích</p>
+                  <p style={{ fontSize: "13px", color: "#6b7280", margin: "0 0 6px 0" }}>Vui lòng bổ sung các chỉ số sau vào form hoặc trang Hồ sơ sức khỏe để kích hoạt AI:</p>
+                  <ul style={{ paddingLeft: "20px", margin: 0, fontSize: "13px", color: "#b45309", fontWeight: "500" }}>
+                    {riskResult.ai_based?.missing_features?.map((item, index) => (
+                      <li key={index}>{item}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+
+              {/* TRẠNG THÁI 3: UNAVAILABLE */}
+              {riskResult.ai_based?.status === "UNAVAILABLE" && (
+                <p style={{ color: "#7c3aed", fontWeight: "500", fontStyle: "italic", marginTop: "15px" }}>
+                  ℹ️ {riskResult.ai_based?.risk_level}
+                </p>
+              )}
             </div>
           </div>
 
-          <p><strong>Điểm cuối cùng:</strong> <strong>{riskResult.final_score}</strong>/100</p>
+          {/* PHẦN KẾT LUẬN TỰ ĐỘNG ĐỒNG BỘ */}
+          <div style={{ marginTop: "20px", padding: "12px", background: "#f1f5f9", borderRadius: "6px" }}>
+            <p style={{ margin: 0, fontSize: "14px" }}>
+              <strong>💡 Cơ chế vận hành:</strong> Kết quả chính thức áp dụng từ Rule-based đạt <strong>{riskResult.rule_based?.score ?? 0} điểm</strong>. 
+              Dữ liệu thô thu thập từ form này đã được tự động tích lũy và cập nhật trực tiếp vào <strong>Hồ sơ sức khỏe cá nhân</strong> của bạn trên hệ thống Cloud.
+            </p>
+          </div>
         </div>
       )}
+    </div>
+  );
+}
+```
+
+### frontend\src\TrangChu.jsx
+```jsx
+// frontend/src/TrangChu.jsx
+import React from "react";
+
+export default function TrangChu({ onGoToLogin }) {
+  return (
+    <div style={{
+      display: "flex",
+      flexDirection: "column",
+      justifyContent: "center",
+      alignItems: "center",
+      minHeight: "100vh",
+      backgroundColor: "#f8fafc",
+      fontFamily: "Segoe UI, Arial, sans-serif",
+      textAlign: "center",
+      padding: "20px"
+    }}>
+      <div style={{
+        background: "white",
+        padding: "40px 60px",
+        borderRadius: "16px",
+        boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
+        maxWidth: "500px",
+        width: "100%"
+      }}>
+        <h1 style={{ color: "#1e293b", fontSize: "36px", marginBottom: "10px", fontWeight: "800" }}>
+          Hello 👋
+        </h1>
+        <h3 style={{ color: "#475569", fontWeight: "500", marginBottom: "24px", lineHeight: "1.5" }}>
+          Chào mừng bạn đến với Hệ thống Đánh giá Nguy cơ Bệnh Mạn tính ứng dụng Trí tuệ nhân tạo (AI & Rule Engine)
+        </h3>
+        <p style={{ color: "#64748b", fontSize: "14px", marginBottom: "32px" }}>
+          Vui lòng đăng nhập tài khoản để quản lý hồ sơ chỉ số sức khỏe cá nhân và nhận các phân tích chuẩn hóa từ mô hình học máy.
+        </p>
+        <button
+          onClick={onGoToLogin}
+          style={{
+            width: "100%",
+            padding: "14px",
+            backgroundColor: "#2563eb",
+            color: "white",
+            border: "none",
+            borderRadius: "8px",
+            fontSize: "16px",
+            fontWeight: "bold",
+            cursor: "pointer",
+            boxShadow: "0 4px 6px -1px rgba(37, 99, 235, 0.2)",
+            transition: "all 0.2s ease-in-out"
+          }}
+          onMouseOver={(e) => e.currentTarget.style.backgroundColor = "#1d4ed8"}
+          onMouseOut={(e) => e.currentTarget.style.backgroundColor = "#2563eb"}
+        >
+          🔑 ĐĂNG NHẬP NGAY
+        </button>
+      </div>
     </div>
   );
 }

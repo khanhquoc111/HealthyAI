@@ -1,8 +1,7 @@
 # backend/app/risk_stratification_engine.py
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import logging
 import os
-import re
 import pandas as pd
 import joblib
 
@@ -13,48 +12,13 @@ except ImportError:
     from explanation_engine import ExplanationEngine
     from condition_evaluator import ConditionEvaluator
 
-from database.database import SessionLocal
-from database.nguoi_dung import NguoiDung
-from database.cs_suc_khoe import CsSucKhoe
-
-DEBUG_MODE = os.environ.get("DEBUG_CONDITION_EVAL", "").lower() in ("1", "true", "yes")
 logger = logging.getLogger(__name__)
-
-FEATURE_COLS = [
-    "age", "gender_code", "bmi", "waist", "systolic", "diastolic", "hypertension",
-    "fasting_glucose", "hba1c", "total_cholesterol", "ldl", "creatinine",
-    "smoke", "exercise", "alcohol", "sodium_intake",
-    "family_hypertension", "family_cardiovascular",
-]
-
-DEFAULT_FEATURES = {
-    "age": 45.0, "gender_code": 1.0, "bmi": 24.0, "waist": 85.0,
-    "systolic": 120.0, "diastolic": 80.0, "hypertension": 0.0,
-    "fasting_glucose": 92.0, "hba1c": 5.4, "total_cholesterol": 180.0,
-    "ldl": 100.0, "creatinine": 0.9, "smoke": 0.0, "exercise": 1.0,
-    "alcohol": 0.0, "sodium_intake": 3200.0,
-    "family_hypertension": 0.0, "family_cardiovascular": 0.0,
-}
-
-COMMON_FIELD_MAPPING = {
-    "tuoi": "age",
-    "bmi": "bmi",
-    "vongEo": "waist",
-    "huyetApTamThu": "systolic",
-    "huyetApTamTruong": "diastolic",
-    "hutThuoc": "smoke",
-    "giaDinhCaoHuyetAp": "family_hypertension",
-    "giaDinhTimMach": "family_cardiovascular",
-    "caoHuyetAp": "hypertension",
-    "tieuDuong": "hypertension",
-    "giaDinhTieuDuong": "family_cardiovascular",
-}
-
 
 class RiskStratificationEngine:
     def __init__(self, plugin_metadata: Dict[str, Any]):
         self.metadata = plugin_metadata
         self.risk_config = plugin_metadata.get("risk_config", {})
+        self.ml_required_features = plugin_metadata.get("ml_required_features", [])
         
         self.baseline_mapping = self.risk_config.get("baseline_mapping", [])
         self.risk_modifiers = self.risk_config.get("risk_modifiers", [])
@@ -77,130 +41,119 @@ class RiskStratificationEngine:
         except Exception as e:
             print(f"⚠️ Failed to load ML model: {e}")
 
-    def _merge_with_health_profile(self, form_data: Dict, health_profile: Dict = None) -> Dict:
-        merged = form_data.copy()
-        health_profile = health_profile or {}
-
-        # Merge fields từ Health Profile
-        for db_key, ml_key in COMMON_FIELD_MAPPING.items():
-            if db_key in health_profile and ml_key and ml_key not in merged:
-                merged[ml_key] = health_profile[db_key]
-
-        # Convert special fields
-        merged = self._convert_special_fields(merged)
-
-        # Fill defaults cho đủ 18 features
-        for col in FEATURE_COLS:
-            if col not in merged or merged[col] is None:
-                merged[col] = DEFAULT_FEATURES.get(col, 0.0)
-
-        return merged
-
-    def _convert_special_fields(self, data: Dict) -> Dict:
-        """Convert string sang numeric cho ML"""
-        converted = data.copy()
+    def _convert_to_ml_format(self, unified_data: Dict) -> Dict:
+        """Chuyển đổi dữ liệu thô (tiếng Việt/tiếng Anh) sang định dạng thuộc tính ML định kiểu số"""
+        ml_data = {}
         
-        # hutThuoc -> smoke
-        if "hutThuoc" in converted:
-            val = str(converted.get("hutThuoc", "")).strip().lower()
-            converted["smoke"] = 1.0 if val in ["đang hút", "current", "yes", "1"] else 0.0
+        # Mapping từ form DB/tiếng Việt sang thuộc tính tiếng Anh của ML
+        mapping = {
+            "tuoi": "age", "bmi": "bmi", "vongEo": "waist",
+            "huyetApTamThu": "systolic", "huyetApTamTruong": "diastolic",
+            "duongHuyet": "fasting_glucose", "hba1c": "hba1c",
+            "cholesterol": "total_cholesterol", "ldl": "ldl", "creatinine": "creatinine",
+            "caoHuyetAp": "hypertension", "tieuDuong": "hypertension"
+        }
+        
+        for src_key, target_key in mapping.items():
+            if src_key in unified_data and unified_data[src_key] not in [None, ""]:
+                ml_data[target_key] = unified_data[src_key]
 
-        # soPhutVanDongMoiTuan -> exercise (1 nếu >= 150 phút)
-        if "soPhutVanDongMoiTuan" in converted:
-            try:
-                mins = float(converted["soPhutVanDongMoiTuan"])
-                converted["exercise"] = 1.0 if mins >= 150 else 0.0
-            except:
-                converted["exercise"] = 0.0
+        # Giữ nguyên nếu có sẵn key tiếng Anh hợp lệ
+        for col in self.ml_required_features:
+            if col in unified_data and unified_data[col] not in [None, ""]:
+                ml_data[col] = unified_data[col]
 
-        # Boolean fields
-        for field in ["caoHuyetAp", "tieuDuong", "giaDinhCaoHuyetAp", "giaDinhTimMach", "giaDinhTieuDuong"]:
-            if field in converted:
-                val = converted[field]
-                if isinstance(val, bool):
-                    converted[field] = 1.0 if val else 0.0
-                elif isinstance(val, str):
-                    converted[field] = 1.0 if val.lower() in ["true", "yes", "1"] else 0.0
-                else:
-                    converted[field] = float(val) if val else 0.0
-
-        return converted
-
-    def _predict_with_ml(self, form_data: Dict) -> Dict:
-        if not self.ml_model:
-            return {"probability": 0.0, "score": 0.0, "risk_level": "low", "confidence": 0.0}
-
-        try:
-            input_dict = {}
-            for col in FEATURE_COLS:
-                val = form_data.get(col)
-                try:
-                    input_dict[col] = float(val) if val is not None else DEFAULT_FEATURES.get(col, 0.0)
-                except (ValueError, TypeError):
-                    input_dict[col] = DEFAULT_FEATURES.get(col, 0.0)
-
-            df_input = pd.DataFrame([input_dict])
-            proba = self.ml_model.predict_proba(df_input)[0, 1]
-            score = round(proba * 100, 2)
+        # Chuẩn hóa các trường thói quen & phân loại
+        if "gioiTinh" in unified_data:
+            ml_data["gender_code"] = 1.0 if unified_data["gioiTinh"] == "Nam" else 2.0
             
-            return {
-                "probability": round(proba, 4),
-                "score": score,
-                "risk_level": "high" if score >= 60 else "medium" if score >= 30 else "low",
-                "confidence": 80
-            }
-        except Exception as e:
-            print(f"ML Error: {e}")
-            return {"probability": 0.0, "score": 0.0, "risk_level": "low", "confidence": 0.0}
+        if "hutThuoc" in unified_data:
+            ml_data["smoke"] = 1.0 if str(unified_data["hutThuoc"]).strip().lower() in ["đang hút", "yes", "1"] else 0.0
 
-    def calculate_risk(self, form_data: Dict[str, Any], health_profile: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Pipeline tính toán nguy cơ hoàn chỉnh - Đánh giá Kép (Dual-Engine)
+        if "soPhutVanDongMoiTuan" in unified_data:
+            try:
+                ml_data["exercise"] = 1.0 if float(unified_data["soPhutVanDongMoiTuan"]) >= 150 else 0.0
+            except:
+                ml_data["exercise"] = 0.0
+
+        # Ép kiểu dữ liệu về số thực (Float)
+        final_ml = {}
+        for k, v in ml_data.items():
+            if v is True: final_ml[k] = 1.0
+            elif v is False: final_ml[k] = 0.0
+            else:
+                try: final_ml[k] = float(v)
+                except (ValueError, TypeError): continue
+                
+        return final_ml
+
+    def calculate_risk(self, unified_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Luồng tính toán mới xử lý phân tầng trạng thái ML"""
         
-        Auto fetch health profile từ user để augment dữ liệu cho ML model
-        - Form data: từ JSON của doctor (có thể thiếu dữ liệu)
-        - Health profile: dữ liệu cá nhân đã lưu (đầy đủ 18 chỉ số)
-        - Merged data: form_data + health_profile (ưu tiên form_data)
-        """
-        # Step 1: Merge với health profile để đủ 18 features cho ML
-        enriched_data = self._merge_with_health_profile(form_data, health_profile or {})
+        # 1. TÍNH ĐIỂM CHUYÊN GIA (RULE-BASED ENGINE)
+        baseline_score = self._calculate_baseline_risk(unified_data)
+        modified_score = self._apply_risk_modifiers(baseline_score, unified_data)
+        protected_score = self._apply_protective_factors(modified_score, unified_data)
+        rule_score = self._apply_interactions(protected_score, unified_data)
         
-        # 1. ĐÁNH GIÁ TỪ CHUYÊN GIA (RULE-BASED)
-        baseline_score = self._calculate_baseline_risk(enriched_data)
-        modified_score = self._apply_risk_modifiers(baseline_score, enriched_data)
-        protected_score = self._apply_protective_factors(modified_score, enriched_data)
-        rule_score = self._apply_interactions(protected_score, enriched_data)
-        
-        # [SỬA Ở ĐÂY] Ép kiểu float() gốc của Python để tránh lỗi JSON
         rule_score = float(min(round(rule_score, 2), 100))
         rule_risk_level = self._stratify_risk_level(rule_score)
 
-        # 2. ĐÁNH GIÁ TỪ AI (MACHINE LEARNING)
-        if self.ml_model:
-            ml_result = self._predict_with_ml(enriched_data)
+        # 2. XÁC THỰC TRẠNG THÁI MÔ HÌNH HỌC MÁY (ML ENGINE)
+        ai_status = "UNAVAILABLE"
+        ai_score = 0.0
+        ai_risk_level = "N/A"
+        ai_proba = 0.0
+        ai_confidence = 0
+        missing_fields = []
+
+        # Nghịch đảo mapping để hiển thị lỗi thân thiện
+        inverse_mapping = {
+            "age": "Tuổi", "bmi": "Chỉ số BMI", "waist": "Vòng eo",
+            "systolic": "Huyết áp tâm thu", "diastolic": "Huyết áp tâm trương",
+            "fasting_glucose": "Đường huyết đói", "hba1c": "Chỉ số HbA1c",
+            "total_cholesterol": "Cholesterol toàn phần", "ldl": "Chỉ số LDL",
+            "creatinine": "Chỉ số Creatinine máu", "smoke": "Tình trạng hút thuốc",
+            "exercise": "Thời gian vận động thể chất",
+            "gender_code": "Giới tính"
+        }
+
+        if self.ml_model and self.ml_required_features:
+            ml_ready_features = self._convert_to_ml_format(unified_data)
             
-            # ml_result là dict: {"probability": 0.42, "score": 42, "risk_level": "low", "confidence": 80}
-            ai_score = float(ml_result.get("score", 0.0))
-            ai_risk_level = ml_result.get("risk_level", "low")
-            has_ai = True
-            ai_confidence = ml_result.get("confidence", 0)
+            # Kiểm đếm các feature bị thiếu
+            for feature in self.ml_required_features:
+                if feature not in ml_ready_features:
+                    missing_fields.append(inverse_mapping.get(feature, feature))
+
+            if len(missing_fields) == 0:
+                ai_status = "READY"
+                try:
+                    df_input = pd.DataFrame([{col: ml_ready_features[col] for col in self.ml_required_features}])
+                    proba = self.ml_model.predict_proba(df_input)[0, 1]
+                    ai_score = round(proba * 100, 2)
+                    ai_proba = round(proba, 4)
+                    ai_confidence = 85
+                    ai_risk_level = "high" if ai_score >= 60 else "medium" if ai_score >= 30 else "low"
+                except Exception as e:
+                    ai_status = "PARTIAL"
+                    ai_risk_level = f"Lỗi thực thi mô hình AI: {str(e)}"
+            else:
+                ai_status = "PARTIAL"
+                ai_risk_level = "Thiếu dữ liệu để thực hiện đánh giá bằng AI"
         else:
-            ai_score = 0.0
-            ai_risk_level = "Chưa có dữ liệu để xác minh"
-            has_ai = False
-            ai_confidence = 0
+            ai_risk_level = "Chưa có mô hình trí tuệ nhân tạo được huấn luyện cho bệnh này"
 
-        all_matched_rules = self._get_matched_rules(enriched_data)
+        all_matched_rules = self._get_matched_rules(unified_data)
 
-        # Giải thích kết quả
         explanation_engine = ExplanationEngine(self.metadata)
         explanation = explanation_engine.generate_explanation({
             "matched_rules": all_matched_rules,
             "risk_level": rule_risk_level,
             "final_score": rule_score,
-            "form_data": enriched_data
+            "form_data": unified_data
         })
 
-        # TRẢ VỀ CẤU TRÚC KÉP RÕ RÀNG
         return {
             "rule_based": {
                 "score": rule_score,
@@ -208,16 +161,19 @@ class RiskStratificationEngine:
                 "matched_rules": all_matched_rules
             },
             "ai_based": {
-                "model_available": has_ai,
+                "status": ai_status,
                 "score": ai_score,
                 "risk_level": ai_risk_level,
-                "confidence": ai_confidence if has_ai else 0
+                "probability": ai_proba,
+                "confidence": ai_confidence,
+                "missing_features": missing_fields
             },
+            "final_score": rule_score,
             "matched_rules": all_matched_rules,
             **explanation
         }
 
-    # ==================== CÁC HÀM CŨ ====================
+    # CÁC HÀM XỬ LÝ RULE-BASED GIỮ NGUYÊN BÊN DƯỚI
     def _calculate_baseline_risk(self, form_data):
         matching_stages = [stage for stage in self.baseline_mapping if ConditionEvaluator.evaluate(stage.get("condition"), form_data)]
         if not matching_stages:

@@ -51,7 +51,6 @@ class ExplanationTemplate(BaseModel):
 class ConditionSchema(BaseModel):
     """
     Atomic or composite condition schema.
-    
     Atomic: {"field": "age", "op": "gte", "value": 45}
     Composite AND: {"all": [cond1, cond2]}
     Composite OR: {"any": [cond1, cond2]}
@@ -110,18 +109,11 @@ class BaselineStage(BaseModel):
 class InteractionRule(BaseModel):
     """
     Interaction rule with flexible condition support.
-    
-    Backward compatible with existing metadata:
-    - Old format: conditions: [cond1, cond2] (AND logic)
-    - New format: condition: {...} (supports all/any/not_all/not_any)
-    
-    Both formats are supported and work identically.
     """
     id: str
     interaction_multiplier: float = 1.0
     description: Optional[str] = None
     
-    # Support both formats for backward compatibility
     conditions: Optional[List[ConditionSchema]] = None
     condition: Optional[ConditionSchema] = None
     
@@ -159,3 +151,6 @@ class DiseaseSchema(BaseModel):
     explanation_templates: List[ExplanationTemplate] = Field(default_factory=list)
     risk_levels: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     display_config: Optional[Dict] = Field(default_factory=dict)
+    
+    # Kích hoạt tính năng State Pattern cho ML Engine
+    ml_required_features: List[str] = Field(default_factory=list)
