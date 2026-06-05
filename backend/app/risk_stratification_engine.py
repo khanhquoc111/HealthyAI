@@ -51,7 +51,7 @@ class RiskStratificationEngine:
             "huyetApTamThu": "systolic", "huyetApTamTruong": "diastolic",
             "duongHuyet": "fasting_glucose", "hba1c": "hba1c",
             "cholesterol": "total_cholesterol", "ldl": "ldl", "creatinine": "creatinine",
-            "caoHuyetAp": "hypertension", "tieuDuong": "hypertension"
+            "caoHuyetAp": "hypertension", "tieuDuong": "diabetes"
         }
         
         for src_key, target_key in mapping.items():

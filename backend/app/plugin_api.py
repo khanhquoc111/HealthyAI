@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import Dict, Any
 
-from fastapi import APIRouter, HTTPException, Query, Depends 
+from fastapi import APIRouter, Body, HTTPException, Query, Depends 
 from sqlalchemy.orm import Session 
 
 from app.plugin_loader import PluginLoader
@@ -95,7 +95,7 @@ def get_plugin_all_fields(plugin_name: str):
 @router.post("/plugins/{plugin_name}/score")
 def score_plugin_form(
     plugin_name: str, 
-    form_data: dict,
+    form_data: dict = Body(...),
     ten_dang_nhap: str = Query(None), 
     db: Session = Depends(get_db)   
 ):
@@ -106,10 +106,11 @@ def score_plugin_form(
             "huyetApTamThu": "systolic", "huyetApTamTruong": "diastolic",
             "duongHuyet": "fasting_glucose", "hba1c": "hba1c",
             "cholesterol": "total_cholesterol", "ldl": "ldl", "hdl": "hdl",
-            "creatinine": "creatinine", "soPhutVanDongMoiTuan": "exercise_minutes_per_week",
-            "giaDinhTieuDuong": "family_history_diabetes",
-            "giaDinhCaoHuyetAp": "family_history_hypertension",
-            "giaDinhTimMach": "family_history_cardiovascular"
+            "creatinine": "creatinine", "soPhutVanDongMoiTuan": "exercise",
+            "giaDinhTieuDuong": "family_diabetes",
+            "giaDinhCaoHuyetAp": "family_hypertension",
+            "giaDinhTimMach": "family_cardiovascular",
+            "gioiTinh": "gender_code",
         }
         form_to_db = {v: k for k, v in db_to_form.items()} # Map ngược lại
 
@@ -132,6 +133,25 @@ def score_plugin_form(
                                 if v == "Đang hút": health_profile_dict["smoking_status"] = "current"
                                 elif v == "Đã bỏ": health_profile_dict["smoking_status"] = "former"
                                 elif v == "Không": health_profile_dict["smoking_status"] = "never"
+                    if "gioiTinh" in health_profile_dict:
+                        gt = health_profile_dict["gioiTinh"]
+                        health_profile_dict["gender_code"] = 1.0 if gt in ("Nam", "1", 1) else 2.0
+                    # Thêm mới — chuyển soPhutVanDong → exercise boolean
+                    if "soPhutVanDongMoiTuan" in health_profile_dict:
+                        try:
+                            health_profile_dict["exercise"] = 1.0 if float(health_profile_dict["soPhutVanDongMoiTuan"]) >= 150 else 0.0
+                        except:
+                            health_profile_dict["exercise"] = 0.0
+
+                    # Thêm mới — chuyển uongRuouBia → alcohol số
+                    if "uongRuouBia" in health_profile_dict and "alcohol" not in health_profile_dict:
+                        mapping_ruou = {"Không": 0, "Thỉnh thoảng": 1, "Thường xuyên": 3, "Nhiều": 5}
+                        health_profile_dict["alcohol"] = mapping_ruou.get(health_profile_dict["uongRuouBia"], 0)
+
+                    # Thêm mới — chuyển mucDoAnMan → sodium_intake số
+                    if "mucDoAnMan" in health_profile_dict and "sodium_intake" not in health_profile_dict:
+                        mapping_muoi = {"Nhạt": 1200, "Vừa": 2000, "Mặn": 3500}
+                        health_profile_dict["sodium_intake"] = mapping_muoi.get(health_profile_dict["mucDoAnMan"], 2000)
 
         # Tạo payload hợp nhất (Ưu tiên form hiện tại hơn DB)
         unified_payload = {**health_profile_dict, **form_data}
@@ -149,7 +169,8 @@ def score_plugin_form(
                 }
             )
 
-        normalized_data = validation_engine.normalize_form_data(unified_payload)
+        normalized_plugin = validation_engine.normalize_form_data(unified_payload)
+        normalized_data = {**unified_payload, **normalized_plugin}
 
         # 3. CALCULATE RISK KÉP DUAL-ENGINE 
         scoring_engine = get_scoring_engine(plugin_name)

@@ -115,5 +115,11 @@
       "action_type": "lifestyle"
     }
   ],
-  "cross_validations": []
+  "cross_validations": [],
+  "ml_required_features": [
+    "age", "gender_code", "bmi", "waist", "systolic", "diastolic",
+    "hypertension", "fasting_glucose", "hba1c", "total_cholesterol",
+    "ldl", "creatinine", "smoke", "exercise", "alcohol",
+    "sodium_intake", "family_hypertension", "family_cardiovascular"
+  ]
 }

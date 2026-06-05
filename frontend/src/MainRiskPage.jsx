@@ -172,6 +172,8 @@ export default function MainRiskPage() {
         `${API_BASE_URL}/plugins/${selectedPlugin}/score?ten_dang_nhap=${tenDangNhap || ''}`,
         cleanData
       );
+      console.log("tenDangNhap:", tenDangNhap);
+      console.log("cleanData:", cleanData);
       
       console.log("Kết quả trả về:", response.data);
       setRiskResult(response.data);

@@ -42,7 +42,11 @@ def register(user: UserRegisterSchema, db: Session = Depends(get_db)):
         )
     
     # 2. Mã hóa mật khẩu
-    hashed_password = pwd_context.hash(user.password)
+    safe_password = user.password
+    if len(safe_password.encode('utf-8')) > 72:
+        safe_password = safe_password[:72] # Cắt ngắn thủ công theo đúng khuyến nghị của Bcrypt
+        
+    hashed_password = pwd_context.hash(safe_password)
     
     # 3. Tạo record mới
     new_user = NguoiDung(
