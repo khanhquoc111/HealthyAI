@@ -818,9 +818,9 @@ def score_plugin_form(
             "duongHuyet": "fasting_glucose", "hba1c": "hba1c",
             "cholesterol": "total_cholesterol", "ldl": "ldl", "hdl": "hdl",
             "creatinine": "creatinine", "soPhutVanDongMoiTuan": "exercise",
-            "giaDinhTieuDuong": "family_history_diabetes",
-            "giaDinhCaoHuyetAp": "family_history_hypertension",
-            "giaDinhTimMach": "family_history_cardiovascular",
+            "giaDinhTieuDuong": "family_diabetes",
+            "giaDinhCaoHuyetAp": "family_hypertension",
+            "giaDinhTimMach": "family_cardiovascular",
             "gioiTinh": "gender_code",
         }
         form_to_db = {v: k for k, v in db_to_form.items()} # Map ngược lại
@@ -880,7 +880,8 @@ def score_plugin_form(
                 }
             )
 
-        normalized_data = validation_engine.normalize_form_data(unified_payload)
+        normalized_plugin = validation_engine.normalize_form_data(unified_payload)
+        normalized_data = {**unified_payload, **normalized_plugin}
 
         # 3. CALCULATE RISK KÉP DUAL-ENGINE 
         scoring_engine = get_scoring_engine(plugin_name)
@@ -3510,6 +3511,8 @@ export default function MainRiskPage() {
         `${API_BASE_URL}/plugins/${selectedPlugin}/score?ten_dang_nhap=${tenDangNhap || ''}`,
         cleanData
       );
+      console.log("tenDangNhap:", tenDangNhap);
+      console.log("cleanData:", cleanData);
       
       console.log("Kết quả trả về:", response.data);
       setRiskResult(response.data);

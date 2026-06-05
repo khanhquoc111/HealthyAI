@@ -6,9 +6,7 @@ const API_BASE_URL = "http://127.0.0.1:8000";
 
 export default function ChiSoSucKhoe() {
   const [formData, setFormData] = useState({
-    tuoi: "", gioiTinh: "Nam", chieuCao: "", canNang: "", bmi: "", vongEo: "",
-    huyetApTamThu: "", huyetApTamTruong: "",
-    // Nhóm Sinh hóa bổ sung đồng bộ DB
+    tuoi: "", gioiTinh: "Nam", chieuCao: "", canNang: "", bmi: "", vongEo: "", huyetApTamThu: "", huyetApTamTruong: "",
     duongHuyet: "", hba1c: "", cholesterol: "", ldl: "", hdl: "", triglyceride: "", creatinine: "", acidUric: "",
     hutThuoc: "Không", uongRuouBia: "Không", soPhutVanDongMoiTuan: "", mucDoAnMan: "Vừa",
     caoHuyetAp: false, tieuDuong: false, benhTimMach: false, gout: false,
@@ -18,202 +16,216 @@ export default function ChiSoSucKhoe() {
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [completionRate, setCompletionRate] = useState(0);
+  const [missingFields, setMissingFields] = useState([]);
+  const [activeAccordion, setActiveAccordion] = useState(1); 
+  
   const tenDangNhap = localStorage.getItem("userName");
 
   useEffect(() => {
-    const nonEmptyFields = Object.values(formData).filter(v => 
-      v !== "" && v !== false && v !== null && v !== undefined
-    ).length;
-    const rate = Math.round((nonEmptyFields / Object.keys(formData).length) * 100);
-    setCompletionRate(rate);
+    const importantFields = { 
+      'bmi': 'Thể chất', 'huyetApTamThu': 'Huyết áp', 'duongHuyet': 'Đường huyết', 
+      'cholesterol': 'Cholesterol toàn phần', 'ldl': 'Chỉ số LDL', 'creatinine': 'Creatinine' 
+    };
+    let filled = 0;
+    let missing = [];
+    Object.keys(importantFields).forEach(key => {
+      if (formData[key] !== "" && formData[key] !== null) filled++;
+      else missing.push(importantFields[key]);
+    });
+    setCompletionRate(Math.round((filled / Object.keys(importantFields).length) * 100));
+    setMissingFields(missing.slice(0, 3));
   }, [formData]);
 
-  useEffect(() => {
-    if (tenDangNhap) fetchHealthProfile();
-  }, [tenDangNhap]);
-
+  useEffect(() => { if (tenDangNhap) fetchHealthProfile(); }, [tenDangNhap]);
   useEffect(() => {
     if (formData.chieuCao && formData.canNang) {
       const heightInM = formData.chieuCao / 100;
-      const bmiValue = (formData.canNang / (heightInM * heightInM)).toFixed(1);
-      setFormData((prev) => ({ ...prev, bmi: bmiValue }));
+      setFormData(prev => ({ ...prev, bmi: (formData.canNang / (heightInM * heightInM)).toFixed(1) }));
     }
   }, [formData.chieuCao, formData.canNang]);
 
   const fetchHealthProfile = async () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/health-profile/${tenDangNhap}`);
-      if (res.data.data) {
-        setFormData((prev) => ({ ...prev, ...res.data.data }));
-      }
-    } catch (error) {
-      console.error("Lỗi tải dữ liệu", error);
-    }
+      if (res.data.data) setFormData(prev => ({ ...prev, ...res.data.data }));
+    } catch (error) { console.error(error); }
   };
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
-    const newValue = type === "checkbox" ? checked : value;
-    
-    setFormData((prev) => ({ ...prev, [name]: newValue }));
-    if (tenDangNhap) autoSaveField(name, newValue);
+    setFormData(prev => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
   };
 
-  const autoSaveField = async (fieldName, fieldValue) => {
-    try {
-      // Ép kiểu chuẩn để không bị lỗi 422 (Unprocessable Entity) từ Pydantic FastAPI
-      let payloadValue = fieldValue;
-      const numericFields = [
-        "tuoi", "chieuCao", "canNang", "bmi", "vongEo", "huyetApTamThu", "huyetApTamTruong",
-        "duongHuyet", "hba1c", "cholesterol", "ldl", "hdl", "triglyceride", "creatinine", "acidUric", "soPhutVanDongMoiTuan"
-      ];
-      
-      // Nếu trường đang nhập là số: rỗng thì gán null, có số thì ép sang Number
-      if (numericFields.includes(fieldName)) {
-        payloadValue = (fieldValue === "" || fieldValue === null) ? null : Number(fieldValue);
-      }
-
-      await axios.post(`${API_BASE_URL}/health-profile/`, {
-        tenDangNhap: tenDangNhap,
-        [fieldName]: payloadValue
-      });
-    } catch (error) {
-      console.error(`Auto-save lỗi cho field ${fieldName}:`, error);
-    }
+  const toggleCheckbox = (name) => {
+    setFormData(prev => ({ ...prev, [name]: !prev[name] }));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!tenDangNhap) {
-      setMessage("⚠️ Vui lòng đăng nhập trước!");
-      return;
-    }
-
+    if (!tenDangNhap) return setMessage("⚠️ Vui lòng đăng nhập trước!");
     try {
       setSaving(true);
-      const payload = { tenDangNhap };
-      
-      // Chuyển đổi định dạng số cho các chỉ số quan trọng
-      const numericFields = [
-        "tuoi", "chieuCao", "canNang", "bmi", "vongEo", "huyetApTamThu", "huyetApTamTruong",
-        "duongHuyet", "hba1c", "cholesterol", "ldl", "hdl", "triglyceride", "creatinine", "acidUric", "soPhutVanDongMoiTuan"
-      ];
-      
-      Object.keys(formData).forEach(key => {
-        if (numericFields.includes(key)) {
-          payload[key] = formData[key] ? Number(formData[key]) : null;
-        } else {
-          payload[key] = formData[key];
-        }
-      });
-
+      const payload = { tenDangNhap, ...formData };
+      const numericFields = ["tuoi", "chieuCao", "canNang", "bmi", "vongEo", "huyetApTamThu", "huyetApTamTruong", "duongHuyet", "hba1c", "cholesterol", "ldl", "hdl", "triglyceride", "creatinine", "acidUric", "soPhutVanDongMoiTuan"];
+      numericFields.forEach(k => { payload[k] = formData[k] ? Number(formData[k]) : null; });
       await axios.post(`${API_BASE_URL}/health-profile/`, payload);
-      setMessage("✅ Lưu dữ liệu hồ sơ sức khỏe thành công!");
+      setMessage("✅ Lưu dữ liệu chỉ số thành công!");
       setTimeout(() => setMessage(""), 3000);
-    } catch (error) {
-      setMessage("❌ Lỗi khi lưu dữ liệu!");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const BMI_CATEGORY = (bmi) => {
-    const b = Number(bmi);
-    if (isNaN(b) || b === 0) return "-";
-    if (b < 18.5) return "Gầy";
-    if (b < 25) return "Bình thường";
-    if (b < 30) return "Thừa cân";
-    return "Béo phì";
+    } catch (error) { setMessage("❌ Lỗi khi lưu dữ liệu!"); } 
+    finally { setSaving(false); }
   };
 
   return (
-    <div style={{ maxWidth: "750px", margin: "0 auto", padding: "20px", fontFamily: "Segoe UI, sans-serif" }}>
-      <h2 style={{ color: "#1e293b", marginTop: 0 }}>📋 Đồng Bộ Chỉ Số Sức Khỏe Cá Nhân</h2>
-      <p style={{ color: "#64748b" }}><i>👤 Tài khoản: <strong>{tenDangNhap || "Chưa đăng nhập"}</strong></i></p>
+    <div style={{ width: "100%", maxWidth: "900px", margin: "0 auto" }}>
+      {/* CSS CẤU HÌNH HIỆU ỨNG ACCORDION CUỘN VÀ ĐỔI MÀU CHỮ CHUẨN */}
+      <style>{`
+        .custom-input { 
+          background-color: #FFFFFF !important; 
+          color: #1E293B !important; 
+          border: 1px solid #D1D5DB; 
+          border-radius: 8px; 
+          padding: 12px; 
+          width: 100%; 
+          box-sizing: border-box; 
+          transition: all 0.2s; 
+          font-size: 15px;
+        }
+        .custom-input:focus { outline: none; border-color: #2563EB; box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+        select.custom-input option { color: #1E293B !important; background-color: #FFFFFF !important; }
+        
+        .acc-header { padding: 20px 24px; background: white; border: 1px solid #E2E8F0; border-radius: 12px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 16px; margin-bottom: 12px; transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+        .acc-header:hover { border-color: #2563EB; background-color: #F8FAFC; }
+        .acc-header.active { border-color: #2563EB; border-bottom-left-radius: 0; border-bottom-right-radius: 0; margin-bottom: 0; }
+        
+        /* HIỆU ỨNG CHUYỂN ĐỘNG ACCORDION MƯỢT MÀ KHÔNG CỨNG NHẮC */
+        .acc-wrapper {
+          max-height: 0;
+          opacity: 0;
+          overflow: hidden;
+          transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease-in-out, padding 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+          padding: 0 24px;
+          border: 1px solid transparent;
+          margin-bottom: 12px;
+          border-radius: 0 0 12px 12px;
+        }
+        .acc-wrapper.open {
+          max-height: 800px; /* Chiều cao tối đa ước tính để tạo hiệu ứng trượt */
+          opacity: 1;
+          padding: 24px;
+          border-color: #E2E8F0;
+          border-top: none;
+        }
 
-      {/* THANH TIẾN TRÌNH HỒ SƠ */}
-      <div style={{ marginBottom: "24px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
-          <span style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>Mức độ điền đầy đủ dữ liệu AI</span>
-          <span style={{ fontSize: "12px", fontWeight: "bold", color: completionRate > 70 ? '#22c55e' : '#f97316' }}>{completionRate}%</span>
+        .tag-btn { padding: 10px 20px; border-radius: 20px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s; user-select: none; border: 1px solid #D1D5DB; background: white; color: #475569; }
+        .tag-btn:hover { border-color: #2563EB; color: #2563EB; }
+        .tag-btn.active { background: #DBEAFE; border-color: #2563EB; color: #1E3A8A; box-shadow: 0 2px 4px rgba(37,99,235,0.1); }
+      `}</style>
+
+      {/* TIẾN TRÌNH HỒ SƠ */}
+      <div style={{ background: "white", padding: "24px", borderRadius: "16px", border: "1px solid #E2E8F0", marginBottom: "32px" }}>
+        <div style={{ display: "flex", justifycontent: "space-between", justifyContent: "space-between", marginBottom: "12px" }}>
+          <span style={{ fontWeight: "700", color: "#334155" }}>Độ hoàn thiện dữ liệu lâm sàng</span>
+          <span style={{ fontWeight: "bold", color: completionRate === 100 ? '#22C55E' : '#2563EB' }}>{completionRate}%</span>
         </div>
-        <div style={{ width: "100%", height: "8px", backgroundColor: "#e2e8f0", borderRadius: "4px", overflow: "hidden" }}>
-          <div style={{ height: "100%", width: `${completionRate}%`, backgroundColor: completionRate > 70 ? '#22c55e' : '#f97316', transition: "width 0.3s" }} />
+        <div style={{ width: "100%", height: "10px", backgroundColor: "#F1F5F9", borderRadius: "5px", overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${completionRate}%`, backgroundColor: completionRate === 100 ? '#22C55E' : '#2563EB', transition: "width 0.5s ease" }} />
         </div>
+        {missingFields.length > 0 && (
+          <div style={{ marginTop: "12px", fontSize: "14px", color: "#64748B" }}>
+            Trường AI đề xuất thêm: <span style={{ color: "#F59E0B", fontWeight: "600" }}>{missingFields.join(", ")}</span>
+          </div>
+        )}
       </div>
 
-      {message && <div style={{ padding: "12px", marginBottom: "16px", borderRadius: "6px", backgroundColor: message.includes("✅") ? "#dcfce7" : "#fee2e2", color: message.includes("✅") ? "#166534" : "#991b1b" }}>{message}</div>}
+      {message && <div style={{ padding: "16px", marginBottom: "24px", borderRadius: "8px", backgroundColor: message.includes("✅") ? "#DCFCE7" : "#FEF2F2", color: message.includes("✅") ? "#166534" : "#991B1B", fontWeight: "600" }}>{message}</div>}
 
-      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+      <form onSubmit={handleSubmit}>
         {/* KHỐI 1 */}
-        <fieldset style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", backgroundColor: "#f8fafc" }}>
-          <legend style={{ fontWeight: "bold", color: "#0f766e", padding: "0 8px" }}>📏 1. Thể chất & Sinh tồn</legend>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div><label>Tuổi (năm)</label><input type="number" name="tuoi" value={formData.tuoi} onChange={handleChange} style={inputStyle}/></div>
-            <div><label>Giới tính</label><select name="gioiTinh" value={formData.gioiTinh} onChange={handleChange} style={inputStyle}><option value="Nam">Nam</option><option value="Nữ">Nữ</option></select></div>
-            <div><label>Chiều cao (cm)</label><input type="number" name="chieuCao" value={formData.chieuCao} onChange={handleChange} style={inputStyle}/></div>
-            <div><label>Cân nặng (kg)</label><input type="number" name="canNang" value={formData.canNang} onChange={handleChange} style={inputStyle}/></div>
-            <div><label>BMI: {BMI_CATEGORY(formData.bmi)}</label><input type="number" name="bmi" value={formData.bmi} readOnly style={{...inputStyle, backgroundColor: "#e2e8f0"}}/></div>
-            <div><label>Vòng eo (cm)</label><input type="number" name="vongEo" value={formData.vongEo} onChange={handleChange} style={inputStyle}/></div>
-            <div><label>HA Tâm thu (mmHg)</label><input type="number" name="huyetApTamThu" value={formData.huyetApTamThu} onChange={handleChange} style={inputStyle}/></div>
-            <div><label>HA Tâm trương (mmHg)</label><input type="number" name="huyetApTamTruong" value={formData.huyetApTamTruong} onChange={handleChange} style={inputStyle}/></div>
+        <div className={`acc-header ${activeAccordion === 1 ? 'active' : ''}`} onClick={() => setActiveAccordion(activeAccordion === 1 ? 0 : 1)}>
+          <span>🫀 1. Thể chất & Sinh tồn</span>
+          <span>{activeAccordion === 1 ? '▼' : '▶'}</span>
+        </div>
+        <div className={`acc-wrapper ${activeAccordion === 1 ? 'open' : ''}`} style={{ background: "#EFF6FF" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
+            <div><label style={lblStyle}>Tuổi</label><input type="number" name="tuoi" value={formData.tuoi} onChange={handleChange} className="custom-input"/></div>
+            <div><label style={lblStyle}>Giới tính</label><select name="gioiTinh" value={formData.gioiTinh} onChange={handleChange} className="custom-input"><option value="Nam">Nam</option><option value="Nữ">Nữ</option></select></div>
+            <div><label style={lblStyle}>Chiều cao (cm)</label><input type="number" name="chieuCao" value={formData.chieuCao} onChange={handleChange} className="custom-input"/></div>
+            <div><label style={lblStyle}>Cân nặng (kg)</label><input type="number" name="canNang" value={formData.canNang} onChange={handleChange} className="custom-input"/></div>
+            <div><label style={lblStyle}>BMI chỉ số</label><input type="number" name="bmi" value={formData.bmi} readOnly className="custom-input" style={{background:"#E2E8F0"}}/></div>
+            <div><label style={lblStyle}>Vòng eo (cm)</label><input type="number" name="vongEo" value={formData.vongEo} onChange={handleChange} className="custom-input"/></div>
+            <div><label style={lblStyle}>HA Tâm thu (mmHg)</label><input type="number" name="huyetApTamThu" value={formData.huyetApTamThu} onChange={handleChange} className="custom-input"/></div>
+            <div><label style={lblStyle}>HA Tâm trương (mmHg)</label><input type="number" name="huyetApTamTruong" value={formData.huyetApTamTruong} onChange={handleChange} className="custom-input"/></div>
           </div>
-        </fieldset>
+          <div style={{textAlign: "right", marginTop: "20px"}}><button type="button" onClick={()=>setActiveAccordion(2)} style={nextBtnStyle}>Tiếp theo ▶</button></div>
+        </div>
 
-        {/* KHỐI 2: XÉT NGHIỆM SINH HÓA NÂNG CAO */}
-        <fieldset style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", backgroundColor: "#f0fdf4" }}>
-          <legend style={{ fontWeight: "bold", color: "#166534", padding: "0 8px" }}>🔬 2. Chỉ số Sinh hóa (Bổ sung dữ liệu mô hình AI)</legend>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div><label>Đường huyết đói (mg/dL)</label><input type="number" name="duongHuyet" value={formData.duongHuyet} onChange={handleChange} style={inputStyle}/></div>
-            <div><label>HbA1c (%)</label><input type="number" step="0.1" name="hba1c" value={formData.hba1c} onChange={handleChange} style={inputStyle}/></div>
-            <div><label>Cholesterol toàn phần (mg/dL)</label><input type="number" name="cholesterol" value={formData.cholesterol} onChange={handleChange} style={inputStyle}/></div>
-            <div><label>LDL-Cholesterol (mg/dL)</label><input type="number" name="ldl" value={formData.ldl} onChange={handleChange} style={inputStyle}/></div>
-            <div><label>HDL-Cholesterol (mg/dL)</label><input type="number" name="hdl" value={formData.hdl} onChange={handleChange} style={inputStyle}/></div>
-            <div><label>Triglyceride (mg/dL)</label><input type="number" name="triglyceride" value={formData.triglyceride} onChange={handleChange} style={inputStyle}/></div>
-            <div><label>Creatinine máu (mg/dL)</label><input type="number" step="0.01" name="creatinine" value={formData.creatinine} onChange={handleChange} style={inputStyle}/></div>
-            <div><label>Acid Uric (mg/dL)</label><input type="number" step="0.1" name="acidUric" value={formData.acidUric} onChange={handleChange} style={inputStyle}/></div>
+        {/* KHỐI 2 */}
+        <div className={`acc-header ${activeAccordion === 2 ? 'active' : ''}`} onClick={() => setActiveAccordion(activeAccordion === 2 ? 0 : 2)}>
+          <span>🧪 2. Chỉ số Sinh hóa chuyên sâu</span>
+          <span>{activeAccordion === 2 ? '▼' : '▶'}</span>
+        </div>
+        <div className={`acc-wrapper ${activeAccordion === 2 ? 'open' : ''}`} style={{ background: "#F0FDF4" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
+            <div><label style={lblStyle}>Đường huyết đói (mg/dL)</label><input type="number" name="duongHuyet" value={formData.duongHuyet} onChange={handleChange} className="custom-input"/></div>
+            <div><label style={lblStyle}>HbA1c (%)</label><input type="number" step="0.1" name="hba1c" value={formData.hba1c} onChange={handleChange} className="custom-input"/></div>
+            <div><label style={lblStyle}>Cholesterol toàn phần</label><input type="number" name="cholesterol" value={formData.cholesterol} onChange={handleChange} className="custom-input"/></div>
+            <div><label style={lblStyle}>LDL-Cholesterol</label><input type="number" name="ldl" value={formData.ldl} onChange={handleChange} className="custom-input"/></div>
+            <div><label style={lblStyle}>HDL-Cholesterol</label><input type="number" name="hdl" value={formData.hdl} onChange={handleChange} className="custom-input"/></div>
+            <div><label style={lblStyle}>Creatinine máu</label><input type="number" step="0.01" name="creatinine" value={formData.creatinine} onChange={handleChange} className="custom-input"/></div>
           </div>
-        </fieldset>
+          <div style={{textAlign: "right", marginTop: "20px"}}><button type="button" onClick={()=>setActiveAccordion(3)} style={nextBtnStyle}>Tiếp theo ▶</button></div>
+        </div>
 
         {/* KHỐI 3 */}
-        <fieldset style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", backgroundColor: "#f8fafc" }}>
-          <legend style={{ fontWeight: "bold", color: "#7c3aed", padding: "0 8px" }}>🏃 3. Lối sống</legend>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div><label>Hút thuốc</label><select name="hutThuoc" value={formData.hutThuoc} onChange={handleChange} style={inputStyle}><option value="Không">Không</option><option value="Đã bỏ">Đã bỏ</option><option value="Đang hút">Đang hút</option></select></div>
-            <div><label>Uống rượu/bia</label><select name="uongRuouBia" value={formData.uongRuouBia} onChange={handleChange} style={inputStyle}><option value="Không">Không</option><option value="Thỉnh thoảng">Thỉnh thoảng</option><option value="Thường xuyên">Thường xuyên</option></select></div>
-            <div><label>Mức độ ăn mặn</label><select name="mucDoAnMan" value={formData.mucDoAnMan} onChange={handleChange} style={inputStyle}><option value="Nhạt">Nhạt</option><option value="Vừa">Vừa</option><option value="Mặn">Mặn</option></select></div>
-            <div><label>Phút vận động/tuần</label><input type="number" name="soPhutVanDongMoiTuan" value={formData.soPhutVanDongMoiTuan} onChange={handleChange} style={inputStyle}/></div>
+        <div className={`acc-header ${activeAccordion === 3 ? 'active' : ''}`} onClick={() => setActiveAccordion(activeAccordion === 3 ? 0 : 3)}>
+          <span>🏃 3. Lối sống cá nhân</span>
+          <span>{activeAccordion === 3 ? '▼' : '▶'}</span>
+        </div>
+        <div className={`acc-wrapper ${activeAccordion === 3 ? 'open' : ''}`} style={{ background: "#FFF7ED" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
+            <div><label style={lblStyle}>Tần suất hút thuốc</label><select name="hutThuoc" value={formData.hutThuoc} onChange={handleChange} className="custom-input"><option value="Không">Không</option><option value="Đã bỏ">Đã bỏ</option><option value="Đang hút">Đang hút</option></select></div>
+            <div><label style={lblStyle}>Sử dụng rượu bia</label><select name="uongRuouBia" value={formData.uongRuouBia} onChange={handleChange} className="custom-input"><option value="Không">Không</option><option value="Thỉnh thoảng">Thỉnh thoảng</option><option value="Thường xuyên">Thường xuyên</option></select></div>
+            <div><label style={lblStyle}>Khẩu vị ăn mặn</label><select name="mucDoAnMan" value={formData.mucDoAnMan} onChange={handleChange} className="custom-input"><option value="Nhạt">Nhạt</option><option value="Vừa">Vừa</option><option value="Mặn">Mặn</option></select></div>
+            <div><label style={lblStyle}>Vận động thể chất (phút/tuần)</label><input type="number" name="soPhutVanDongMoiTuan" value={formData.soPhutVanDongMoiTuan} onChange={handleChange} className="custom-input"/></div>
           </div>
-        </fieldset>
+          <div style={{textAlign: "right", marginTop: "20px"}}><button type="button" onClick={()=>setActiveAccordion(4)} style={nextBtnStyle}>Tiếp theo ▶</button></div>
+        </div>
 
         {/* KHỐI 4 */}
-        <fieldset style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", backgroundColor: "#fff5f5" }}>
-          <legend style={{ fontWeight: "bold", color: "#dc2626", padding: "0 8px" }}>⚠️ 4. Tiền sử bệnh lý (Cá nhân & Gia đình)</legend>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <h4 style={{ margin: "5px 0" }}>Bản thân bị:</h4>
-              <label style={checkLabel}><input type="checkbox" name="caoHuyetAp" checked={formData.caoHuyetAp} onChange={handleChange}/> Cao huyết áp</label>
-              <label style={checkLabel}><input type="checkbox" name="tieuDuong" checked={formData.tieuDuong} onChange={handleChange}/> Tiểu đường</label>
-              <label style={checkLabel}><input type="checkbox" name="benhTimMach" checked={formData.benhTimMach} onChange={handleChange}/> Tim mạch</label>
-              <label style={checkLabel}><input type="checkbox" name="gout" checked={formData.gout} onChange={formData.gout} onChange={handleChange}/> Bệnh Gout</label>
-            </div>
-            <div>
-              <h4 style={{ margin: "5px 0" }}>Gia đình cận huyết bị:</h4>
-              <label style={checkLabel}><input type="checkbox" name="giaDinhCaoHuyetAp" checked={formData.giaDinhCaoHuyetAp} onChange={handleChange}/> Cao huyết áp GD</label>
-              <label style={checkLabel}><input type="checkbox" name="giaDinhTieuDuong" checked={formData.giaDinhTieuDuong} onChange={handleChange}/> Tiểu đường GD</label>
-              <label style={checkLabel}><input type="checkbox" name="giaDinhTimMach" checked={formData.giaDinhTimMach} onChange={handleChange}/> Tim mạch GD</label>
-              <label style={checkLabel}><input type="checkbox" name="giaDinhGout" checked={formData.giaDinhGout} onChange={handleChange}/> Gout GD</label>
+        <div className={`acc-header ${activeAccordion === 4 ? 'active' : ''}`} onClick={() => setActiveAccordion(activeAccordion === 4 ? 0 : 4)}>
+          <span>⚠️ 4. Tiền sử bệnh lý (Cá nhân & Gia đình)</span>
+          <span>{activeAccordion === 4 ? '▼' : '▶'}</span>
+        </div>
+        <div className={`acc-wrapper ${activeAccordion === 4 ? 'open' : ''}`} style={{ background: "#FEF2F2" }}>
+          <div style={{ marginBottom: "28px" }}>
+            <label style={{...lblStyle, marginBottom:"12px"}}>Tiền sử lâm sàng bản thân:</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+              <div className={`tag-btn ${formData.caoHuyetAp ? 'active' : ''}`} onClick={() => toggleCheckbox('caoHuyetAp')}>{formData.caoHuyetAp ? '✓' : '+'} Cao huyết áp</div>
+              <div className={`tag-btn ${formData.tieuDuong ? 'active' : ''}`} onClick={() => toggleCheckbox('tieuDuong')}>{formData.tieuDuong ? '✓' : '+'} Tiểu đường</div>
+              <div className={`tag-btn ${formData.benhTimMach ? 'active' : ''}`} onClick={() => toggleCheckbox('benhTimMach')}>{formData.benhTimMach ? '✓' : '+'} Tim mạch</div>
+              <div className={`tag-btn ${formData.gout ? 'active' : ''}`} onClick={() => toggleCheckbox('gout')}>{formData.gout ? '✓' : '+'} Bệnh Gout</div>
             </div>
           </div>
-        </fieldset>
 
-        <button type="submit" disabled={saving} style={{ padding: "12px", backgroundColor: saving ? "#cbd5e1" : "#0284c7", color: "white", fontWeight: "600", border: "none", borderRadius: "6px", cursor: saving ? "not-allowed" : "pointer" }}>
-          {saving ? "⏳ Đang đồng bộ..." : "💾 LƯU TOÀN BỘ CHỈ SỐ LÊN ĐỒNG BỘ AI"}
+          <div>
+            <label style={{...lblStyle, marginBottom:"12px"}}>Tiền sử di truyền gia đình cận huyết:</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+              <div className={`tag-btn ${formData.giaDinhCaoHuyetAp ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhCaoHuyetAp')}>{formData.giaDinhCaoHuyetAp ? '✓' : '+'} Cao huyết áp GD</div>
+              <div className={`tag-btn ${formData.giaDinhTieuDuong ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhTieuDuong')}>{formData.giaDinhTieuDuong ? '✓' : '+'} Tiểu đường GD</div>
+              <div className={`tag-btn ${formData.giaDinhTimMach ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhTimMach')}>{formData.giaDinhTimMach ? '✓' : '+'} Tim mạch GD</div>
+              <div className={`tag-btn ${formData.giaDinhGout ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhGout')}>{formData.giaDinhGout ? '✓' : '+'} Gout GD</div>
+            </div>
+          </div>
+        </div>
+
+        {/* NÚT SUBMIT */}
+        <button type="submit" disabled={saving} style={{ width: "100%", padding: "16px", backgroundColor: saving ? "#94A3B8" : "#2563EB", color: "white", fontSize: "16px", fontWeight: "700", border: "none", borderRadius: "12px", cursor: saving ? "not-allowed" : "pointer", marginTop: "24px", transition: "all 0.2s", boxShadow: "0 4px 6px -1px rgba(37, 99, 235, 0.2)" }}>
+          {saving ? "⏳ Đang kết nối dữ liệu đám mây..." : "💾 LƯU HỒ SƠ SỨC KHỎE CAN THIỆP"}
         </button>
       </form>
     </div>
   );
 }
 
-const inputStyle = { width: "100%", padding: "8px", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box", marginTop: "4px" };
-const checkLabel = { display: "flex", alignItems: "center", gap: "8px", margin: "8px 0", cursor: "pointer" };
+const lblStyle = { display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" };
+const nextBtnStyle = { padding: "8px 16px", background: "#FFFFFF", border: "1px solid #CBD5E1", borderRadius: "8px", color: "#475569", fontWeight: "600", cursor: "pointer", transition: "all 0.2s" };
