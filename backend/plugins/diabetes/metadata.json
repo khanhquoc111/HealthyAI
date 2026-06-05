@@ -1,11 +1,12 @@
 {
+  "plugin_id": "diabetes",
   "disease_info": {
     "id": "diabetes",
     "name": "Đánh giá Nguy cơ Tiểu đường Type 2",
     "version": "1.1",
     "description": "Công cụ đánh giá nguy cơ phát triển tiểu đường type 2 dựa trên các yếu tố nguy cơ.",
     "author": "LuanVanKTPM",
-    "last_updated": "2026-06-04"
+    "last_updated": "2026-06-05"
   },
   "fields": [
     {
@@ -99,7 +100,6 @@
         "priority": 10
       }
     ],
-    "interactions": [],
     "thresholds": [
       { "range": [0, 40], "level": "low" },
       { "range": [40, 70], "level": "medium" },
@@ -114,6 +114,5 @@
       "priority": 1,
       "action_type": "lifestyle"
     }
-  ],
-  "cross_validations": []
+  ]
 }

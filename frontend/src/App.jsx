@@ -1,17 +1,18 @@
 // frontend/src/App.jsx
 import { useState, useEffect } from "react";
+import axios from "axios"; // THÊM IMPORT AXIOS
 import MainRiskPage from "./MainRiskPage";
 import DangNhap from "./dang_nhap";
 import DangKy from "./dang_ky";
 import ChiSoSucKhoe from "./cs_suckhoe";
-import TrangChu from "./TrangChu"; // <-- [THÊM MỚI] Import trang chủ vừa tạo
+import TrangChu from "./TrangChu";
+
+const API_BASE_URL = "http://127.0.0.1:8000"; // THÊM BASE URL
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userEmail, setUserEmail] = useState("");
   
-  // SỬA ĐỔI QUAN TRỌNG: Mặc định chế độ auth ban đầu là "welcome" 
-  // thay vì nhảy bổ trực tiếp vào form đăng nhập để tránh bug tự động lấy dữ liệu lỗi.
   const [authMode, setAuthMode] = useState("welcome"); // "welcome", "login", "register"
   const [currentView, setCurrentView] = useState("risk"); // "risk" hoặc "profile"
 
@@ -21,8 +22,8 @@ export default function App() {
     if (token && email) {
       setIsAuthenticated(true);
       setUserEmail(email);
+      checkInitialRoute(email); // Kiểm tra xem user này đã có hồ sơ chưa khi F5 trang
     } else {
-      // Nếu không có token hợp lệ, làm sạch bộ nhớ tránh bẫy dữ liệu cũ
       localStorage.removeItem("token");
       localStorage.removeItem("userName");
       setIsAuthenticated(false);
@@ -31,9 +32,27 @@ export default function App() {
     }
   }, []);
 
-  const handleLoginSuccess = (email) => {
+  // HÀM MỚI: Kiểm tra hồ sơ và điều hướng thông minh
+  const checkInitialRoute = async (email) => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/health-profile/${email}`);
+      // Nếu data là null (Chưa có hồ sơ), chuyển sang tab Nhập chỉ số sức khỏe
+      if (!res.data.data) {
+        setCurrentView("profile");
+      } else {
+        // Đã có hồ sơ thì cho vào trang khám bệnh luôn
+        setCurrentView("risk");
+      }
+    } catch (error) {
+      console.error("Lỗi kiểm tra hồ sơ", error);
+      setCurrentView("risk"); // Fallback mặc định
+    }
+  };
+
+  const handleLoginSuccess = async (email) => {
     setIsAuthenticated(true);
     setUserEmail(email);
+    await checkInitialRoute(email); // Gọi kiểm tra ngay khi vừa đăng nhập xong
   };
 
   const handleLogout = () => {
@@ -41,7 +60,7 @@ export default function App() {
     localStorage.removeItem("userName");
     setIsAuthenticated(false);
     setUserEmail("");
-    setAuthMode("welcome"); // Reset về trang chủ welcome ban đầu có chữ Hello
+    setAuthMode("welcome");
     setCurrentView("risk"); 
   };
 
@@ -78,7 +97,6 @@ export default function App() {
             Risk Engine
           </div>
           
-          {/* CÁC NÚT TẢI CÔNG CỤ DUAL-ENGINE */}
           <div style={{ display: "flex", gap: "10px" }}>
             <button 
               onClick={() => setCurrentView("risk")}

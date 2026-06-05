@@ -20,6 +20,7 @@ export default function ChiSoSucKhoe() {
   const [completionRate, setCompletionRate] = useState(0);
   const tenDangNhap = localStorage.getItem("userName");
 
+  // Tính toán % tiến trình hồ sơ
   useEffect(() => {
     const nonEmptyFields = Object.values(formData).filter(v => 
       v !== "" && v !== false && v !== null && v !== undefined
@@ -28,17 +29,45 @@ export default function ChiSoSucKhoe() {
     setCompletionRate(rate);
   }, [formData]);
 
+  // Load hồ sơ khi có tenDangNhap
   useEffect(() => {
     if (tenDangNhap) fetchHealthProfile();
   }, [tenDangNhap]);
 
+  // 1. RÀNG BUỘC TÍNH TOÁN BMI CHẶT CHẼ
   useEffect(() => {
-    if (formData.chieuCao && formData.canNang) {
-      const heightInM = formData.chieuCao / 100;
-      const bmiValue = (formData.canNang / (heightInM * heightInM)).toFixed(1);
-      setFormData((prev) => ({ ...prev, bmi: bmiValue }));
+    const c = parseFloat(formData.chieuCao);
+    const n = parseFloat(formData.canNang);
+    if (c > 0 && n > 0) {
+      const heightInM = c / 100;
+      const bmiValue = (n / (heightInM * heightInM)).toFixed(1);
+      // Chỉ cập nhật nếu có sự thay đổi để tránh loop
+      if (String(formData.bmi) !== String(bmiValue)) {
+        setFormData((prev) => ({ ...prev, bmi: bmiValue }));
+        if (tenDangNhap) autoSaveField("bmi", bmiValue);
+      }
+    } else if (formData.bmi !== "") {
+      // Nếu xóa chiều cao/cân nặng -> Tự động xóa BMI
+      setFormData((prev) => ({ ...prev, bmi: "" }));
+      if (tenDangNhap) autoSaveField("bmi", null);
     }
   }, [formData.chieuCao, formData.canNang]);
+
+  // 2. RÀNG BUỘC TÍNH TOÁN LDL-CHOLESTEROL (Công thức Friedewald)
+  useEffect(() => {
+    const tc = parseFloat(formData.cholesterol);
+    const hdl = parseFloat(formData.hdl);
+    const tg = parseFloat(formData.triglyceride);
+    
+    if (tc > 0 && hdl > 0 && tg > 0) {
+      const ldlEst = (tc - hdl - (tg / 5)).toFixed(1);
+      // Chỉ tự động điền nếu người dùng chưa nhập LDL để ưu tiên chỉ số xét nghiệm thực tế
+      if (formData.ldl === "" || formData.ldl === null) {
+        setFormData((prev) => ({ ...prev, ldl: ldlEst }));
+        if (tenDangNhap) autoSaveField("ldl", ldlEst);
+      }
+    }
+  }, [formData.cholesterol, formData.hdl, formData.triglyceride]);
 
   const fetchHealthProfile = async () => {
     try {
@@ -61,14 +90,12 @@ export default function ChiSoSucKhoe() {
 
   const autoSaveField = async (fieldName, fieldValue) => {
     try {
-      // Ép kiểu chuẩn để không bị lỗi 422 (Unprocessable Entity) từ Pydantic FastAPI
       let payloadValue = fieldValue;
       const numericFields = [
         "tuoi", "chieuCao", "canNang", "bmi", "vongEo", "huyetApTamThu", "huyetApTamTruong",
         "duongHuyet", "hba1c", "cholesterol", "ldl", "hdl", "triglyceride", "creatinine", "acidUric", "soPhutVanDongMoiTuan"
       ];
       
-      // Nếu trường đang nhập là số: rỗng thì gán null, có số thì ép sang Number
       if (numericFields.includes(fieldName)) {
         payloadValue = (fieldValue === "" || fieldValue === null) ? null : Number(fieldValue);
       }
@@ -93,12 +120,10 @@ export default function ChiSoSucKhoe() {
       setSaving(true);
       const payload = { tenDangNhap };
       
-      // Chuyển đổi định dạng số cho các chỉ số quan trọng
       const numericFields = [
         "tuoi", "chieuCao", "canNang", "bmi", "vongEo", "huyetApTamThu", "huyetApTamTruong",
         "duongHuyet", "hba1c", "cholesterol", "ldl", "hdl", "triglyceride", "creatinine", "acidUric", "soPhutVanDongMoiTuan"
       ];
-      
       Object.keys(formData).forEach(key => {
         if (numericFields.includes(key)) {
           payload[key] = formData[key] ? Number(formData[key]) : null;
@@ -106,7 +131,7 @@ export default function ChiSoSucKhoe() {
           payload[key] = formData[key];
         }
       });
-
+      
       await axios.post(`${API_BASE_URL}/health-profile/`, payload);
       setMessage("✅ Lưu dữ liệu hồ sơ sức khỏe thành công!");
       setTimeout(() => setMessage(""), 3000);
@@ -134,13 +159,25 @@ export default function ChiSoSucKhoe() {
       {/* THANH TIẾN TRÌNH HỒ SƠ */}
       <div style={{ marginBottom: "24px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
-          <span style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>Mức độ điền đầy đủ dữ liệu AI</span>
+           <span style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>Mức độ điền đầy đủ dữ liệu AI</span>
           <span style={{ fontSize: "12px", fontWeight: "bold", color: completionRate > 70 ? '#22c55e' : '#f97316' }}>{completionRate}%</span>
         </div>
         <div style={{ width: "100%", height: "8px", backgroundColor: "#e2e8f0", borderRadius: "4px", overflow: "hidden" }}>
           <div style={{ height: "100%", width: `${completionRate}%`, backgroundColor: completionRate > 70 ? '#22c55e' : '#f97316', transition: "width 0.3s" }} />
         </div>
       </div>
+
+      {completionRate <= 15 && (
+        <div style={{ padding: "16px", marginBottom: "20px", borderRadius: "8px", backgroundColor: "#eff6ff", color: "#1e3a8a", border: "1px solid #bfdbfe", display: "flex", alignItems: "flex-start", gap: "12px" }}>
+          <span style={{ fontSize: "24px" }}>👋</span>
+          <div>
+            <h4 style={{ margin: "0 0 4px 0", color: "#1d4ed8" }}>Chào mừng bạn mới!</h4>
+            <p style={{ margin: 0, fontSize: "14px", lineHeight: "1.5" }}>
+              Hệ thống cần thu thập một số dữ liệu sinh tồn cơ bản. Hãy dành 1 phút để thiết lập hồ sơ sức khỏe nhé. Điều này giúp hệ thống <strong>Trí tuệ nhân tạo (AI)</strong> có đủ 18 nhóm dữ liệu lâm sàng để phân tích độ rủi ro bệnh mạn tính một cách chính xác nhất cho riêng bạn.
+            </p>
+          </div>
+        </div>
+      )}
 
       {message && <div style={{ padding: "12px", marginBottom: "16px", borderRadius: "6px", backgroundColor: message.includes("✅") ? "#dcfce7" : "#fee2e2", color: message.includes("✅") ? "#166534" : "#991b1b" }}>{message}</div>}
 
@@ -153,7 +190,10 @@ export default function ChiSoSucKhoe() {
             <div><label>Giới tính</label><select name="gioiTinh" value={formData.gioiTinh} onChange={handleChange} style={inputStyle}><option value="Nam">Nam</option><option value="Nữ">Nữ</option></select></div>
             <div><label>Chiều cao (cm)</label><input type="number" name="chieuCao" value={formData.chieuCao} onChange={handleChange} style={inputStyle}/></div>
             <div><label>Cân nặng (kg)</label><input type="number" name="canNang" value={formData.canNang} onChange={handleChange} style={inputStyle}/></div>
-            <div><label>BMI: {BMI_CATEGORY(formData.bmi)}</label><input type="number" name="bmi" value={formData.bmi} readOnly style={{...inputStyle, backgroundColor: "#e2e8f0"}}/></div>
+            <div>
+              <label>BMI: {BMI_CATEGORY(formData.bmi)} <span style={{color: "#059669", fontSize: "12px"}}>(Tự động)</span></label>
+              <input type="number" name="bmi" value={formData.bmi} readOnly style={{...inputStyle, backgroundColor: "#e2e8f0", cursor: "not-allowed", color: "#64748b"}}/>
+            </div>
             <div><label>Vòng eo (cm)</label><input type="number" name="vongEo" value={formData.vongEo} onChange={handleChange} style={inputStyle}/></div>
             <div><label>HA Tâm thu (mmHg)</label><input type="number" name="huyetApTamThu" value={formData.huyetApTamThu} onChange={handleChange} style={inputStyle}/></div>
             <div><label>HA Tâm trương (mmHg)</label><input type="number" name="huyetApTamTruong" value={formData.huyetApTamTruong} onChange={handleChange} style={inputStyle}/></div>
@@ -167,9 +207,12 @@ export default function ChiSoSucKhoe() {
             <div><label>Đường huyết đói (mg/dL)</label><input type="number" name="duongHuyet" value={formData.duongHuyet} onChange={handleChange} style={inputStyle}/></div>
             <div><label>HbA1c (%)</label><input type="number" step="0.1" name="hba1c" value={formData.hba1c} onChange={handleChange} style={inputStyle}/></div>
             <div><label>Cholesterol toàn phần (mg/dL)</label><input type="number" name="cholesterol" value={formData.cholesterol} onChange={handleChange} style={inputStyle}/></div>
-            <div><label>LDL-Cholesterol (mg/dL)</label><input type="number" name="ldl" value={formData.ldl} onChange={handleChange} style={inputStyle}/></div>
             <div><label>HDL-Cholesterol (mg/dL)</label><input type="number" name="hdl" value={formData.hdl} onChange={handleChange} style={inputStyle}/></div>
             <div><label>Triglyceride (mg/dL)</label><input type="number" name="triglyceride" value={formData.triglyceride} onChange={handleChange} style={inputStyle}/></div>
+            <div>
+              <label>LDL-Cholesterol (mg/dL)</label>
+              <input type="number" name="ldl" value={formData.ldl} onChange={handleChange} placeholder="Tự động tính nếu để trống" style={inputStyle}/>
+            </div>
             <div><label>Creatinine máu (mg/dL)</label><input type="number" step="0.01" name="creatinine" value={formData.creatinine} onChange={handleChange} style={inputStyle}/></div>
             <div><label>Acid Uric (mg/dL)</label><input type="number" step="0.1" name="acidUric" value={formData.acidUric} onChange={handleChange} style={inputStyle}/></div>
           </div>
@@ -195,7 +238,7 @@ export default function ChiSoSucKhoe() {
               <label style={checkLabel}><input type="checkbox" name="caoHuyetAp" checked={formData.caoHuyetAp} onChange={handleChange}/> Cao huyết áp</label>
               <label style={checkLabel}><input type="checkbox" name="tieuDuong" checked={formData.tieuDuong} onChange={handleChange}/> Tiểu đường</label>
               <label style={checkLabel}><input type="checkbox" name="benhTimMach" checked={formData.benhTimMach} onChange={handleChange}/> Tim mạch</label>
-              <label style={checkLabel}><input type="checkbox" name="gout" checked={formData.gout} onChange={formData.gout} onChange={handleChange}/> Bệnh Gout</label>
+              <label style={checkLabel}><input type="checkbox" name="gout" checked={formData.gout} onChange={handleChange}/> Bệnh Gout</label>
             </div>
             <div>
               <h4 style={{ margin: "5px 0" }}>Gia đình cận huyết bị:</h4>

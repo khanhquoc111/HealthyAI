@@ -1,7 +1,6 @@
 # backend/app/plugin_api.py
 import json
 import time
-from pathlib import Path
 from typing import Dict, Any
 
 from fastapi import APIRouter, HTTPException, Query, Depends 
@@ -28,6 +27,7 @@ def get_db():
         db.close()
 
 def get_plugin_metadata(plugin_name: str) -> Dict[str, Any]:
+    """plugin_name chính là plugin_id (diabetes, hypertension,...)"""
     try:
         return plugin_loader.load_plugin(plugin_name)
     except FileNotFoundError:
@@ -94,12 +94,18 @@ def get_plugin_all_fields(plugin_name: str):
 
 @router.post("/plugins/{plugin_name}/score")
 def score_plugin_form(
-    plugin_name: str, 
+    plugin_name: str,   # Đây chính là plugin_id (diabetes, hypertension, ...)
     form_data: dict,
     ten_dang_nhap: str = Query(None), 
     db: Session = Depends(get_db)   
 ):
     try:
+        # plugin_name = plugin_id (định danh duy nhất)
+        metadata = get_plugin_metadata(plugin_name)
+        
+        # Chỉ dùng name để hiển thị, KHÔNG dùng để map logic
+        ten_benh = metadata.get("disease_info", {}).get("name", plugin_name)
+
         # TỪ ĐIỂN MAPPING CỘT DB (Tiếng Việt) VÀ TRƯỜNG PLUGIN (Tiếng Anh)
         db_to_form = {
             "tuoi": "age", "bmi": "bmi", "vongEo": "waist",
@@ -111,7 +117,7 @@ def score_plugin_form(
             "giaDinhCaoHuyetAp": "family_history_hypertension",
             "giaDinhTimMach": "family_history_cardiovascular"
         }
-        form_to_db = {v: k for k, v in db_to_form.items()} # Map ngược lại
+        form_to_db = {v: k for k, v in db_to_form.items()}
 
         # 1. Trích xuất dữ liệu Hồ sơ sức khỏe từ Database để hợp nhất
         health_profile_dict = {}
@@ -136,7 +142,7 @@ def score_plugin_form(
         # Tạo payload hợp nhất (Ưu tiên form hiện tại hơn DB)
         unified_payload = {**health_profile_dict, **form_data}
 
-        # 2. VALIDATION ĐỐI VỚI FORM GỐC (Chỉ validate các trường mà plugin hiện tại quản lý)
+        # 2. VALIDATION ĐỐI VỚI FORM GỐC
         validation_engine = get_validation_engine(plugin_name)
         validation_result = validation_engine.validate_form(form_data)
 
@@ -160,11 +166,11 @@ def score_plugin_form(
             "warnings": [w.to_dict() for w in validation_result.warnings]
         }
 
-        # 4. TỰ ĐỘNG TÍCH LŨY DỮ LIỆU & LƯU LỊCH SỬ (Ánh xạ ngược Anh -> Việt)
+        # 4. TỰ ĐỘNG TÍCH LŨY DỮ LIỆU & LƯU LỊCH SỬ
         if ten_dang_nhap:
             user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == ten_dang_nhap).first()
             if user:
-                # Tự động lưu form hiện tại vào Hồ sơ sức khỏe để làm giàu dữ liệu
+                # Tự động lưu form hiện tại vào Hồ sơ sức khỏe
                 profile_record = db.query(CsSucKhoe).filter(CsSucKhoe.idNguoiDung == user.idNguoiDung).first()
                 if not profile_record:
                     profile_record = CsSucKhoe(idNguoiDung=user.idNguoiDung)
@@ -173,10 +179,8 @@ def score_plugin_form(
                 for form_key, value in form_data.items():
                     if value in [None, ""]: continue
                     
-                    db_key = form_key # Mặc định
-                    if form_key in form_to_db:
-                        db_key = form_to_db[form_key]
-                        
+                    db_key = form_to_db.get(form_key, form_key)
+                    
                     # Dịch ngược giá trị từ tiếng Anh của form về DB
                     if form_key == "smoking_status":
                         db_key = "hutThuoc"
@@ -189,9 +193,6 @@ def score_plugin_form(
                         setattr(profile_record, db_key, value)
                 
                 # Lưu log phân tích
-                metadata = get_plugin_metadata(plugin_name)
-                ten_benh = metadata.get("disease_info", {}).get("name", plugin_name)
-
                 lich_su = LichSuDanhGia(
                     idNguoiDung=user.idNguoiDung,
                     tenBenh=ten_benh,

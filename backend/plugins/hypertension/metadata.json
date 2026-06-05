@@ -1,11 +1,12 @@
 {
+  "plugin_id": "hypertension",
   "disease_info": {
     "id": "hypertension",
     "name": "Đánh giá Nguy cơ Tăng huyết áp",
     "version": "1.2",
     "description": "Công cụ đánh giá nguy cơ phát triển tăng huyết áp và biến chứng tim mạch dựa trên các yếu tố nguy cơ chính.",
     "author": "LuanVanKTPM",
-    "last_updated": "2026-06-02"
+    "last_updated": "2026-06-05"
   },
   "fields": [
     {
@@ -141,37 +142,7 @@
       { "range": [0, 40], "level": "low" },
       { "range": [40, 70], "level": "medium" },
       { "range": [70, 100], "level": "high" }
-    ],
-    "computed_fields": [
-      {
-        "key": "bp_category",
-        "formula": "systolic * 0.7 + diastolic * 0.3",
-        "dependencies": ["systolic", "diastolic"],
-        "description": "Huyết áp trung bình có trọng số"
-      }
     ]
-  },
-  "explanation_templates": [
-    {
-      "rule_id": "age_high",
-      "template": "Tuổi {age} thuộc nhóm nguy cơ cao (>60 tuổi)",
-      "variables": ["age"]
-    },
-    {
-      "rule_id": "obesity",
-      "template": "BMI {bmi} thuộc mức béo phì, tăng nguy cơ tăng huyết áp",
-      "variables": ["bmi"]
-    },
-    {
-      "rule_id": "smoking",
-      "template": "Đang hút thuốc lá - yếu tố nguy cơ mạnh",
-      "variables": []
-    }
-  ],
-  "risk_levels": {
-    "low": { "summary": "Nguy cơ thấp. Tiếp tục duy trì lối sống lành mạnh." },
-    "medium": { "summary": "Nguy cơ trung bình. Nên cải thiện lối sống và theo dõi định kỳ." },
-    "high": { "summary": "Nguy cơ cao. Khuyến nghị gặp bác sĩ sớm." }
   },
   "recommendations": [
     {
@@ -188,8 +159,5 @@
       "priority": 2,
       "action_type": "referral"
     }
-  ],
-  "display_config": {
-    "primary_color": "#e53e3e"
-  }
+  ]
 }
