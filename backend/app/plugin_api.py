@@ -1,6 +1,7 @@
 # backend/app/plugin_api.py
 import json
 import time
+import numpy as np
 from pathlib import Path
 from typing import Dict, Any
 
@@ -19,6 +20,20 @@ from database.cs_suc_khoe import CsSucKhoe
 router = APIRouter()
 
 plugin_loader = PluginLoader()
+
+def convert_to_serializable(obj):
+    """Chuyển numpy types về Python native types để JSON serialize được"""
+    if isinstance(obj, dict):
+        return {k: convert_to_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_serializable(i) for i in obj]
+    elif isinstance(obj, (np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, (np.int32, np.int64)):
+        return int(obj)
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    return obj
 
 def get_db():
     db = SessionLocal()
@@ -144,8 +159,9 @@ def score_plugin_form(
                             health_profile_dict["exercise"] = 0.0
 
                     # Thêm mới — chuyển uongRuouBia → alcohol số
+                    # Thêm mới — chuyển uongRuouBia → alcohol số
                     if "uongRuouBia" in health_profile_dict and "alcohol" not in health_profile_dict:
-                        mapping_ruou = {"Không": 0, "Thỉnh thoảng": 1, "Thường xuyên": 3, "Nhiều": 5}
+                        mapping_ruou = {"Không": 0, "Thỉnh thoảng": 0, "Thường xuyên": 1, "Nhiều": 1}
                         health_profile_dict["alcohol"] = mapping_ruou.get(health_profile_dict["uongRuouBia"], 0)
 
                     # Thêm mới — chuyển mucDoAnMan → sodium_intake số
@@ -175,12 +191,15 @@ def score_plugin_form(
         # 3. CALCULATE RISK KÉP DUAL-ENGINE 
         scoring_engine = get_scoring_engine(plugin_name)
         result = scoring_engine.calculate_risk(normalized_data)
+        print(f"✅ calculate_risk xong, result keys: {list(result.keys())}")
+        print(f"✅ ai_based status: {result.get('ai_based', {}).get('status')}")
 
         result["validation"] = {
             "is_valid": validation_result.is_valid,
             "warnings": [w.to_dict() for w in validation_result.warnings]
         }
 
+        print(f"✅ Bắt đầu lưu DB, ten_dang_nhap={ten_dang_nhap}")
         # 4. TỰ ĐỘNG TÍCH LŨY DỮ LIỆU & LƯU LỊCH SỬ (Ánh xạ ngược Anh -> Việt)
         if ten_dang_nhap:
             user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == ten_dang_nhap).first()
@@ -220,16 +239,21 @@ def score_plugin_form(
                     diemML=float(result.get("ai_based", {}).get("score", 0.0)),
                     diemTong=float(result.get("rule_based", {}).get("score", 0.0)),
                     mucNguyCo=str(result.get("rule_based", {}).get("risk_level", "low")),
-                    ketQuaJSON=result  
+                    ketQuaJSON=convert_to_serializable(result)  
                 )
                 db.add(lich_su)
+                print(f"✅ Chuẩn bị commit DB")
                 db.commit()
+                print(f"✅ Commit DB xong")
 
         return result
 
     except HTTPException as he:
         raise he
     except Exception as e:
+        import traceback
+        print(f"❌ EXCEPTION NGOÀI: {type(e).__name__}: {e}")
+        traceback.print_exc()
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Scoring error: {str(e)}")
 

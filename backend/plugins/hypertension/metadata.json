@@ -191,5 +191,8 @@
   ],
   "display_config": {
     "primary_color": "#e53e3e"
-  }
+  },
+  "ml_required_features": [
+    "age", "gender_code", "bmi", "smoke", "exercise", "alcohol", "sodium_intake"
+  ]
 }

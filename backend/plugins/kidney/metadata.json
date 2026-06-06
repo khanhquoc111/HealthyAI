@@ -1,0 +1,173 @@
+{
+    "disease_info": {
+        "id": "kidney",
+        "name": "Đánh giá Nguy cơ Bệnh Thận Mạn (CKD)",
+        "version": "1.1",
+        "description": "Công cụ đánh giá mức độ suy giảm chức năng thận và rủi ro tiến triển thành bệnh thận mạn tính.",
+        "author": "LuanVanKTPM",
+        "last_updated": "2026-06-04"
+    },
+    "fields": [
+        {
+            "key": "creatinine",
+            "label": "Creatinine huyết thanh",
+            "type": "number",
+            "required": true,
+            "min": 0.1,
+            "max": 20.0,
+            "unit": "mg/dL"
+        },
+        {
+            "key": "blood_urea_nitrogen",
+            "label": "Nitơ Urê máu (BUN)",
+            "type": "number",
+            "required": true,
+            "min": 1.0,
+            "max": 300.0,
+            "unit": "mg/dL"
+        },
+        {
+            "key": "egfr",
+            "label": "Độ lọc cầu thận (eGFR)",
+            "type": "number",
+            "required": true,
+            "min": 0,
+            "max": 150,
+            "unit": "mL/min/1.73m²"
+        },
+        {
+            "key": "systolic",
+            "label": "Huyết áp tâm thu",
+            "type": "number",
+            "required": true,
+            "min": 70,
+            "max": 250,
+            "unit": "mmHg"
+        },
+        {
+            "key": "diastolic",
+            "label": "Huyết áp tâm trương",
+            "type": "number",
+            "required": true,
+            "min": 40,
+            "max": 150,
+            "unit": "mmHg"
+        }
+    ],
+    "risk_config": {
+        "baseline_mapping": [
+            {
+                "name": "Low Risk",
+                "condition": {
+                    "field": "egfr",
+                    "op": "gte",
+                    "value": 90
+                },
+                "score": 10
+            },
+            {
+                "name": "Moderate Risk",
+                "condition": {
+                    "field": "egfr",
+                    "op": "lt",
+                    "value": 90
+                },
+                "score": 40
+            },
+            {
+                "name": "High Risk",
+                "condition": {
+                    "field": "egfr",
+                    "op": "lt",
+                    "value": 60
+                },
+                "score": 65
+            }
+        ],
+        "risk_modifiers": [
+            {
+                "id": "creatinine_high",
+                "description": "Creatinine huyết thanh tăng cao (>1.2)",
+                "condition": {
+                    "field": "creatinine",
+                    "op": "gte",
+                    "value": 1.2
+                },
+                "effect_type": "multiplicative",
+                "value": 1.4,
+                "category": "modifier",
+                "priority": 20
+            },
+            {
+                "id": "ckd_hypertension",
+                "description": "Tăng huyết áp gây áp lực vi mạch thận",
+                "condition": {
+                    "field": "systolic",
+                    "op": "gte",
+                    "value": 140
+                },
+                "effect_type": "multiplicative",
+                "value": 1.25,
+                "category": "modifier",
+                "priority": 25
+            }
+        ],
+        "protective_factors": [
+            {
+                "id": "normal_bun",
+                "description": "Chỉ số BUN trong mức ổn định (<20)",
+                "condition": {
+                    "field": "blood_urea_nitrogen",
+                    "op": "lt",
+                    "value": 20
+                },
+                "effect_type": "divisive",
+                "value": 1.15,
+                "category": "protective",
+                "priority": 10
+            }
+        ],
+        "interactions": [],
+        "thresholds": [
+            {
+                "range": [
+                    0,
+                    40
+                ],
+                "level": "low"
+            },
+            {
+                "range": [
+                    40,
+                    70
+                ],
+                "level": "medium"
+            },
+            {
+                "range": [
+                    70,
+                    100
+                ],
+                "level": "high"
+            }
+        ]
+    },
+    "recommendations": [
+        {
+            "id": "kidney_care",
+            "condition": {
+                "field": "final_score",
+                "op": "gte",
+                "value": 40
+            },
+            "text": "Kiểm soát đường huyết, uống đủ nước, hạn chế thực phẩm giàu protein động vật và theo dõi chức năng lọc cầu thận định kỳ.",
+            "priority": 1,
+            "action_type": "lifestyle"
+        }
+    ],
+    "cross_validations": [],
+    "ml_required_features": [
+        "age", "gender_code", "bmi", "systolic", "diastolic",
+        "fasting_glucose", "creatinine", "smoke"
+    ]
+}

@@ -18,6 +18,13 @@ export default function MainRiskPage() {
 
   const tenDangNhap = localStorage.getItem("userName");
 
+  const pluginLabels = {
+    diabetes: "🍬 Tiểu đường",
+    hypertension: "🩸 Tăng huyết áp",
+    cardiovascular: "❤️ Tim mạch",
+    kidney: "🫘 Thận mãn tính",
+  };
+
   useEffect(() => { loadPluginsList(); }, []);
   useEffect(() => { tenDangNhap ? fetchHealthProfile() : setProfileLoaded(true); }, [tenDangNhap]);
   useEffect(() => { if (profileLoaded) loadPlugin(selectedPlugin); }, [selectedPlugin, profileLoaded, healthProfile]);
@@ -26,7 +33,7 @@ export default function MainRiskPage() {
     try {
       const res = await axios.get(`${API_BASE_URL}/health-profile/${tenDangNhap}`);
       if (res.data.data) setHealthProfile(res.data.data);
-    } catch (error) { console.error(error); } 
+    } catch (error) { console.error(error); }
     finally { setProfileLoaded(true); }
   };
 
@@ -45,7 +52,7 @@ export default function MainRiskPage() {
       setFormData(mergeWithHealthProfile(response.data.fields));
       setRiskResult(null);
       setErrors({});
-    } catch (error) { console.error(error); } 
+    } catch (error) { console.error(error); }
     finally { setLoading(false); }
   };
 
@@ -53,21 +60,39 @@ export default function MainRiskPage() {
     const initialData = {};
     fields.forEach((field) => initialData[field.key] = field.default !== undefined ? field.default : "");
     if (!healthProfile) return initialData;
+
     const dbToFormMapping = {
-      "tuoi": "age", "bmi": "bmi", "vongEo": "waist", "huyetApTamThu": "systolic", "huyetApTamTruong": "diastolic",
-      "duongHuyet": "fasting_glucose", "hba1c": "hba1c", "cholesterol": "total_cholesterol", "ldl": "ldl", "hdl": "hdl",
+      "tuoi": "age", "bmi": "bmi", "vongEo": "waist",
+      "huyetApTamThu": "systolic", "huyetApTamTruong": "diastolic",
+      "duongHuyet": "fasting_glucose", "hba1c": "hba1c",
+      "cholesterol": "total_cholesterol", "ldl": "ldl", "hdl": "hdl",
       "creatinine": "creatinine", "soPhutVanDongMoiTuan": "exercise_minutes_per_week",
-      "giaDinhTieuDuong": "family_history_diabetes", "giaDinhCaoHuyetAp": "family_history_hypertension", "giaDinhTimMach": "family_history_cardiovascular",
+      "giaDinhTieuDuong": "family_history_diabetes",
+      "giaDinhCaoHuyetAp": "family_history_hypertension",
+      "giaDinhTimMach": "family_history_cardiovascular",
     };
+
     Object.keys(dbToFormMapping).forEach(dbKey => {
       if (healthProfile[dbKey] !== undefined && healthProfile[dbKey] !== null) {
-        if (fields.some(f => f.key === dbToFormMapping[dbKey])) initialData[dbToFormMapping[dbKey]] = healthProfile[dbKey];
+        if (fields.some(f => f.key === dbToFormMapping[dbKey]))
+          initialData[dbToFormMapping[dbKey]] = healthProfile[dbKey];
       }
     });
+
     if (healthProfile["hutThuoc"] && fields.some(f => f.key === "smoking_status")) {
-        const val = healthProfile["hutThuoc"];
-        initialData["smoking_status"] = val === "Đang hút" ? "current" : val === "Đã bỏ" ? "former" : "never";
+      const val = healthProfile["hutThuoc"];
+      initialData["smoking_status"] = val === "Đang hút" ? "current" : val === "Đã bỏ" ? "former" : "never";
     }
+
+    if (healthProfile["uongRuouBia"] && fields.some(f => f.key === "alcohol")) {
+      const mapping = { "Không": "0", "Thỉnh thoảng": "0", "Thường xuyên": "1", "Nhiều": "1" };
+      initialData["alcohol"] = mapping[healthProfile["uongRuouBia"]] ?? "0";
+    }
+
+    if (healthProfile["tieuDuong"] !== undefined && fields.some(f => f.key === "diabetes_status")) {
+      initialData["diabetes_status"] = healthProfile["tieuDuong"] ? "yes" : "no";
+    }
+
     return initialData;
   };
 
@@ -140,7 +165,7 @@ export default function MainRiskPage() {
         <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
           <span style={{ fontSize: "14px", fontWeight: "600", color: "#475569" }}>Mô hình đích:</span>
           <select value={selectedPlugin} onChange={(e) => setSelectedPlugin(e.target.value)} className="custom-input" style={{ width: "220px", padding: "8px 12px" }}>
-            {plugins.map(p => <option key={p} value={p}>{p === "diabetes" ? "🍬 Tiểu đường" : p === "hypertension" ? "🩸 Tăng huyết áp" : p}</option>)}
+            {plugins.map(p => <option key={p} value={p}>{pluginLabels[p] || p}</option>)}
           </select>
         </div>
       </div>
@@ -151,7 +176,7 @@ export default function MainRiskPage() {
           {plugin.fields.map((field) => (
             <div key={field.key} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
               <label style={{ fontWeight: "600", color: "#475569", fontSize: "14px" }}>
-                {field.label}{field.required && <span style={{color: "#EF4444"}}> *</span>}
+                {field.label}{field.required && <span style={{ color: "#EF4444" }}> *</span>}
               </label>
 
               {field.type === "number" && (
@@ -165,15 +190,15 @@ export default function MainRiskPage() {
               )}
               {field.type === "boolean" && (
                 <label style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px", border: "1px solid #D1D5DB", borderRadius: "8px", cursor: "pointer", backgroundColor: formData[field.key] ? "#EFF6FF" : "#FFFFFF", borderColor: formData[field.key] ? "#2563EB" : "#D1D5DB", transition: "all 0.2s" }}>
-                  <input type="checkbox" checked={!!formData[field.key]} onChange={(e) => handleChange(field, e.target.checked)} style={{ width: "18px", height: "18px" }}/>
+                  <input type="checkbox" checked={!!formData[field.key]} onChange={(e) => handleChange(field, e.target.checked)} style={{ width: "18px", height: "18px" }} />
                   <span style={{ color: formData[field.key] ? "#1E40AF" : "#475569", fontSize: "15px", fontWeight: formData[field.key] ? "600" : "500" }}>Kích hoạt yếu tố chỉ định này</span>
                 </label>
               )}
-              {errors[field.key] && <div style={{color: "#EF4444", fontSize: "13px", fontWeight: "500"}}>{errors[field.key]}</div>}
+              {errors[field.key] && <div style={{ color: "#EF4444", fontSize: "13px", fontWeight: "500" }}>{errors[field.key]}</div>}
             </div>
           ))}
         </div>
-        
+
         <button className="btn-analyze" onClick={handleAnalyzeClick} disabled={isCalculating} style={{ width: "100%", marginTop: "32px" }}>
           {isCalculating ? "⏳ Đang phân tích chỉ số liên tầng..." : "🩺 Phân tích nguy cơ"}
         </button>
@@ -196,9 +221,9 @@ export default function MainRiskPage() {
           <div style={{ background: "white", padding: "24px", borderRadius: "16px", border: "1px solid #E2E8F0", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
             <h3 style={{ margin: "0 0 16px 0", color: "#334155", display: "flex", justifyContent: "space-between" }}>
               <span>🧠 Học máy AI Model</span>
-              {riskResult.ai_based?.status === "READY" ? <span style={{ color: "#10B981", fontWeight: "700" }}>{(riskResult.ai_based?.probability * 100).toFixed(1)}%</span> : <span style={{ color: "#F59E0B", fontSize:"14px" }}>PARTIAL MODE</span>}
+              {riskResult.ai_based?.status === "READY" ? <span style={{ color: "#10B981", fontWeight: "700" }}>{(riskResult.ai_based?.probability * 100).toFixed(1)}%</span> : <span style={{ color: "#F59E0B", fontSize: "14px" }}>PARTIAL MODE</span>}
             </h3>
-            
+
             {riskResult.ai_based?.status === "READY" ? (
               <>
                 <div style={{ width: "100%", height: "12px", background: "#F1F5F9", borderRadius: "6px", overflow: "hidden", marginBottom: "16px" }}>

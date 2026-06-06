@@ -32,12 +32,18 @@ class RiskStratificationEngine:
     def _load_ml_model(self):
         try:
             ml_dir = os.path.join(os.path.dirname(__file__), "..", "ml", "models")
-            model_path = os.path.join(ml_dir, "screening_best_model.pkl")
+            plugin_id = self.metadata.get("disease_info", {}).get("id", "")
+            
+            specific_path = os.path.join(ml_dir, f"{plugin_id}_model.pkl")
+            generic_path  = os.path.join(ml_dir, "screening_best_model.pkl")
+            
+            model_path = specific_path if os.path.exists(specific_path) else generic_path
+            
             if os.path.exists(model_path):
                 self.ml_model = joblib.load(model_path)
-                print("✅ ML Model loaded successfully!")
+                print(f"✅ ML Model loaded: {os.path.basename(model_path)}")
             else:
-                print("⚠️ ML Model not found - using rule-based only")
+                print(f"⚠️ ML Model not found for plugin '{plugin_id}'")
         except Exception as e:
             print(f"⚠️ Failed to load ML model: {e}")
 
@@ -66,6 +72,12 @@ class RiskStratificationEngine:
         # Chuẩn hóa các trường thói quen & phân loại
         if "gioiTinh" in unified_data:
             ml_data["gender_code"] = 1.0 if unified_data["gioiTinh"] == "Nam" else 2.0
+        
+        if "gender_code" in unified_data and "gender_code" not in ml_data:
+            try:
+                ml_data["gender_code"] = float(unified_data["gender_code"])
+            except (ValueError, TypeError):
+                ml_data["gender_code"] = 1.0
             
         if "hutThuoc" in unified_data:
             ml_data["smoke"] = 1.0 if str(unified_data["hutThuoc"]).strip().lower() in ["đang hút", "yes", "1"] else 0.0
@@ -75,6 +87,30 @@ class RiskStratificationEngine:
                 ml_data["exercise"] = 1.0 if float(unified_data["soPhutVanDongMoiTuan"]) >= 150 else 0.0
             except:
                 ml_data["exercise"] = 0.0
+
+        if "smoking_status" in unified_data and "smoke" not in ml_data:
+            ml_data["smoke"] = 1.0 if unified_data["smoking_status"] == "current" else 0.0
+        
+        if "alcohol" in unified_data and "alcohol" not in ml_data:
+            try:
+                ml_data["alcohol"] = float(unified_data["alcohol"])
+            except (ValueError, TypeError):
+                ml_data["alcohol"] = 0.0
+        
+        if "exercise_minutes_per_week" in unified_data and "exercise" not in ml_data:
+            try:
+                ml_data["exercise"] = 1.0 if float(unified_data["exercise_minutes_per_week"]) >= 150 else 0.0
+            except (ValueError, TypeError):
+                ml_data["exercise"] = 0.0
+        
+        if "diabetes_status" in unified_data and "diabetes" not in ml_data:
+            ml_data["diabetes"] = 1.0 if unified_data["diabetes_status"] == "yes" else 0.0
+
+        if "creatinine" in unified_data and "creatinine" not in ml_data:
+            try:
+                ml_data["creatinine"] = float(unified_data["creatinine"])
+            except (ValueError, TypeError):
+                pass
 
         # Ép kiểu dữ liệu về số thực (Float)
         final_ml = {}
@@ -129,8 +165,33 @@ class RiskStratificationEngine:
             if len(missing_fields) == 0:
                 ai_status = "READY"
                 try:
-                    df_input = pd.DataFrame([{col: ml_ready_features[col] for col in self.ml_required_features}])
-                    proba = self.ml_model.predict_proba(df_input)[0, 1]
+                    import warnings, traceback
+        
+                    # DEBUG 1: kiểm tra feature_cols load được không
+                    plugin_id = self.metadata.get('disease_info', {}).get('id', '')
+                    feature_cols_path = os.path.join(
+                        os.path.dirname(__file__), "..", "ml", "models",
+                        f"{plugin_id}_feature_cols.pkl"
+                    )
+                    print(f"🔍 feature_cols_path exists: {os.path.exists(feature_cols_path)}")
+                    
+                    all_feature_cols = joblib.load(feature_cols_path)
+                    print(f"🔍 all_feature_cols ({len(all_feature_cols)}): {all_feature_cols}")
+                    
+                    # DEBUG 2: kiểm tra row trước khi tạo DataFrame
+                    row = {col: ml_ready_features.get(col, float("nan")) for col in all_feature_cols}
+                    print(f"🔍 row: {row}")
+                    
+                    df_input = pd.DataFrame([row])
+                    print(f"🔍 df_input shape: {df_input.shape}, columns: {list(df_input.columns)}")
+                    print(f"🔍 df_input NaN count: {df_input.isna().sum().to_dict()}")
+                    
+                    # DEBUG 3: thử predict với warnings tắt
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        proba = self.ml_model.predict_proba(df_input)[0, 1]
+                    
+                    print(f"✅ proba = {proba}")
                     ai_score = round(proba * 100, 2)
                     ai_proba = round(proba, 4)
                     ai_confidence = 85
@@ -138,6 +199,9 @@ class RiskStratificationEngine:
                 except Exception as e:
                     ai_status = "PARTIAL"
                     ai_risk_level = f"Lỗi thực thi mô hình AI: {str(e)}"
+                    print(f"❌ EXCEPTION type: {type(e).__name__}")
+                    print(f"❌ EXCEPTION message: {e}")
+                    traceback.print_exc()
             else:
                 ai_status = "PARTIAL"
                 ai_risk_level = "Thiếu dữ liệu để thực hiện đánh giá bằng AI"
@@ -156,19 +220,19 @@ class RiskStratificationEngine:
 
         return {
             "rule_based": {
-                "score": rule_score,
+                "score": float(rule_score),
                 "risk_level": rule_risk_level,
                 "matched_rules": all_matched_rules
             },
             "ai_based": {
                 "status": ai_status,
-                "score": ai_score,
+                "score": float(ai_score),
                 "risk_level": ai_risk_level,
-                "probability": ai_proba,
-                "confidence": ai_confidence,
+                "probability": float(ai_proba),
+                "confidence": int(ai_confidence),
                 "missing_features": missing_fields
             },
-            "final_score": rule_score,
+            "final_score": float(rule_score),
             "matched_rules": all_matched_rules,
             **explanation
         }
