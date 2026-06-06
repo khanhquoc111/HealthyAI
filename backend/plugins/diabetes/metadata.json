@@ -3,10 +3,10 @@
   "disease_info": {
     "id": "diabetes",
     "name": "Đánh giá Nguy cơ Tiểu đường Type 2",
-    "version": "1.1",
-    "description": "Công cụ đánh giá nguy cơ phát triển tiểu đường type 2 dựa trên các yếu tố nguy cơ.",
+    "version": "2.0",
+    "description": "Công cụ đánh giá nguy cơ phát triển tiểu đường type 2 dựa trên các yếu tố nguy cơ chính theo tiêu chuẩn y tế.",
     "author": "LuanVanKTPM",
-    "last_updated": "2026-06-05"
+    "last_updated": "2026-06-06"
   },
   "fields": [
     {
@@ -56,63 +56,283 @@
   ],
   "risk_config": {
     "baseline_mapping": [
-      { "name": "Low Risk", "condition": { "field": "bmi", "op": "lt", "value": 25 }, "score": 15 },
-      { "name": "Moderate Risk", "condition": { "field": "bmi", "op": "gte", "value": 25 }, "score": 35 },
-      { "name": "High Risk", "condition": { "field": "bmi", "op": "gte", "value": 30 }, "score": 55 }
-    ],
-    "risk_modifiers": [
       {
-        "id": "age_high",
-        "description": "Tuổi cao (>45)",
-        "condition": { "field": "age", "op": "gte", "value": 45 },
-        "effect_type": "multiplicative",
-        "value": 1.4,
-        "category": "modifier",
+        "name": "Low Risk",
+        "description": "Nguy cơ thấp",
+        "condition": {
+          "type": "AND",
+          "conditions": [
+            { "field": "bmi", "op": "lt", "value": 25 },
+            { "field": "age", "op": "lt", "value": 45 }
+          ]
+        },
+        "score": 15,
+        "priority": 10
+      },
+      {
+        "name": "Moderate Risk",
+        "description": "Nguy cơ trung bình",
+        "condition": {
+          "type": "OR",
+          "conditions": [
+            {
+              "type": "AND",
+              "conditions": [
+                { "field": "bmi", "op": "gte", "value": 25 },
+                { "field": "bmi", "op": "lt", "value": 30 },
+                { "field": "age", "op": "lt", "value": 60 }
+              ]
+            },
+            {
+              "type": "AND",
+              "conditions": [
+                { "field": "bmi", "op": "lt", "value": 30 },
+                { "field": "age", "op": "gte", "value": 45 },
+                { "field": "age", "op": "lt", "value": 60 }
+              ]
+            }
+          ]
+        },
+        "score": 40,
         "priority": 20
       },
       {
+        "name": "High Risk",
+        "description": "Nguy cơ cao",
+        "condition": {
+          "type": "OR",
+          "conditions": [
+            { "field": "bmi", "op": "gte", "value": 30 },
+            { "field": "age", "op": "gte", "value": 60 }
+          ]
+        },
+        "score": 65,
+        "priority": 30
+      }
+    ],
+    "risk_modifiers": [
+      {
+        "id": "age_45_60",
+        "description": "Tuổi từ 45-60",
+        "condition": {
+          "type": "AND",
+          "conditions": [
+            { "field": "age", "op": "gte", "value": 45 },
+            { "field": "age", "op": "lt", "value": 60 }
+          ]
+        },
+        "effect_type": "multiplicative",
+        "value": 1.3,
+        "priority": 20,
+        "note": "Chức năng tuyến tụy giảm theo tuổi"
+      },
+      {
+        "id": "age_high",
+        "description": "Tuổi cao (≥60)",
+        "condition": { "field": "age", "op": "gte", "value": 60 },
+        "effect_type": "multiplicative",
+        "value": 1.5,
+        "priority": 25,
+        "note": "Tuổi ≥60 là yếu tố nguy cơ độc lập mạnh mẽ"
+      },
+      {
         "id": "family_history",
-        "description": "Có tiền sử gia đình",
+        "description": "Có tiền sử gia đình bị tiểu đường",
         "condition": { "field": "family_history_diabetes", "op": "bool_true" },
         "effect_type": "multiplicative",
-        "value": 1.6,
-        "category": "modifier",
-        "priority": 25
+        "value": 1.5,
+        "priority": 30,
+        "note": "Tiền sử gia đình tăng nguy cơ 60% (50-80% do yếu tố di truyền)"
+      },
+      {
+        "id": "obesity",
+        "description": "Béo phì (BMI ≥ 30)",
+        "condition": { "field": "bmi", "op": "gte", "value": 30 },
+        "effect_type": "multiplicative",
+        "value": 1.45,
+        "priority": 28,
+        "note": "Béo phì làm giảm nhạy cảm insulin 40-60%"
+      },
+      {
+        "id": "overweight",
+        "description": "Thừa cân (BMI 25-29.9)",
+        "condition": {
+          "type": "AND",
+          "conditions": [
+            { "field": "bmi", "op": "gte", "value": 25 },
+            { "field": "bmi", "op": "lt", "value": 30 }
+          ]
+        },
+        "effect_type": "multiplicative",
+        "value": 1.25,
+        "priority": 18,
+        "note": "Thừa cân tăng nguy cơ tiểu đường 2-3 lần"
       },
       {
         "id": "smoking",
         "description": "Đang hút thuốc",
         "condition": { "field": "smoking_status", "op": "eq", "value": "current" },
         "effect_type": "multiplicative",
-        "value": 1.25,
-        "category": "modifier",
-        "priority": 15
+        "value": 1.3,
+        "priority": 22,
+        "note": "Hút thuốc tăng nguy cơ 44% so với không hút"
       }
     ],
     "protective_factors": [
       {
         "id": "regular_exercise",
-        "description": "Tập thể dục đều đặn",
-        "condition": { "field": "exercise_minutes_per_week", "op": "gte", "value": 150 },
+        "description": "Tập thể dục đều đặn (≥300 phút/tuần)",
+        "condition": { "field": "exercise_minutes_per_week", "op": "gte", "value": 300 },
         "effect_type": "divisive",
-        "value": 1.2,
-        "category": "protective",
-        "priority": 10
+        "value": 1.4,
+        "priority": 12,
+        "note": "300+ phút/tuần giảm nguy cơ 42%"
+      },
+      {
+        "id": "moderate_exercise",
+        "description": "Tập thể dục vừa phải (150-299 phút/tuần)",
+        "condition": {
+          "type": "AND",
+          "conditions": [
+            { "field": "exercise_minutes_per_week", "op": "gte", "value": 150 },
+            { "field": "exercise_minutes_per_week", "op": "lt", "value": 300 }
+          ]
+        },
+        "effect_type": "divisive",
+        "value": 1.25,
+        "priority": 10,
+        "note": "150+ phút/tuần giảm nguy cơ 28-35%"
+      },
+      {
+        "id": "healthy_weight",
+        "description": "Cân nặng lý tưởng (BMI < 25)",
+        "condition": { "field": "bmi", "op": "lt", "value": 25 },
+        "effect_type": "divisive",
+        "value": 1.35,
+        "priority": 15,
+        "note": "Giảm 1kg làm giảm nguy cơ 5%"
+      },
+      {
+        "id": "no_smoking",
+        "description": "Không hút thuốc",
+        "condition": {
+          "type": "OR",
+          "conditions": [
+            { "field": "smoking_status", "op": "eq", "value": "never" },
+            { "field": "smoking_status", "op": "eq", "value": "former" }
+          ]
+        },
+        "effect_type": "divisive",
+        "value": 1.25,
+        "priority": 12,
+        "note": "Bỏ hút thuốc giảm nguy cơ về tiểu đường"
+      }
+    ],
+    "interactions": [
+      {
+        "id": "obesity_sedentary",
+        "description": "Tương tác: Béo phì + Ít vận động",
+        "condition": {
+          "type": "AND",
+          "conditions": [
+            { "field": "bmi", "op": "gte", "value": 30 },
+            { "field": "exercise_minutes_per_week", "op": "lt", "value": 150 }
+          ]
+        },
+        "interaction_multiplier": 1.4,
+        "interaction_type": "synergy",
+        "note": "Kết hợp béo phì + ít vận động làm tăng nguy cơ đáng kể"
+      },
+      {
+        "id": "family_history_obesity_age",
+        "description": "Tương tác: Tiền sử gia đình + Béo phì + Tuổi cao",
+        "condition": {
+          "type": "AND",
+          "conditions": [
+            { "field": "family_history_diabetes", "op": "bool_true" },
+            { "field": "bmi", "op": "gte", "value": 30 },
+            { "field": "age", "op": "gte", "value": 50 }
+          ]
+        },
+        "interaction_multiplier": 1.5,
+        "interaction_type": "synergy",
+        "note": "Sự kết hợp nhiều yếu tố nguy cơ tạo ra tác động tích lũy"
+      },
+      {
+        "id": "smoking_family_history",
+        "description": "Tương tác: Hút thuốc + Tiền sử gia đình",
+        "condition": {
+          "type": "AND",
+          "conditions": [
+            { "field": "smoking_status", "op": "eq", "value": "current" },
+            { "field": "family_history_diabetes", "op": "bool_true" }
+          ]
+        },
+        "interaction_multiplier": 1.25,
+        "interaction_type": "synergy"
       }
     ],
     "thresholds": [
-      { "range": [0, 40], "level": "low" },
-      { "range": [40, 70], "level": "medium" },
-      { "range": [70, 100], "level": "high" }
+      { "range": [0, 35], "level": "low" },
+      { "range": [35, 65], "level": "medium" },
+      { "range": [65, 100], "level": "high" }
     ]
   },
   "recommendations": [
     {
-      "id": "lifestyle",
-      "condition": { "field": "final_score", "op": "gte", "value": 40 },
-      "text": "Tập thể dục ít nhất 150 phút/tuần, giảm cân và ăn uống lành mạnh.",
+      "id": "low_risk_maintenance",
+      "condition": { "field": "final_score", "op": "lt", "value": 35 },
+      "text": "Nguy cơ thấp. Duy trì lối sống lành mạnh: tập thể dục 150-300 phút/tuần, ăn uống cân bằng, kiểm tra sức khỏe định kỳ hàng năm.",
       "priority": 1,
       "action_type": "lifestyle"
+    },
+    {
+      "id": "medium_risk_prevention",
+      "condition": {
+        "type": "AND",
+        "conditions": [
+          { "field": "final_score", "op": "gte", "value": 35 },
+          { "field": "final_score", "op": "lt", "value": 65 }
+        ]
+      },
+      "text": "Nguy cơ trung bình. Cần tập thể dục 300+ phút/tuần, giảm cân 5-10% (nếu BMI > 25), giảm đường và carbs tinh, kiểm tra hàng năm hoặc 6-12 tháng.",
+      "priority": 2,
+      "action_type": "lifestyle"
+    },
+    {
+      "id": "high_risk_medical",
+      "condition": { "field": "final_score", "op": "gte", "value": 65 },
+      "text": "⚠️ Nguy cơ cao. Cần gặp bác sĩ trong 1-2 tuần để xét nghiệm đường huyết lúc đói, HbA1c, và xem xét can thiệp. Theo dõi chặt chẽ các chỉ số sức khỏe.",
+      "priority": 1,
+      "action_type": "referral"
+    },
+    {
+      "id": "weight_loss",
+      "condition": { "field": "bmi", "op": "gte", "value": 25 },
+      "text": "Giảm cân 5-10% có thể giảm nguy cơ tiểu đường 42-58%. Hãy tư vấn với chuyên gia dinh dưỡng về chế độ ăn phù hợp.",
+      "priority": 1,
+      "action_type": "lifestyle"
+    },
+    {
+      "id": "increase_exercise",
+      "condition": { "field": "exercise_minutes_per_week", "op": "lt", "value": 150 },
+      "text": "Tăng hoạt động thể chất lên ít nhất 150 phút/tuần (từ từ tăng lên 300 phút/tuần). Bắt đầu với những hoạt động nhẹ như đi bộ.",
+      "priority": 2,
+      "action_type": "lifestyle"
+    },
+    {
+      "id": "quit_smoking",
+      "condition": { "field": "smoking_status", "op": "eq", "value": "current" },
+      "text": "Bỏ hút thuốc giúp giảm nguy cơ tiểu đường và các biến chứng. Liên hệ chương trình hỗ trợ bỏ hút hoặc bác sĩ để nhận sự hỗ trợ.",
+      "priority": 1,
+      "action_type": "lifestyle"
+    },
+    {
+      "id": "family_history_screening",
+      "condition": { "field": "family_history_diabetes", "op": "bool_true" },
+      "text": "Do có tiền sử gia đình, cần kiểm tra sức khỏe sớm và thường xuyên hơn. Kiểm tra xét nghiệm đường huyết mỗi 1-2 năm hoặc theo lời khuyên bác sĩ.",
+      "priority": 2,
+      "action_type": "referral"
     }
   ]
 }

@@ -42,7 +42,9 @@ LuanVanKTPM/
 │   ├── plugins/
 │   │   ├── diabetes/
 │   │   │   └── metadata.json
-│   │   └── hypertension/
+│   │   ├── hypertension/
+│   │   │   └── metadata.json
+│   │   └── stroke/
 │   │       └── metadata.json
 │   ├── venv/
 │   ├── debug_ai_model.py
@@ -290,14 +292,13 @@ except Exception as e:
 ```py
 # backend/app/condition_evaluator.py
 """
-ConditionEvaluator - Đánh giá các điều kiện từ risk config
-Hỗ trợ logic AND/OR/NOT với so sánh giá trị (>, <, ==, etc.)
-
-[FIX] Thêm support cho "range" operator cho baseline_mapping
+ConditionEvaluator - UPGRADED VERSION
+Nâng cấp để hỗ trợ thêm operators, percentile comparison, và conditional logic
 """
 
 from typing import Any, Dict, List, Union
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -309,12 +310,15 @@ class ConditionEvaluator:
     Hỗ trợ cú pháp:
     - Simple: {"field": "age", "op": ">", "value": 50}
     - Range: {"field": "systolic", "op": "range", "min": 90, "max": 120}
+    - Percentile: {"field": "bmi", "op": "percentile_gt", "percentile": 75}
     - Compound: {"type": "AND", "conditions": [...]}
     - Compound: {"type": "OR", "conditions": [...]}
     - Negation: {"type": "NOT", "condition": {...}}
+    - Advanced: {"field": "risk_score", "op": "between_inclusive", "min": 40, "max": 70}
     """
 
     OPERATORS = {
+        # Basic comparison
         "gt": lambda v, threshold: v > threshold,
         "gte": lambda v, threshold: v >= threshold,
         "lt": lambda v, threshold: v < threshold,
@@ -327,11 +331,30 @@ class ConditionEvaluator:
         "==": lambda v, threshold: v == threshold,
         "ne": lambda v, threshold: v != threshold,
         "!=": lambda v, threshold: v != threshold,
+        
+        # Collection operators
         "in": lambda v, values: v in values,
         "not_in": lambda v, values: v not in values,
         "contains": lambda v, substr: substr in str(v).lower() if v else False,
+        
+        # Boolean operators
         "bool_true": lambda v, _: bool(v),
         "bool_false": lambda v, _: not bool(v),
+        
+        # [NEW] Range operators
+        "between": lambda v, range_dict: range_dict.get("min") <= v < range_dict.get("max"),
+        "between_inclusive": lambda v, range_dict: range_dict.get("min") <= v <= range_dict.get("max"),
+        
+        # [NEW] String operators
+        "startswith": lambda v, prefix: str(v).lower().startswith(str(prefix).lower()) if v else False,
+        "endswith": lambda v, suffix: str(v).lower().endswith(str(suffix).lower()) if v else False,
+        "icontains": lambda v, substr: substr.lower() in str(v).lower() if v and substr else False,
+        
+        # [NEW] Null/existence operators
+        "is_null": lambda v, _: v is None,
+        "is_not_null": lambda v, _: v is not None,
+        "is_empty": lambda v, _: v is None or v == "" or v == [],
+        "is_not_empty": lambda v, _: v is not None and v != "" and v != [],
     }
 
     @staticmethod
@@ -371,6 +394,11 @@ class ConditionEvaluator:
             sub_condition = condition.get("condition")
             return not ConditionEvaluator.evaluate(sub_condition, form_data)
 
+        elif cond_type == "XOR":  # [NEW] Exclusive OR
+            conditions = condition.get("conditions", [])
+            true_count = sum(1 for c in conditions if ConditionEvaluator.evaluate(c, form_data))
+            return true_count == 1
+
         # Simple condition
         field = condition.get("field")
         operator = condition.get("op", "==")
@@ -383,10 +411,15 @@ class ConditionEvaluator:
         field_value = form_data.get(field)
 
         if field_value is None:
-            # Nếu field không có, xem như điều kiện không thỏa mãn
+            # [ENHANCED] Xử lý null values với is_null/is_not_null
+            if operator in ["is_null", "is_empty"]:
+                return True
+            elif operator in ["is_not_null", "is_not_empty"]:
+                return False
+            # Các operator khác: field không có xem như điều kiện không thỏa mãn
             return False
 
-        # [FIX] Support "range" operator cho baseline_mapping
+        # [ENHANCED] Support "range" operator cho baseline_mapping
         if operator == "range":
             min_val = condition.get("min")
             max_val = condition.get("max")
@@ -403,14 +436,29 @@ class ConditionEvaluator:
                 return False
             return False
 
-        # Chuyển kiểu nếu cần
-        try:
-            if operator in [">", "<", ">=", "<=", "gt", "lt", "gte", "lte"]:
-                field_value = float(field_value)
-                if isinstance(value, (int, float)):
-                    value = float(value)
-        except (ValueError, TypeError):
-            pass
+        # [NEW] Support percentile operators
+        if operator in ["percentile_gt", "percentile_gte", "percentile_lt", "percentile_lte"]:
+            percentile_value = condition.get("percentile", 50)
+            try:
+                num_val = float(field_value)
+                # [TODO] Cần reference data từ database để tính percentile
+                # Tạm thời sử dụng xấp xỉ
+                is_high = num_val > 70  # Placeholder
+                if operator == "percentile_gt":
+                    return is_high
+                elif operator == "percentile_gte":
+                    return is_high or num_val == 70
+                elif operator == "percentile_lt":
+                    return not is_high
+                elif operator == "percentile_lte":
+                    return not is_high or num_val == 70
+            except (ValueError, TypeError):
+                logger.warning(f"Cannot convert {field}={field_value} for percentile")
+                return False
+            return False
+
+        # [ENHANCED] Type conversion with better error handling
+        field_value, value = ConditionEvaluator._coerce_types(operator, field_value, value)
 
         # Đánh giá với operator
         if operator not in ConditionEvaluator.OPERATORS:
@@ -419,10 +467,71 @@ class ConditionEvaluator:
 
         try:
             op_func = ConditionEvaluator.OPERATORS[operator]
-            return op_func(field_value, value)
+            
+            # [ENHANCED] Xử lý range operators
+            if operator in ["between", "between_inclusive"]:
+                range_dict = {"min": condition.get("min"), "max": condition.get("max")}
+                return op_func(field_value, range_dict)
+            else:
+                return op_func(field_value, value)
         except Exception as e:
             logger.error(f"Error evaluating condition: {e}")
             return False
+
+    @staticmethod
+    def _coerce_types(operator: str, field_value: Any, comparison_value: Any) -> tuple:
+        """
+        [ENHANCED] Chuẩn hóa kiểu dữ liệu cho operator
+        
+        Returns:
+            (coerced_field_value, coerced_comparison_value)
+        """
+        try:
+            # Numeric operators
+            if operator in [">", "<", ">=", "<=", "gt", "lt", "gte", "lte", "between", "between_inclusive"]:
+                field_value = float(field_value) if field_value is not None else 0
+                if comparison_value is not None:
+                    comparison_value = float(comparison_value)
+            
+            # Boolean operators - convert string to bool
+            elif operator in ["bool_true", "bool_false"]:
+                field_value = ConditionEvaluator._string_to_bool(field_value)
+            
+            # Equality operators - convert if types differ
+            elif operator in ["eq", "==", "ne", "!="]:
+                if isinstance(comparison_value, bool):
+                    field_value = ConditionEvaluator._string_to_bool(field_value)
+                elif isinstance(comparison_value, (int, float)):
+                    try:
+                        field_value = float(field_value)
+                    except (ValueError, TypeError):
+                        pass
+            
+            # String operators - convert to string
+            elif operator in ["contains", "icontains", "startswith", "endswith"]:
+                field_value = str(field_value)
+                comparison_value = str(comparison_value) if comparison_value is not None else ""
+        
+        except (ValueError, TypeError) as e:
+            logger.debug(f"Type coercion warning: {e}")
+        
+        return field_value, comparison_value
+
+    @staticmethod
+    def _string_to_bool(value: Any) -> bool:
+        """
+        [ENHANCED] Chuyển đổi string thành boolean một cách thông minh
+        """
+        if isinstance(value, bool):
+            return value
+        
+        if isinstance(value, (int, float)):
+            return bool(value)
+        
+        if isinstance(value, str):
+            return value.lower() in ("true", "1", "yes", "on", "enabled", "active")
+        
+        return bool(value)
 
 
 class ValidationRule:
@@ -440,59 +549,39 @@ class ValidationRule:
         """
         if value is None or value == "":
             if self.params.get("required"):
-                return False, f"{self.field} là bắt buộc"
+                return False, f"{self.field} is required"
             return True, ""
 
-        # Numeric validation
-        if self.rule_type == "numeric":
+        if self.rule_type == "number":
             try:
-                num_val = float(value)
+                num = float(value)
                 min_val = self.params.get("min")
                 max_val = self.params.get("max")
-
-                if min_val is not None and num_val < min_val:
-                    return False, f"{self.field} không thể nhỏ hơn {min_val}"
-                if max_val is not None and num_val > max_val:
-                    return False, f"{self.field} không thể lớn hơn {max_val}"
-
+                
+                if min_val is not None and num < min_val:
+                    return False, f"{self.field} must be >= {min_val}"
+                if max_val is not None and num > max_val:
+                    return False, f"{self.field} must be <= {max_val}"
+                
                 return True, ""
-            except ValueError:
-                return False, f"{self.field} phải là số"
+            except (ValueError, TypeError):
+                return False, f"{self.field} must be a number"
 
-        # Range validation
-        elif self.rule_type == "range":
-            try:
-                num_val = float(value)
-                min_val = self.params.get("min")
-                max_val = self.params.get("max")
-                if not (min_val <= num_val <= max_val):
-                    return False, f"{self.field} phải trong khoảng [{min_val}, {max_val}]"
-                return True, ""
-            except ValueError:
-                return False, f"{self.field} phải là số"
-
-        # Length validation
-        elif self.rule_type == "length":
-            min_len = self.params.get("min", 0)
-            max_len = self.params.get("max", float("inf"))
-            str_val = str(value)
-            if not (min_len <= len(str_val) <= max_len):
-                return False, f"{self.field} độ dài phải từ {min_len} đến {max_len}"
+        elif self.rule_type == "select":
+            options = self.params.get("options", [])
+            if value not in options:
+                return False, f"{self.field} has invalid value"
             return True, ""
 
-        # Enum validation
-        elif self.rule_type == "enum":
-            allowed = self.params.get("values", [])
-            if value not in allowed:
-                return False, f"{self.field} giá trị không hợp lệ: {value}"
-            return True, ""
-
-        # Pattern validation
-        elif self.rule_type == "pattern":
-            import re
-            pattern = self.params.get("pattern")
-            if not re.match(pattern, str(value)):
-                return False, f"{self.field} định dạng không hợp lệ"
+        elif self.rule_type == "string":
+            min_len = self.params.get("min_length")
+            max_len = self.params.get("max_length")
+            
+            if min_len and len(str(value)) < min_len:
+                return False, f"{self.field} is too short"
+            if max_len and len(str(value)) > max_len:
+                return False, f"{self.field} is too long"
+            
             return True, ""
 
         return True, ""
@@ -662,328 +751,667 @@ class DiseaseSchema(BaseModel):
 ```py
 # backend/app/explanation_engine.py
 """
-ExplanationEngine - Sinh giải thích chi tiết cho kết quả đánh giá
-Cung cấp:
-- Risk factors (yếu tố tăng nguy cơ)
-- Protective factors (yếu tố bảo vệ)
-- Recommendations (khuyến nghị)
-- Scoring breakdown (chi tiết điểm số)
+ExplanationEngine - UPGRADED VERSION
+Tạo giải thích chi tiết, dễ hiểu về kết quả đánh giá rủi ro
 """
 
-from typing import Any, Dict, List
+from typing import Dict, Any, List, Optional
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 class ExplanationEngine:
-    """Sinh giải thích từ metadata plugin và dữ liệu nhập"""
-
-    def __init__(self, plugin_metadata: Dict[str, Any]):
-        self.metadata = plugin_metadata
-        self.disease_info = plugin_metadata.get("disease_info", {})
-        self.recommendations = plugin_metadata.get("recommendations", [])
-        self.explanation_templates = plugin_metadata.get("explanation_templates", {})
-        self.risk_config = plugin_metadata.get("risk_config", {})
-
-    def generate_explanation(self, result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Engine để tạo giải thích chi tiết về kết quả rủi ro
+    """
+    
+    def __init__(self, plugin_metadata: Dict[str, Any], risk_result: Dict[str, Any]):
         """
-        Tạo giải thích toàn diện cho kết quả
-        
         Args:
-            result: {
-                "risk_level": "high/medium/low",
-                "final_score": float (0-100),
-                "form_data": dict của dữ liệu nhập
-            }
-            
+            plugin_metadata: Metadata của disease plugin
+            risk_result: Kết quả từ RiskStratificationEngine
+        """
+        self.plugin_metadata = plugin_metadata
+        self.risk_result = risk_result
+        self.disease_info = plugin_metadata.get("disease_info", {})
+        self.explanations = plugin_metadata.get("explanations", {})
+    
+    def generate_explanation(self) -> Dict[str, Any]:
+        """
+        Tạo giải thích toàn diện về kết quả đánh giá rủi ro
+        
         Returns:
             {
-                "risk_factors": [...],
-                "protective_factors": [...],
-                "recommendations": [...],
                 "summary": "...",
-                "explanation": "..."
+                "risk_level_explanation": "...",
+                "score_breakdown": "...",
+                "primary_factors": [...],
+                "protective_factors": [...],
+                "next_steps": [...],
+                "severity": "..."
             }
         """
-        risk_level = result.get("risk_level", "medium")
-        final_score = result.get("final_score", 50)
-        form_data = result.get("form_data", {})
-
-        risk_factors = self._identify_risk_factors(form_data)
-        protective_factors = self._identify_protective_factors(form_data)
-        recommendations = self._get_recommendations(risk_level, form_data)
-        summary = self._generate_summary(risk_level, final_score, len(risk_factors))
-        explanation = self._generate_explanation(risk_level, risk_factors, protective_factors)
-
+        
+        final_score = self.risk_result.get("final_score", 0)
+        risk_level = self.risk_result.get("risk_level", "unknown")
+        risk_percentile = self.risk_result.get("risk_percentile", 50)
+        
         return {
-            "risk_factors": risk_factors,
-            "protective_factors": protective_factors,
-            "recommendations": recommendations,
-            "summary": summary,
-            "explanation": explanation,
-            "disease_name": self.disease_info.get("name", "Bệnh"),
+            "summary": self._generate_summary(),
+            "risk_level_explanation": self._explain_risk_level(risk_level),
+            "score_breakdown": self._explain_score_breakdown(final_score),
+            "score_interpretation": self._interpret_score(final_score, risk_percentile),
+            "primary_factors": self._list_primary_factors(),
+            "protective_factors": self._list_protective_factors(),
+            "action_items": self._generate_action_items(),
+            "next_steps": self._generate_next_steps(),
+            "clinical_notes": self._generate_clinical_notes(),
+            "severity_rating": self._rate_severity(final_score, risk_level)
         }
-
-    def _identify_risk_factors(self, form_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    
+    def _generate_summary(self) -> str:
         """
-        Xác định các yếu tố tăng nguy cơ từ dữ liệu
+        [NEW] Tạo tóm tắt một dòng về kết quả
         """
-        risk_factors = []
-
-        risk_modifiers = self.risk_config.get("risk_modifiers", [])
-        baseline_mapping = self.risk_config.get("baseline_mapping", [])
-
-        # Kiểm tra với risk_modifiers
-        for modifier in risk_modifiers:
-            if self._check_condition(modifier.get("condition"), form_data):
-                factor = {
-                    "name": modifier.get("name", "Yếu tố nguy cơ"),
-                    "description": modifier.get("description", ""),
-                    "effect": modifier.get("value", 0),
-                    "effect_type": modifier.get("effect_type", "multiplicative"),
-                }
-                risk_factors.append(factor)
-
-        # Kiểm tra baseline_mapping
-        for baseline in baseline_mapping:
-            if self._check_condition(baseline.get("condition"), form_data):
-                if baseline.get("score", 0) > 50:
-                    factor = {
-                        "name": baseline.get("name", "Tình trạng cơ bản"),
-                        "description": baseline.get("description", ""),
-                        "effect": baseline.get("score", 0),
-                        "effect_type": "baseline",
-                    }
-                    risk_factors.append(factor)
-
-        return risk_factors[:5]  # Giới hạn 5 yếu tố chính
-
-    def _identify_protective_factors(self, form_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        final_score = self.risk_result.get("final_score", 0)
+        risk_level = self.risk_result.get("risk_level", "medium")
+        baseline_stage = self.risk_result.get("baseline_stage", "unknown")
+        
+        disease_name = self.disease_info.get("name", "bệnh")
+        
+        if risk_level == "high":
+            return f"Bạn có nguy cơ CAO mắc {disease_name} (điểm: {final_score}). Cần có sự can thiệp tích cực."
+        elif risk_level == "medium":
+            return f"Bạn có nguy cơ TRUNG BÌNH mắc {disease_name} (điểm: {final_score}). Cần chú ý theo dõi."
+        else:
+            return f"Bạn có nguy cơ THẤP mắc {disease_name} (điểm: {final_score}). Tiếp tục duy trì lối sống lành mạnh."
+    
+    def _explain_risk_level(self, risk_level: str) -> str:
         """
-        Xác định các yếu tố bảo vệ từ dữ liệu
+        [NEW] Giải thích chi tiết mức độ rủi ro
         """
-        protective_factors = []
-
-        factors = self.risk_config.get("protective_factors", [])
-
-        for factor in factors:
-            if self._check_condition(factor.get("condition"), form_data):
-                prot = {
-                    "name": factor.get("name", "Yếu tố bảo vệ"),
-                    "description": factor.get("description", ""),
-                    "effect": factor.get("value", 0),
-                    "effect_type": factor.get("effect_type", "multiplicative"),
-                }
-                protective_factors.append(prot)
-
-        return protective_factors[:5]
-
-    def _get_recommendations(
-        self, risk_level: str, form_data: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
+        explanations = self.explanations.get("risk_levels", {})
+        
+        if risk_level in explanations:
+            return explanations[risk_level]
+        
+        # Default explanations
+        default_explanations = {
+            "low": "Nguy cơ mắc bệnh của bạn được đánh giá là thấp. Tuy nhiên, vẫn cần duy trì lối sống lành mạnh và theo dõi định kỳ.",
+            "medium": "Nguy cơ mắc bệnh của bạn được đánh giá là trung bình. Bạn nên thay đổi lối sống và có thể cần tư vấn y tế.",
+            "high": "Nguy cơ mắc bệnh của bạn được đánh giá là cao. Bạn cần nên liên hệ với bác sĩ để tư vấn và kiểm tra sớm."
+        }
+        
+        return default_explanations.get(risk_level, "Không rõ mức độ rủi ro")
+    
+    def _explain_score_breakdown(self, final_score: float) -> str:
         """
-        Lấy khuyến nghị dựa trên mức nguy cơ
+        [NEW] Giải thích cách tính điểm
         """
-        recommendations = []
-
-        for rec in self.recommendations:
-            # Khuyến nghị dựa trên mức nguy cơ
-            if risk_level.lower() in str(rec.get("risk_level", "")).lower():
-                recommendations.append({
-                    "priority": rec.get("priority", "medium"),
-                    "action": rec.get("action", ""),
-                    "description": rec.get("description", ""),
+        baseline_score = self.risk_result.get("baseline_score", 0)
+        modifiers_effect = self.risk_result.get("modifiers_effect", 0)
+        protective_effect = self.risk_result.get("protective_effect", 0)
+        interaction_multiplier = self.risk_result.get("interaction_multiplier", 1.0)
+        
+        explanation = f"""
+        Điểm của bạn được tính như sau:
+        
+        1. Điểm cơ bản: {baseline_score:.1f}
+           - Dựa trên các thông số sức khỏe hiện tại của bạn
+        
+        2. Yếu tố tăng rủi ro: +{modifiers_effect:.1f}
+           - Tính toán từ các yếu tố nguy hiểm được phát hiện
+        
+        3. Yếu tố bảo vệ: {protective_effect:.1f}
+           - Những yếu tố giúp giảm nguy cơ
+        
+        4. Tác động kết hợp: ×{interaction_multiplier:.2f}
+           - Sự tương tác giữa các yếu tố
+        
+        Điểm cuối cùng: {final_score:.1f} (trên thang 0-100)
+        """
+        
+        return explanation.strip()
+    
+    def _interpret_score(self, score: float, percentile: int) -> Dict[str, Any]:
+        """
+        [NEW] Diễn giải ý nghĩa của điểm
+        """
+        return {
+            "absolute_score": f"Điểm tuyệt đối: {score}/100",
+            "percentile_rank": f"Xếp hạng phần trăm: {percentile}% (bạn cao hơn {percentile}% dân số)",
+            "interpretation": self._get_score_interpretation(score, percentile)
+        }
+    
+    def _get_score_interpretation(self, score: float, percentile: int) -> str:
+        """Diễn giải ý nghĩa điểm"""
+        if percentile < 10:
+            return "Bạn nằm trong nhóm có rủi ro thấp nhất"
+        elif percentile < 25:
+            return "Bạn nằm trong nhóm có rủi ro thấp"
+        elif percentile < 50:
+            return "Bạn nằm trong nhóm có rủi ro dưới trung bình"
+        elif percentile < 75:
+            return "Bạn nằm trong nhóm có rủi ro trên trung bình"
+        elif percentile < 90:
+            return "Bạn nằm trong nhóm có rủi ro cao"
+        else:
+            return "Bạn nằm trong nhóm có rủi ro cao nhất"
+    
+    def _list_primary_factors(self) -> List[Dict[str, Any]]:
+        """
+        [NEW] Liệt kê các yếu tố chính tăng rủi ro
+        """
+        modifiers = self.risk_result.get("breakdown", {}).get("applied_modifiers", [])
+        
+        # Sort by effect (impact giảm)
+        sorted_modifiers = sorted(
+            modifiers,
+            key=lambda x: abs(x.get("effect_on_score", 0)),
+            reverse=True
+        )
+        
+        factors = []
+        for modifier in sorted_modifiers[:5]:  # Top 5
+            factors.append({
+                "name": modifier.get("description", ""),
+                "impact": f"+{modifier.get('effect_on_score', 0):.1f}",
+                "explanation": self._get_factor_explanation(modifier.get("id", ""))
+            })
+        
+        return factors
+    
+    def _list_protective_factors(self) -> List[Dict[str, Any]]:
+        """
+        [NEW] Liệt kê các yếu tố bảo vệ (giảm rủi ro)
+        """
+        protective = self.risk_result.get("breakdown", {}).get("applied_protective", [])
+        
+        if not protective:
+            return []
+        
+        factors = []
+        for prot in protective:
+            factors.append({
+                "name": prot.get("description", ""),
+                "benefit": f"{prot.get('effect_on_score', 0):.1f}",
+                "explanation": self._get_factor_explanation(prot.get("id", ""))
+            })
+        
+        return factors
+    
+    def _get_factor_explanation(self, factor_id: str) -> str:
+        """
+        [NEW] Lấy giải thích của một yếu tố
+        """
+        factor_explanations = self.explanations.get("factor_explanations", {})
+        
+        return factor_explanations.get(
+            factor_id,
+            "Yếu tố này ảnh hưởng đến nguy cơ mắc bệnh"
+        )
+    
+    def _generate_action_items(self) -> List[Dict[str, Any]]:
+        """
+        [NEW] Tạo danh sách hành động cụ thể
+        """
+        risk_level = self.risk_result.get("risk_level", "medium")
+        active_factors = self.risk_result.get("breakdown", {}).get("applied_modifiers", [])
+        
+        action_items = []
+        
+        # Thêm actions dựa trên risk level
+        if risk_level == "high":
+            action_items.append({
+                "priority": "URGENT",
+                "action": "Liên hệ với bác sĩ để kiểm tra sớm",
+                "timeline": "Trong 1-2 tuần"
+            })
+        
+        # Thêm actions dựa trên active factors
+        for factor in active_factors[:3]:  # Top 3 factors
+            actions = self.explanations.get("recommended_actions", {}).get(
+                factor.get("id", ""),
+                None
+            )
+            
+            if actions:
+                action_items.append({
+                    "factor": factor.get("description", ""),
+                    "action": actions.get("action", ""),
+                    "timeline": actions.get("timeline", "")
                 })
-
-        return recommendations[:5]
-
-    def _generate_summary(self, risk_level: str, score: float, num_risk_factors: int) -> str:
+        
+        return action_items
+    
+    def _generate_next_steps(self) -> List[str]:
         """
-        Tạo tóm tắt ngắn gọn
+        [NEW] Tạo danh sách bước tiếp theo
         """
-        risk_labels = {
-            "high": "CAO ⚠️",
-            "medium": "TRUNG BÌNH ⚡",
-            "low": "THẤP ✓",
-        }
-
-        label = risk_labels.get(risk_level.lower(), risk_level)
-
-        if risk_level.lower() == "high":
-            return f"Nguy cơ {label}. Điểm số: {score:.1f}/100. Phát hiện {num_risk_factors} yếu tố nguy cơ chính. Cần tư vấn y tế sớm."
-        elif risk_level.lower() == "medium":
-            return f"Nguy cơ {label}. Điểm số: {score:.1f}/100. Nên theo dõi định kỳ và cải thiện lối sống."
+        risk_level = self.risk_result.get("risk_level", "medium")
+        
+        next_steps = []
+        
+        if risk_level == "high":
+            next_steps = [
+                "1. Đặt lịch tái khám với bác sĩ chuyên khoa",
+                "2. Chuẩn bị danh sách câu hỏi để hỏi bác sĩ",
+                "3. Xem xét việc theo dõi sức khỏe thường xuyên",
+                "4. Thảo luận về các lựa chọn điều trị"
+            ]
+        elif risk_level == "medium":
+            next_steps = [
+                "1. Tái đánh giá nguy cơ trong 3-6 tháng",
+                "2. Thực hiện các thay đổi lối sống được khuyến cáo",
+                "3. Theo dõi các chỉ số sức khỏe chính",
+                "4. Tư vấn với bác sĩ nếu có triệu chứng"
+            ]
         else:
-            return f"Nguy cơ {label}. Điểm số: {score:.1f}/100. Tiếp tục duy trì lối sống lành mạnh."
-
-    def _generate_explanation(
-        self, risk_level: str, risk_factors: List[Dict], protective_factors: List[Dict]
-    ) -> str:
+            next_steps = [
+                "1. Duy trì lối sống lành mạnh hiện tại",
+                "2. Tái đánh giá nguy cơ hàng năm",
+                "3. Tiếp tục theo dõi các chỉ số sức khỏe",
+                "4. Chia sẻ kinh nghiệm với gia đình"
+            ]
+        
+        return next_steps
+    
+    def _generate_clinical_notes(self) -> Optional[str]:
         """
-        Sinh giải thích chi tiết
+        [NEW] Tạo các ghi chú lâm sàng bổ sung (nếu có)
         """
-        explanation = ""
-
-        if risk_level.lower() == "high":
-            explanation = "Kết quả cho thấy nguy cơ cao. "
-        elif risk_level.lower() == "medium":
-            explanation = "Kết quả cho thấy nguy cơ trung bình. "
+        evidence_score = self.risk_result.get("evidence_score", 100)
+        confidence = "cao" if evidence_score > 80 else "trung bình" if evidence_score > 60 else "thấp"
+        
+        notes = f"""
+        GHI CHÚ LÂM SÀNG:
+        - Độ tin cậy của kết quả: {confidence} ({evidence_score:.1f}%)
+        - Mức độ hoàn chỉnh dữ liệu: {evidence_score:.1f}%
+        - Kết quả này dựa trên các chỉ số hiện tại và không thay thế tư vấn y tế chuyên nghiệp
+        """
+        
+        return notes.strip()
+    
+    def _rate_severity(self, score: float, risk_level: str) -> Dict[str, Any]:
+        """
+        [NEW] Đánh giá mức độ nghiêm trọng
+        """
+        
+        if risk_level == "high":
+            severity = {
+                "level": "CAO",
+                "color": "red",
+                "icon": "🔴",
+                "recommendation": "CẦN CAN THIỆP Y TẾ"
+            }
+        elif risk_level == "medium":
+            severity = {
+                "level": "TRUNG BÌNH",
+                "color": "orange",
+                "icon": "🟠",
+                "recommendation": "CẦN THEO DÕI VÀ THAY ĐỔI LỐI SỐNG"
+            }
         else:
-            explanation = "Kết quả cho thấy nguy cơ thấp. "
-
-        if risk_factors:
-            factor_names = [f["name"] for f in risk_factors[:3]]
-            explanation += f"Các yếu tố chính: {', '.join(factor_names)}. "
-
-        if protective_factors:
-            prot_names = [f["name"] for f in protective_factors[:3]]
-            explanation += f"Các yếu tố bảo vệ: {', '.join(prot_names)}. "
-
-        explanation += "Vui lòng tư vấn với bác sĩ để có đánh giá chuyên sâu hơn."
-
-        return explanation
-
-    def _check_condition(self, condition: Any, form_data: Dict[str, Any]) -> bool:
-        """
-        Kiểm tra điều kiện (sử dụng ConditionEvaluator)
-        """
-        if condition is None:
-            return True
-
-        try:
-            from app.condition_evaluator import ConditionEvaluator
-
-            return ConditionEvaluator.evaluate(condition, form_data)
-        except Exception as e:
-            logger.error(f"Error checking condition: {e}")
-            return False
+            severity = {
+                "level": "THẤP",
+                "color": "green",
+                "icon": "🟢",
+                "recommendation": "DUY TRÌ LỐI SỐNG LÀNH MẠNH"
+            }
+        
+        return severity
 ```
 
 ### backend\app\plugin_api.py
 ```py
 # backend/app/plugin_api.py
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
-from typing import Dict, Any, Optional
-from sqlalchemy.orm import Session
-import logging
+"""
+Plugin API - UPGRADED VERSION
+Sử dụng các feature mới từ upgraded validation và risk engines
+"""
 
-from database.database import get_db
-from database.nguoi_dung import NguoiDung
-from database.hs_suckhoe import HoSoSucKhoe
-from database.cs_suckhoe import ChiSoSucKhoe
+from fastapi import APIRouter, HTTPException
+from typing import Dict, Any, Optional
+import logging
 
 from app.plugin_loader import get_plugin
 from app.validation_engine import ValidationEngine
 from app.risk_stratification_engine import RiskStratificationEngine
+from app.explanation_engine import ExplanationEngine
+from app.condition_evaluator import ConditionEvaluator
 
-router = APIRouter(prefix="/api/plugins", tags=["Plugins"])
 logger = logging.getLogger(__name__)
 
-class FormSubmission(BaseModel):
-    ten_dang_nhap: Optional[str] = None
-    form_data: Dict[str, Any] = {}
+router = APIRouter(prefix="/api/plugins", tags=["plugins"])
 
-# Mapping DB (VN) → Plugin (EN) - CHÍNH XÁC
-DB_TO_FORM = {
-    "tuoi": "age",
-    "gioiTinh": "gender",
-    "bmi": "bmi",
-    "vongEo": "waist_circumference",
-    "huyetApTamThu": "systolic_bp",
-    "huyetApTamTruong": "diastolic_bp",
-    "duongHuyet": "fasting_blood_glucose",
-    "hba1c": "hba1c",
-    "cholesterol": "total_cholesterol",
-    "hdl": "hdl_cholesterol",
-    "ldl": "ldl_cholesterol",
-    "triglyceride": "triglycerides",
-    "creatinine": "serum_creatinine",
-    "soPhutVanDongMoiTuan": "physical_activity_minutes",
-    "giaDinhTieuDuong": "family_history_diabetes",
-    "giaDinhCaoHuyetAp": "family_history_hypertension",
-}
 
-FORM_TO_DB = {v: k for k, v in DB_TO_FORM.items()}
-
-@router.get("/")
-def list_plugins():
+@router.get("/diseases")
+async def get_available_diseases():
+    """
+    Lấy danh sách các bệnh khả dụng
+    """
     from app.plugin_loader import get_plugin_loader
-    plugins = get_plugin_loader().list_diseases()
-    return {"available_plugins": [{"id": p, "name": p.capitalize()} for p in plugins]}
-
-# [FIX] Added missing endpoint to fetch metadata for a specific plugin
-@router.get("/{plugin_id}")
-def get_plugin_metadata(plugin_id: str):
-    """Lấy toàn bộ metadata (schema) của một plugin để frontend render form"""
-    plugin_metadata = get_plugin(plugin_id)
-    if not plugin_metadata:
-        raise HTTPException(status_code=404, detail=f"Plugin {plugin_id} not found")
-    return plugin_metadata
-
-# [FIX] Added missing endpoint for real-time frontend field validation
-@router.post("/{plugin_id}/validate-field/{field_key}")
-def validate_single_field(plugin_id: str, field_key: str, payload: Dict[str, Any]):
-    """Validate từng field realtime khi user nhập liệu (on blur/change)"""
-    plugin_metadata = get_plugin(plugin_id)
-    if not plugin_metadata:
-        raise HTTPException(status_code=404, detail=f"Plugin {plugin_id} not found")
     
-    val_engine = ValidationEngine(plugin_metadata)
-    errors = val_engine.get_field_errors(payload, field_key)
+    loader = get_plugin_loader()
+    diseases = loader.list_diseases()
     
-    if errors:
-        return {"is_valid": False, "errors": [e.to_dict() for e in errors]}
-    return {"is_valid": True}
+    disease_info = []
+    for disease in diseases:
+        plugin = loader.load_plugin(disease)
+        if plugin:
+            disease_info.append({
+                "id": disease,
+                "name": plugin.get("disease_info", {}).get("name", disease),
+                "description": plugin.get("disease_info", {}).get("description", ""),
+                "icon": plugin.get("disease_info", {}).get("icon", "🏥")
+            })
+    
+    return {"diseases": disease_info}
 
-@router.post("/{plugin_id}/calculate")
-def calculate_disease_risk(plugin_id: str, payload: FormSubmission, db: Session = Depends(get_db)):
-    plugin_metadata = get_plugin(plugin_id)
+
+@router.get("/diseases/{disease_id}")
+async def get_disease_plugin(disease_id: str):
+    """
+    Lấy thông tin chi tiết plugin của một bệnh
+    """
+    plugin = get_plugin(disease_id)
+    
+    if not plugin:
+        raise HTTPException(status_code=404, detail=f"Disease plugin '{disease_id}' not found")
+    
+    # [ENHANCED] Return simplified metadata for frontend
+    return {
+        "id": disease_id,
+        "disease_info": plugin.get("disease_info", {}),
+        "fields": plugin.get("fields", []),
+        "risk_config": {
+            "baseline_mapping": plugin.get("risk_config", {}).get("baseline_mapping", []),
+            "thresholds": plugin.get("risk_config", {}).get("thresholds", [])
+        }
+    }
+
+
+@router.post("/diseases/{disease_id}/assess")
+async def assess_risk(disease_id: str, payload: Dict[str, Any]):
+    """
+    [ENHANCED] Đánh giá nguy cơ bệnh
+    
+    Payload:
+    {
+        "form_data": {...user input...},
+        "health_profile": {...optional existing data...},
+        "include_breakdown": bool,
+        "calculate_progression": bool
+    }
+    """
+    
+    # [STEP 1] Load plugin
+    plugin_metadata = get_plugin(disease_id)
+    
     if not plugin_metadata:
-        raise HTTPException(status_code=404, detail=f"Plugin {plugin_id} not found")
-
-    ten_dang_nhap = payload.ten_dang_nhap
-    form_data = payload.form_data or {}
-
-    # 1. Lấy dữ liệu từ DB
-    health_profile = {}
-    if ten_dang_nhap:
-        user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == ten_dang_nhap).first()
-        if user:
-            # HoSoSucKhoe (cột cứng)
-            hoso = db.query(HoSoSucKhoe).filter(HoSoSucKhoe.idNguoiDung == user.idNguoiDung).first()
-            if hoso:
-                for k, v in hoso.__dict__.items():
-                    if not k.startswith('_') and v is not None:
-                        form_key = DB_TO_FORM.get(k, k)
-                        health_profile[form_key] = v
-
-            # ChiSoSucKhoe (EAV)
-            chisos = db.query(ChiSoSucKhoe).filter(ChiSoSucKhoe.idNguoiDung == user.idNguoiDung).all()
-            for cs in chisos:
-                form_key = DB_TO_FORM.get(cs.maChiSo, cs.maChiSo)
-                try:
-                    health_profile[form_key] = float(cs.giaTri) if '.' in str(cs.giaTri) or str(cs.giaTri).isdigit() else cs.giaTri
-                except:
-                    health_profile[form_key] = cs.giaTri
-
-    # 2. Merge: form_data ưu tiên cao hơn DB
+        raise HTTPException(status_code=404, detail=f"Disease plugin '{disease_id}' not found")
+    
+    # [STEP 2] Extract payloads
+    form_data = payload.get("form_data", {})
+    health_profile = payload.get("health_profile", {})
+    include_breakdown = payload.get("include_breakdown", True)
+    calculate_progression = payload.get("calculate_progression", True)
+    
+    # [STEP 3] Merge data: form_data ưu tiên cao hơn health_profile
     unified_data = {**health_profile, **form_data}
-
-    # 3. Validation & Normalize
-    val_engine = ValidationEngine(plugin_metadata)
+    
+    # [STEP 4] Validation & Quality Assessment
+    val_engine = ValidationEngine(plugin_metadata.get("risk_config", {}))
     val_result = val_engine.validate_form(unified_data)
+    
+    # Return validation errors
     if val_result.has_errors():
-        raise HTTPException(400, detail={"errors": [e.to_dict() for e in val_result.errors]})
-
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "errors": [e.to_dict() for e in val_result.errors],
+                "message": "Validation failed"
+            }
+        )
+    
+    # [NEW] Log warnings if any
+    if val_result.has_warnings():
+        logger.warning(f"Validation warnings for {disease_id}: {[w.to_dict() for w in val_result.warnings]}")
+    
+    # [STEP 5] Normalize form data
     normalized = val_engine.normalize_form_data(unified_data)
+    
+    # [STEP 6] Calculate risk using upgraded engine
+    risk_engine = RiskStratificationEngine(plugin_metadata.get("risk_config", {}))
+    risk_result = risk_engine.evaluate(normalized)
+    
+    # [STEP 7] Generate explanation
+    explanation_engine = ExplanationEngine(plugin_metadata, risk_result)
+    explanation = explanation_engine.generate_explanation()
+    
+    # [STEP 8] Build response
+    # [FIX] Trọng yếu: Truyền thêm normalized payload vào function _generate_recommendations 
+    response = {
+        "disease_id": disease_id,
+        "final_score": risk_result.get("final_score"),
+        "risk_level": risk_result.get("risk_level"),
+        "risk_percentile": risk_result.get("risk_percentile"),
+        "data_quality_score": val_result.data_quality_score,
+        "explanation": explanation,
+        "recommendations": _generate_recommendations(risk_result, plugin_metadata, normalized),
+    }
+    
+    # [NEW] Include detailed breakdown if requested
+    if include_breakdown:
+        response["breakdown"] = risk_result.get("breakdown", {})
+        response["evidence_breakdown"] = risk_result.get("evidence_breakdown", {})
+    
+    # [NEW] Include risk progression if requested
+    if calculate_progression:
+        response["risk_progression"] = risk_result.get("risk_progression", {})
+    
+    # [NEW] Include quality metrics
+    response["quality_metrics"] = {
+        "data_quality": val_result.data_quality_score,
+        "confidence_level": _calculate_confidence(val_result, risk_result),
+        "fields_provided": sum(1 for k, v in normalized.items() if v is not None)
+    }
+    
+    return response
 
-    # 4. Tính risk (rule-based)
-    risk_engine = RiskStratificationEngine(plugin_metadata)
-    result = risk_engine.calculate_risk(normalized)
 
-    return result
+@router.post("/diseases/{disease_id}/batch-assess")
+async def batch_assess_risk(disease_id: str, payloads: list):
+    """
+    [NEW] Đánh giá nguy cơ cho nhiều người dùng cùng một lúc
+    """
+    results = []
+    
+    for payload in payloads:
+        try:
+            result = await assess_risk(disease_id, payload)
+            results.append({
+                "success": True,
+                "data": result
+            })
+        except HTTPException as e:
+            results.append({
+                "success": False,
+                "error": str(e.detail)
+            })
+        except Exception as e:
+            results.append({
+                "success": False,
+                "error": str(e)
+            })
+    
+    return {"results": results}
+
+
+@router.post("/diseases/{disease_id}/validate")
+async def validate_form(disease_id: str, form_data: Dict[str, Any]):
+    """
+    [NEW] Chỉ validate form data, không tính risk
+    Hữu ích cho real-time validation trong frontend
+    """
+    plugin_metadata = get_plugin(disease_id)
+    
+    if not plugin_metadata:
+        raise HTTPException(status_code=404, detail=f"Disease plugin '{disease_id}' not found")
+    
+    val_engine = ValidationEngine(plugin_metadata.get("risk_config", {}))
+    val_result = val_engine.validate_form(form_data)
+    
+    return {
+        "is_valid": val_result.is_valid,
+        "errors": [e.to_dict() for e in val_result.errors],
+        "warnings": [w.to_dict() for w in val_result.warnings],
+        "data_quality_score": val_result.data_quality_score
+    }
+
+
+@router.get("/diseases/{disease_id}/field-metadata/{field_key}")
+async def get_field_metadata(disease_id: str, field_key: str):
+    """
+    [NEW] Lấy metadata của một field cụ thể
+    Hữu ích cho dynamic form rendering
+    """
+    plugin = get_plugin(disease_id)
+    
+    if not plugin:
+        raise HTTPException(status_code=404, detail=f"Disease plugin '{disease_id}' not found")
+    
+    fields = plugin.get("fields", [])
+    field = next((f for f in fields if f.get("key") == field_key), None)
+    
+    if not field:
+        raise HTTPException(status_code=404, detail=f"Field '{field_key}' not found")
+    
+    # [ENHANCED] Return rich field metadata
+    return {
+        "key": field.get("key"),
+        "label": field.get("label"),
+        "type": field.get("type"),
+        "required": field.get("required", False),
+        "description": field.get("description", ""),
+        "hint": field.get("hint", ""),
+        "min": field.get("min"),
+        "max": field.get("max"),
+        "options": field.get("options", []),
+        "validation_rules": field.get("validation_rules", []),
+        "icon": field.get("icon", "")
+    }
+
+
+@router.post("/diseases/{disease_id}/compare-risk")
+async def compare_risk_scenarios(disease_id: str, scenarios: Dict[str, Dict[str, Any]]):
+    """
+    [NEW] So sánh rủi ro giữa nhiều kịch bản
+    """
+    plugin_metadata = get_plugin(disease_id)
+    
+    if not plugin_metadata:
+        raise HTTPException(status_code=404, detail=f"Disease plugin '{disease_id}' not found")
+    
+    risk_engine = RiskStratificationEngine(plugin_metadata.get("risk_config", {}))
+    val_engine = ValidationEngine(plugin_metadata.get("risk_config", {}))
+    
+    comparison = {}
+    
+    for scenario_name, scenario_data in scenarios.items():
+        try:
+            normalized = val_engine.normalize_form_data(scenario_data)
+            result = risk_engine.evaluate(normalized)
+            
+            comparison[scenario_name] = {
+                "score": result.get("final_score"),
+                "risk_level": result.get("risk_level"),
+                "percentile": result.get("risk_percentile")
+            }
+        except Exception as e:
+            logger.error(f"Error evaluating scenario '{scenario_name}': {e}")
+            comparison[scenario_name] = {
+                "error": str(e)
+            }
+    
+    # [NEW] Calculate score differences
+    if "current" in comparison and len(comparison) > 1:
+        current_score = comparison["current"].get("score", 0)
+        
+        for scenario_name, scenario_result in comparison.items():
+            if scenario_name != "current":
+                other_score = scenario_result.get("score", 0)
+                scenario_result["score_difference"] = round(current_score - other_score, 2)
+                scenario_result["improvement_percentage"] = round(
+                    ((current_score - other_score) / current_score * 100) if current_score > 0 else 0, 2
+                )
+    
+    return {"scenarios": comparison}
+
+
+def _generate_recommendations(risk_result: Dict, plugin_metadata: Dict, form_data: Dict = None) -> list:
+    """
+    [NEW] Phân tích list condition trong metadata json để xuất ra recommendation chính xác.
+    """
+    recommendations = []
+    
+    # Setup context đánh giá logic (đưa mọi params cần thiết vào context eval)
+    context = {}
+    if form_data:
+        context.update(form_data)
+    context["risk_level"] = risk_result.get("risk_level", "medium")
+    context["final_score"] = risk_result.get("final_score", 50)
+    
+    # Recommendation từ JSON trả về sẽ là một Array(List)
+    disease_recommendations = plugin_metadata.get("recommendations", [])
+    
+    if isinstance(disease_recommendations, list):
+        for rule in disease_recommendations:
+            if isinstance(rule, dict):
+                condition = rule.get("condition")
+                text = rule.get("text")
+                try:
+                    # Rất nhiều JSON rule sẽ null condition mặc định là apply luôn.
+                    # Hoặc có condition, nếu pass evaluate sẽ apply.
+                    if (condition is None) or ConditionEvaluator.evaluate(condition, context):
+                        if text and text not in recommendations:
+                            recommendations.append(text)
+                except Exception as e:
+                    logger.warning(f"Bỏ qua recommendation rule vì lỗi phân tích condition: {e}")
+    elif isinstance(disease_recommendations, dict):
+        # Fallback phòng trường hợp version cũ dùng object/dict để format
+        risk_level = risk_result.get("risk_level", "medium")
+        for level_name, level_recs in disease_recommendations.items():
+            if level_name == risk_level and isinstance(level_recs, list):
+                for rec in level_recs:
+                    if isinstance(rec, str):
+                        recommendations.append(rec)
+                    elif isinstance(rec, dict) and "text" in rec:
+                        recommendations.append(rec["text"])
+    
+    # [NEW] Add specific recommendations dựa trên các modifiers đã match (nếu có)
+    active_modifiers = risk_result.get("breakdown", {}).get("applied_modifiers", [])
+    for modifier in active_modifiers:
+        rec_text = modifier.get("recommendation")
+        if rec_text and rec_text not in recommendations:
+            recommendations.append(rec_text)
+            
+    return recommendations[:5]  # Limit to top 5 recommendations để tránh UI bị quá tải chữ
+
+
+def _calculate_confidence(val_result: Any, risk_result: Dict) -> str:
+    """
+    [NEW] Tính độ tin cậy của kết quả
+    """
+    quality_score = val_result.data_quality_score
+    
+    if quality_score >= 90:
+        return "high"
+    elif quality_score >= 70:
+        return "moderate"
+    else:
+        return "low"
 ```
 
 ### backend\app\plugin_loader.py
@@ -1043,12 +1471,18 @@ def get_all_plugins():
 ```py
 # backend/app/risk_stratification_engine.py
 """
-RiskStratificationEngine - Đánh giá rủi ro dựa trên rule từ metadata plugin
-Hoạt động 100% generic, không hard-code logic bệnh cụ thể nào
+RiskStratificationEngine - UPGRADED VERSION
+Nâng cấp thuật toán rule để đánh giá rủi ro bệnh mạn tính
+- Weighted baseline scoring
+- Percentile-based risk assessment
+- Evidence scoring system
+- Risk progression tracking
 """
 
 from typing import Any, Dict, List, Optional, Tuple
 import logging
+import math
+
 from app.condition_evaluator import ConditionEvaluator
 
 logger = logging.getLogger(__name__)
@@ -1056,15 +1490,17 @@ logger = logging.getLogger(__name__)
 
 class RiskStratificationEngine:
     """
-    Engine đánh giá rủi ro - hoàn toàn dựa vào metadata plugin
+    Engine đánh giá rủi ro nâng cấp
     
     Quy trình:
-    1. Lấy baseline score từ baseline_mapping (điều kiện nào match, lấy score đó)
-    2. Áp dụng risk_modifiers (nhân/cộng điểm)
-    3. Áp dụng protective_factors (giảm điểm)
-    4. Áp dụng interactions (nhân lên nếu có)
-    5. Chuẩn hóa thành 0-100
-    6. Map thành risk_level theo thresholds
+    1. Tính toán computed fields
+    2. Xác định baseline score (weighted)
+    3. Áp dụng risk modifiers với evidence scoring
+    4. Áp dụng protective factors
+    5. Áp dụng interactions (synergy effects)
+    6. Chuẩn hóa điểm (0-100)
+    7. Ánh xạ thành risk level với percentile thresholds
+    8. Tính risk progression score
     """
     
     def __init__(self, risk_config: Dict[str, Any]):
@@ -1079,105 +1515,141 @@ class RiskStratificationEngine:
         self.interactions = risk_config.get("interactions", [])
         self.thresholds = risk_config.get("thresholds", [])
         self.computed_fields = risk_config.get("computed_fields", [])
+        
+        # [NEW] Risk progression & evidence config
+        self.evidence_scoring = risk_config.get("evidence_scoring", {})
+        self.risk_progression = risk_config.get("risk_progression", [])
     
     def evaluate(self, form_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Đánh giá rủi ro cho người dùng dựa trên dữ liệu nhập + baseline + modifiers
+        Đánh giá rủi ro toàn diện
         
         Returns:
             {
                 "final_score": float (0-100),
                 "risk_level": str (low/medium/high),
+                "risk_percentile": int (0-100),
                 "baseline_score": float,
+                "evidence_score": float,
                 "modifiers_effect": float,
                 "protective_effect": float,
                 "interaction_multiplier": float,
-                "breakdown": {
-                    "baseline": {...},
-                    "applied_modifiers": [...],
-                    "applied_protective": [...],
-                    "applied_interactions": [...]
-                }
+                "risk_progression": dict,
+                "evidence_breakdown": dict,
+                "breakdown": {...detailed breakdown...}
             }
         """
         
         # [STEP 1] Tính toán computed fields
         enriched_data = self._compute_fields(form_data)
         
-        # [STEP 2] Xác định baseline score
-        baseline_result = self._get_baseline_score(enriched_data)
+        # [STEP 2] Xác định baseline score (weighted)
+        baseline_result = self._get_weighted_baseline_score(enriched_data)
         baseline_score = baseline_result["score"]
         baseline_stage = baseline_result.get("stage_name", "unknown")
         
-        # [STEP 3] Áp dụng risk modifiers
+        # [STEP 3] Tính evidence score
+        evidence_result = self._calculate_evidence_score(enriched_data)
+        evidence_score = evidence_result["total_score"]
+        evidence_breakdown = evidence_result["breakdown"]
+        
+        # [STEP 4] Áp dụng risk modifiers với evidence weighting
         current_score = baseline_score
         applied_modifiers = []
         modifier_effect = 0.0
         
         for modifier in self.risk_modifiers:
             if self._check_condition(modifier.get("condition"), enriched_data):
-                mod_result = self._apply_modifier(current_score, modifier)
+                mod_result = self._apply_modifier(current_score, modifier, enriched_data)
                 applied_modifiers.append({
                     "id": modifier.get("id", "unknown"),
                     "description": modifier.get("description", ""),
                     "value": modifier.get("value", 1.0),
                     "effect_type": modifier.get("effect_type", "multiplicative"),
-                    "effect_on_score": mod_result["effect"]
+                    "effect_on_score": mod_result["effect"],
+                    "evidence_weight": mod_result.get("evidence_weight", 1.0)
                 })
                 current_score = mod_result["new_score"]
                 modifier_effect += mod_result["effect"]
         
-        # [STEP 4] Áp dụng protective factors
+        # [STEP 5] Áp dụng protective factors
         applied_protective = []
         protective_effect = 0.0
         
         for prot in self.protective_factors:
             if self._check_condition(prot.get("condition"), enriched_data):
-                prot_result = self._apply_modifier(current_score, prot, is_protective=True)
+                prot_result = self._apply_modifier(current_score, prot, enriched_data, is_protective=True)
                 applied_protective.append({
                     "id": prot.get("id", "unknown"),
                     "description": prot.get("description", ""),
                     "value": prot.get("value", 1.0),
                     "effect_type": prot.get("effect_type", "multiplicative"),
-                    "effect_on_score": prot_result["effect"]
+                    "effect_on_score": prot_result["effect"],
+                    "evidence_weight": prot_result.get("evidence_weight", 1.0)
                 })
                 current_score = prot_result["new_score"]
                 protective_effect += prot_result["effect"]
         
-        # [STEP 5] Áp dụng interactions
+        # [STEP 6] Áp dụng interactions (synergy effects)
         interaction_multiplier = 1.0
         applied_interactions = []
         
         for interaction in self.interactions:
             if self._check_condition(interaction.get("condition"), enriched_data):
-                interaction_multiplier = interaction.get("interaction_multiplier", 1.0)
+                # [ENHANCED] Support both fixed multiplier and dynamic calculation
+                if "multiplier_formula" in interaction:
+                    multiplier = self._evaluate_formula(
+                        interaction.get("multiplier_formula"), 
+                        enriched_data
+                    )
+                else:
+                    multiplier = interaction.get("interaction_multiplier", 1.0)
+                
+                interaction_multiplier = multiplier
                 applied_interactions.append({
                     "id": interaction.get("id", "unknown"),
                     "description": interaction.get("description", ""),
-                    "multiplier": interaction_multiplier
+                    "multiplier": round(interaction_multiplier, 3),
+                    "type": interaction.get("interaction_type", "synergy")
                 })
         
         current_score = current_score * interaction_multiplier
         
-        # [STEP 6] Chuẩn hóa điểm (0-100)
+        # [STEP 7] Chuẩn hóa điểm (0-100)
         final_score = max(0, min(100, current_score))
         
-        # [STEP 7] Ánh xạ thành risk level
-        risk_level = self._map_to_risk_level(final_score)
+        # [STEP 8] Tính percentile
+        risk_percentile = self._calculate_percentile(final_score, baseline_stage)
+        
+        # [STEP 9] Ánh xạ thành risk level
+        risk_level = self._map_to_risk_level(final_score, risk_percentile)
+        
+        # [STEP 10] Tính risk progression
+        risk_progression = self._calculate_risk_progression(
+            final_score,
+            risk_level,
+            applied_modifiers,
+            enriched_data
+        )
         
         return {
             "final_score": round(final_score, 2),
             "risk_level": risk_level,
+            "risk_percentile": risk_percentile,
             "baseline_score": baseline_score,
             "baseline_stage": baseline_stage,
+            "evidence_score": round(evidence_score, 2),
             "modifiers_effect": round(modifier_effect, 2),
             "protective_effect": round(protective_effect, 2),
-            "interaction_multiplier": round(interaction_multiplier, 2),
+            "interaction_multiplier": round(interaction_multiplier, 3),
+            "risk_progression": risk_progression,
+            "evidence_breakdown": evidence_breakdown,
             "breakdown": {
                 "baseline": {
                     "score": baseline_score,
                     "stage": baseline_stage
                 },
+                "evidence": evidence_breakdown,
                 "applied_modifiers": applied_modifiers,
                 "applied_protective": applied_protective,
                 "applied_interactions": applied_interactions
@@ -1185,16 +1657,7 @@ class RiskStratificationEngine:
         }
     
     def _compute_fields(self, form_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Tính toán các field được định nghĩa trong computed_fields
-        
-        Ví dụ: 
-        {
-            "key": "bmi",
-            "formula": "weight / ((height / 100) ** 2)",
-            "dependencies": ["weight", "height"]
-        }
-        """
+        """Tính toán các computed fields từ formula"""
         enriched = form_data.copy()
         
         for computed in self.computed_fields:
@@ -1203,11 +1666,9 @@ class RiskStratificationEngine:
             dependencies = computed.get("dependencies", [])
             
             try:
-                # Kiểm tra tất cả dependencies có giá trị không
                 all_available = all(dep in enriched and enriched[dep] is not None for dep in dependencies)
                 
                 if all_available:
-                    # Tính toán giá trị
                     result = eval(formula, {"__builtins__": {}}, enriched)
                     enriched[key] = float(result)
                     logger.debug(f"Computed {key} = {enriched[key]}")
@@ -1216,13 +1677,11 @@ class RiskStratificationEngine:
         
         return enriched
     
-    def _get_baseline_score(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _get_weighted_baseline_score(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Tìm baseline stage nào match với dữ liệu
-        Trả về score của stage đó
+        [ENHANCED] Xác định baseline score với weighted stages
         
-        Nếu nhiều stage match, lấy cái có priority cao nhất
-        Nếu không có stage nào match, trả về 50 (điểm mặc định)
+        Nếu nhiều stage match, tính weighted average dựa trên priority
         """
         matching_stages = []
         
@@ -1231,7 +1690,8 @@ class RiskStratificationEngine:
                 matching_stages.append({
                     "name": stage.get("name", "unknown"),
                     "score": stage.get("score", 50),
-                    "priority": stage.get("priority", 0)
+                    "priority": stage.get("priority", 0),
+                    "weight": stage.get("weight", 1.0)  # [NEW] Weight for averaging
                 })
         
         if not matching_stages:
@@ -1241,32 +1701,97 @@ class RiskStratificationEngine:
                 "note": "No baseline stage matched, using default score"
             }
         
-        # Sắp xếp theo priority (cao nhất trước)
-        matching_stages.sort(key=lambda x: x["priority"], reverse=True)
-        selected = matching_stages[0]
+        # [ENHANCED] Nếu có weight, tính weighted average; nếu không, lấy priority cao nhất
+        if any(stage.get("weight", 1.0) != 1.0 for stage in matching_stages):
+            # Weighted average
+            total_weight = sum(s["weight"] for s in matching_stages)
+            weighted_score = sum(s["score"] * s["weight"] for s in matching_stages) / total_weight
+            
+            return {
+                "score": weighted_score,
+                "stage_name": "weighted_multiple",
+                "matching_count": len(matching_stages),
+                "calculation": "weighted_average"
+            }
+        else:
+            # Priority-based selection
+            matching_stages.sort(key=lambda x: x["priority"], reverse=True)
+            selected = matching_stages[0]
+            
+            return {
+                "score": selected["score"],
+                "stage_name": selected["name"],
+                "matching_count": len(matching_stages),
+                "calculation": "priority_based"
+            }
+    
+    def _calculate_evidence_score(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        [NEW] Tính evidence score dựa trên các yếu tố đã ghi nhận
+        
+        Evidence scoring thể hiện độ tin cậy của dữ liệu đầu vào
+        """
+        evidence_config = self.evidence_scoring
+        total_score = 0
+        breakdown = {}
+        
+        if not evidence_config:
+            return {"total_score": 100, "breakdown": {"default": "No evidence config"}}
+        
+        # Tính evidence từ các field được định nghĩa
+        evidence_fields = evidence_config.get("fields", [])
+        
+        for field_config in evidence_fields:
+            field_name = field_config.get("name")
+            base_evidence = field_config.get("evidence", 0)
+            
+            if field_name in data and data[field_name] is not None:
+                total_score += base_evidence
+                breakdown[field_name] = base_evidence
+            else:
+                breakdown[field_name] = 0
+        
+        # Tính total evidence score (0-100)
+        max_evidence = sum(f.get("evidence", 0) for f in evidence_fields) or 100
+        evidence_percentage = min(100, (total_score / max_evidence * 100)) if max_evidence > 0 else 100
         
         return {
-            "score": selected["score"],
-            "stage_name": selected["name"],
-            "matching_count": len(matching_stages)
+            "total_score": round(evidence_percentage, 2),
+            "breakdown": breakdown,
+            "evidence_count": len([f for f in breakdown.values() if f > 0])
         }
     
     def _apply_modifier(
-        self, 
-        current_score: float, 
+        self,
+        current_score: float,
         modifier: Dict[str, Any],
+        enriched_data: Dict[str, Any],
         is_protective: bool = False
-    ) -> Dict[str, float]:
+    ) -> Dict[str, Any]:
         """
-        Áp dụng một modifier (risk hoặc protective) lên điểm hiện tại
+        [ENHANCED] Áp dụng modifier với evidence weighting và dynamic values
         
         effect_type:
         - additive: score = score + value
         - multiplicative: score = score * value
         - divisive: score = score / value
+        - formula: score = eval(formula)
         """
         effect_type = modifier.get("effect_type", "multiplicative")
         value = modifier.get("value", 1.0)
+        
+        # [NEW] Support formula-based values
+        if "value_formula" in modifier:
+            try:
+                value = self._evaluate_formula(modifier.get("value_formula"), enriched_data)
+            except Exception as e:
+                logger.warning(f"Cannot evaluate value formula: {e}")
+        
+        # [NEW] Evidence-based weighting
+        evidence_weight = modifier.get("evidence_weight", 1.0)
+        if evidence_weight != 1.0:
+            # Adjust effect based on evidence confidence
+            value = value * evidence_weight
         
         new_score = current_score
         effect = 0.0
@@ -1281,16 +1806,24 @@ class RiskStratificationEngine:
         elif effect_type == "divisive":
             effect = current_score * (1 - 1/value) if is_protective else current_score * (value - 1)
             new_score = current_score / value if is_protective else current_score * value
+        elif effect_type == "formula":
+            try:
+                new_score = self._evaluate_formula(
+                    modifier.get("formula"),
+                    {**enriched_data, "current_score": current_score}
+                )
+                effect = new_score - current_score
+            except Exception as e:
+                logger.error(f"Cannot evaluate modifier formula: {e}")
         
         return {
             "new_score": max(0, new_score),
-            "effect": effect
+            "effect": effect,
+            "evidence_weight": evidence_weight
         }
     
     def _check_condition(self, condition: Any, data: Dict[str, Any]) -> bool:
-        """
-        Kiểm tra điều kiện sử dụng ConditionEvaluator
-        """
+        """Kiểm tra điều kiện sử dụng ConditionEvaluator"""
         if condition is None:
             return True
         
@@ -1300,20 +1833,47 @@ class RiskStratificationEngine:
             logger.error(f"Error checking condition: {e}")
             return False
     
-    def _map_to_risk_level(self, score: float) -> str:
+    def _evaluate_formula(self, formula: str, context: Dict[str, Any]) -> float:
         """
-        Ánh xạ điểm thành risk level dựa trên thresholds
-        
-        thresholds format:
-        [
-            {"threshold": 30, "level": "low"},
-            {"threshold": 70, "level": "medium"},
-            {"threshold": 100, "level": "high"}
-        ]
-        
-        Logic: score < 30 -> low, 30-70 -> medium, >= 70 -> high
+        [NEW] Đánh giá công thức toán học an toàn
         """
-        # Sắp xếp thresholds theo giá trị tăng dần
+        try:
+            # Safe evaluation - chỉ cho phép math operations
+            safe_dict = {
+                "math": math,
+                "__builtins__": {},
+                **context
+            }
+            result = eval(formula, safe_dict)
+            return float(result)
+        except Exception as e:
+            logger.error(f"Formula evaluation error '{formula}': {e}")
+            raise
+    
+    def _calculate_percentile(self, score: float, stage_name: str) -> int:
+        """
+        [NEW] Tính percentile dựa trên score và stage
+        Giúp so sánh rủi ro của người dùng với dân số
+        """
+        # [TODO] Trong thực tế, cần dữ liệu thống kê dân số từ DB
+        # Ở đây sử dụng công thức xấp xỉ
+        
+        if score < 20:
+            return 10
+        elif score < 40:
+            return 25
+        elif score < 60:
+            return 50
+        elif score < 80:
+            return 75
+        else:
+            return 90
+    
+    def _map_to_risk_level(self, score: float, percentile: int = None) -> str:
+        """
+        [ENHANCED] Ánh xạ score thành risk level
+        Có thể dựa vào percentile nếu có
+        """
         sorted_thresholds = sorted(self.thresholds, key=lambda x: x.get("threshold", 0))
         
         for threshold_config in sorted_thresholds:
@@ -1321,8 +1881,50 @@ class RiskStratificationEngine:
             if score < threshold_value:
                 return threshold_config.get("level", "low")
         
-        # Nếu vượt qua tất cả thresholds, lấy level cao nhất
         return sorted_thresholds[-1].get("level", "high") if sorted_thresholds else "medium"
+    
+    def _calculate_risk_progression(
+        self,
+        final_score: float,
+        risk_level: str,
+        modifiers: List[Dict],
+        enriched_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        [NEW] Tính risk progression - dự báo sự tiến triển rủi ro
+        
+        Dựa trên số lượng risk factors và mức độ ảnh hưởng của chúng
+        """
+        risk_progression_config = self.risk_progression or []
+        
+        # Tính trajectory dựa trên số modifiers được áp dụng
+        modifier_count = len(modifiers)
+        
+        progression = {
+            "current_score": final_score,
+            "current_level": risk_level,
+            "active_risk_factors": modifier_count,
+            "trajectory": "stable"  # stable, increasing, decreasing
+        }
+        
+        # Xác định trajectory
+        if modifier_count >= 3:
+            progression["trajectory"] = "increasing"
+        elif modifier_count == 0:
+            progression["trajectory"] = "decreasing"
+        
+        # Dự báo điểm trong tương lai (6 months, 1 year)
+        for config in risk_progression_config:
+            timeframe = config.get("timeframe")
+            rate = config.get("progression_rate", 1.0)
+            
+            if timeframe:
+                projected_score = final_score * rate
+                progression[f"projected_{timeframe}"] = round(
+                    min(100, max(0, projected_score)), 2
+                )
+        
+        return progression
 ```
 
 ### backend\app\schema_validator.py
@@ -1909,235 +2511,436 @@ if __name__ == "__main__":
 ```py
 # backend/app/validation_engine.py
 """
-ValidationEngine - Kiểm tra và normalize dữ liệu nhập từ form
-Cung cấp:
-- Field validation (yêu cầu, kiểu dữ liệu, range)
-- Form validation (kiểm tra toàn bộ form)
-- Data normalization (chuẩn hóa dữ liệu)
-- Warning generation (cảnh báo về dữ liệu)
+ValidationEngine - UPGRADED VERSION
+Nâng cấp validation với data quality scoring, smart normalization, và better error handling
 """
 
-from typing import Any, Dict, List
-from dataclasses import dataclass, asdict
+from typing import Any, Dict, List, Optional, Tuple
 import logging
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ValidationError:
-    """Lỗi validation"""
-
+    """Mô tả một lỗi validation"""
     field: str
     message: str
-    severity: str = "error"  # error, warning
-
-    def to_dict(self):
-        return asdict(self)
+    severity: str = "error"  # error, warning, info
+    code: str = "invalid"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "field": self.field,
+            "message": self.message,
+            "severity": self.severity,
+            "code": self.code
+        }
 
 
 @dataclass
 class ValidationResult:
     """Kết quả validation"""
-
-    is_valid: bool = True
     errors: List[ValidationError] = None
     warnings: List[ValidationError] = None
-
+    data_quality_score: float = 100.0  # 0-100
+    
     def __post_init__(self):
         if self.errors is None:
             self.errors = []
         if self.warnings is None:
             self.warnings = []
-
+    
+    @property
+    def is_valid(self) -> bool:
+        return len(self.errors) == 0
+    
     def has_errors(self) -> bool:
         return len(self.errors) > 0
-
+    
     def has_warnings(self) -> bool:
         return len(self.warnings) > 0
 
-    def to_dict(self):
-        return {
-            "is_valid": self.is_valid,
-            "errors": [e.to_dict() for e in self.errors],
-            "warnings": [w.to_dict() for w in self.warnings],
-        }
-
 
 class ValidationEngine:
-    """Kiểm tra và normalize dữ liệu từ form"""
-
-    def __init__(self, plugin_metadata: Dict[str, Any]):
-        self.metadata = plugin_metadata
-        self.fields = plugin_metadata.get("fields", [])
-        self.field_map = {f["key"]: f for f in self.fields}
-
+    """
+    Engine validation nâng cấp với quality scoring
+    """
+    
+    def __init__(self, risk_config: Dict[str, Any]):
+        """
+        Args:
+            risk_config: Config từ metadata.json -> risk_config
+        """
+        self.risk_config = risk_config
+        self.fields = risk_config.get("fields", [])
+        self.field_map = {f.get("key"): f for f in self.fields}
+        
+        # [NEW] Data quality config
+        self.quality_config = risk_config.get("data_quality", {})
+        self.normalization_rules = risk_config.get("normalization_rules", {})
+    
     def validate_form(self, form_data: Dict[str, Any]) -> ValidationResult:
         """
-        Validate toàn bộ form
+        Validate form data toàn diện
         
-        Args:
-            form_data: Dữ liệu từ form
-            
         Returns:
-            ValidationResult với errors và warnings
-        """
-        result = ValidationResult()
-
-        # Kiểm tra từng field
-        for field in self.fields:
-            key = field.get("key")
-            value = form_data.get(key)
-            field_errors = self._validate_field(field, value, form_data)
-            result.errors.extend(field_errors)
-
-        result.is_valid = not result.has_errors()
-        return result
-
-    def get_field_errors(self, form_data: Dict[str, Any], field_key: str) -> List[ValidationError]:
-        """
-        Validate một field cụ thể
-        """
-        field = self.field_map.get(field_key)
-        if not field:
-            return []
-
-        value = form_data.get(field_key)
-        return self._validate_field(field, value, form_data)
-
-    def _validate_field(
-        self, field: Dict[str, Any], value: Any, form_data: Dict[str, Any]
-    ) -> List[ValidationError]:
-        """
-        Validate một field
+            ValidationResult với errors, warnings, và data_quality_score
         """
         errors = []
-        key = field.get("key")
-
-        # 1. Kiểm tra bắt buộc
-        if field.get("required", False):
-            if value is None or value == "" or str(value).strip() == "":
-                errors.append(
-                    ValidationError(
-                        field=key,
-                        message=f"{field.get('label', key)} là bắt buộc",
-                    )
-                )
-                return errors
-
-        # Nếu trống và không bắt buộc, pass
-        if value is None or value == "":
-            return errors
-
-        # 2. Kiểm tra kiểu dữ liệu
-        field_type = field.get("type", "text")
-
-        if field_type == "number":
-            try:
-                num_value = float(value)
-                # Kiểm tra min/max
+        warnings = []
+        
+        # [STEP 1] Validate required fields
+        for field in self.fields:
+            key = field.get("key")
+            required = field.get("required", False)
+            value = form_data.get(key)
+            
+            if required and (value is None or value == ""):
+                errors.append(ValidationError(
+                    field=key,
+                    message=f"{field.get('label', key)} là bắt buộc",
+                    code="required_missing"
+                ))
+                continue
+            
+            if value is None or value == "":
+                continue
+            
+            # [STEP 2] Type validation
+            field_type = field.get("type")
+            type_valid, type_error = self._validate_type(key, value, field_type, field)
+            
+            if not type_valid:
+                errors.append(ValidationError(
+                    field=key,
+                    message=type_error,
+                    code="invalid_type"
+                ))
+                continue
+            
+            # [STEP 3] Value range validation
+            if field_type == "number":
                 min_val = field.get("min")
                 max_val = field.get("max")
-
-                if min_val is not None and num_value < min_val:
-                    errors.append(
-                        ValidationError(
+                
+                try:
+                    num_val = float(value)
+                    
+                    if min_val is not None and num_val < min_val:
+                        errors.append(ValidationError(
                             field=key,
                             message=f"{field.get('label', key)} phải >= {min_val}",
-                        )
-                    )
-
-                if max_val is not None and num_value > max_val:
-                    errors.append(
-                        ValidationError(
+                            code="below_minimum"
+                        ))
+                    
+                    if max_val is not None and num_val > max_val:
+                        errors.append(ValidationError(
                             field=key,
                             message=f"{field.get('label', key)} phải <= {max_val}",
-                        )
-                    )
-            except (ValueError, TypeError):
-                errors.append(
-                    ValidationError(
+                            code="above_maximum"
+                        ))
+                    
+                    # [NEW] Outlier detection
+                    if self.quality_config.get("detect_outliers"):
+                        outlier_msg = self._check_outlier(key, num_val, field)
+                        if outlier_msg:
+                            warnings.append(ValidationError(
+                                field=key,
+                                message=outlier_msg,
+                                severity="warning",
+                                code="potential_outlier"
+                            ))
+                
+                except (ValueError, TypeError):
+                    errors.append(ValidationError(
                         field=key,
                         message=f"{field.get('label', key)} phải là số",
-                    )
-                )
-
-        elif field_type == "select":
-            options = field.get("options", [])
-            valid_values = [opt.get("value") for opt in options]
-            if value not in valid_values:
-                errors.append(
-                    ValidationError(
+                        code="not_numeric"
+                    ))
+            
+            elif field_type == "select":
+                options = field.get("options", [])
+                valid_values = [
+                    opt.get("value") if isinstance(opt, dict) else opt
+                    for opt in options
+                ]
+                
+                if value not in valid_values:
+                    errors.append(ValidationError(
                         field=key,
-                        message=f"{field.get('label', key)} giá trị không hợp lệ",
-                    )
-                )
-
-        elif field_type == "boolean":
-            if not isinstance(value, bool):
-                errors.append(
-                    ValidationError(
+                        message=f"{field.get('label', key)} không hợp lệ",
+                        code="invalid_option"
+                    ))
+            
+            elif field_type == "boolean":
+                bool_valid, bool_error = self._validate_boolean(value)
+                if not bool_valid:
+                    errors.append(ValidationError(
                         field=key,
-                        message=f"{field.get('label', key)} phải là boolean",
-                    )
-                )
-
-        # 3. Kiểm tra custom validation rules
-        custom_rules = field.get("validation_rules", [])
-        for rule in custom_rules:
-            rule_type = rule.get("type")
-
-            if rule_type == "custom_range":
-                # Kiểm tra range dựa trên điều kiện khác
-                pass  # Implement nếu cần
-
-        return errors
-
+                        message=bool_error,
+                        code="invalid_boolean"
+                    ))
+            
+            elif field_type == "string":
+                str_val = str(value)
+                min_len = field.get("min_length")
+                max_len = field.get("max_length")
+                pattern = field.get("pattern")
+                
+                if min_len and len(str_val) < min_len:
+                    errors.append(ValidationError(
+                        field=key,
+                        message=f"{field.get('label', key)} quá ngắn",
+                        code="too_short"
+                    ))
+                
+                if max_len and len(str_val) > max_len:
+                    errors.append(ValidationError(
+                        field=key,
+                        message=f"{field.get('label', key)} quá dài",
+                        code="too_long"
+                    ))
+                
+                if pattern:
+                    import re
+                    if not re.match(pattern, str_val):
+                        errors.append(ValidationError(
+                            field=key,
+                            message=f"{field.get('label', key)} định dạng không hợp lệ",
+                            code="invalid_format"
+                        ))
+        
+        # [STEP 4] Cross-field validation
+        cross_field_errors = self._validate_cross_field(form_data)
+        errors.extend(cross_field_errors)
+        
+        # [STEP 5] Calculate data quality score
+        quality_score = self._calculate_data_quality(form_data)
+        
+        return ValidationResult(
+            errors=errors,
+            warnings=warnings,
+            data_quality_score=quality_score
+        )
+    
     def normalize_form_data(self, form_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Chuẩn hóa dữ liệu (convert types, fill defaults, etc.)
+        [ENHANCED] Chuẩn hóa dữ liệu form
+        
+        - Convert types theo field definition
+        - Apply normalization rules
+        - Compute derived fields
         """
         normalized = {}
-
+        
         for field in self.fields:
             key = field.get("key")
             value = form_data.get(key)
-            field_type = field.get("type", "text")
-
-            # Nếu không có giá trị, dùng default
-            if value is None or value == "":
-                if field.get("default") is not None:
-                    value = field.get("default")
-                else:
-                    continue
-
-            # Convert types
+            
+            if value is None:
+                normalized[key] = None
+                continue
+            
+            field_type = field.get("type")
+            
+            # [NEW] Apply field-specific normalization rules
+            if key in self.normalization_rules:
+                value = self._apply_normalization_rule(key, value, self.normalization_rules[key])
+            
+            # Type normalization
             if field_type == "number":
                 try:
                     normalized[key] = float(value)
                 except (ValueError, TypeError):
                     normalized[key] = None
+            
             elif field_type == "boolean":
-                if isinstance(value, bool):
-                    normalized[key] = value
-                else:
-                    normalized[key] = str(value).lower() in ["true", "1", "yes", "on"]
+                normalized[key] = self._normalize_boolean(value)
+            
+            elif field_type == "select":
+                normalized[key] = value
+            
+            elif field_type == "string":
+                normalized[key] = str(value).strip() if value else None
+            
             else:
                 normalized[key] = value
-
+        
         return normalized
-
-    def get_all_field_keys(self) -> List[str]:
-        """Lấy tất cả field keys"""
-        return [f.get("key") for f in self.fields]
-
-    def get_field_by_key(self, key: str) -> Dict[str, Any]:
-        """Lấy field definition theo key"""
-        return self.field_map.get(key)
-
-    def get_required_fields(self) -> List[str]:
-        """Lấy danh sách field bắt buộc"""
-        return [f.get("key") for f in self.fields if f.get("required", False)]
+    
+    def _validate_type(self, field_key: str, value: Any, field_type: str, field_config: Dict) -> Tuple[bool, str]:
+        """Validate kiểu dữ liệu"""
+        if field_type == "number":
+            try:
+                float(value)
+                return True, ""
+            except (ValueError, TypeError):
+                return False, f"{field_config.get('label', field_key)} phải là số"
+        
+        elif field_type == "boolean":
+            bool_valid, error = self._validate_boolean(value)
+            return bool_valid, error
+        
+        elif field_type == "select":
+            return True, ""
+        
+        elif field_type == "string":
+            return True, ""
+        
+        return True, ""
+    
+    def _validate_boolean(self, value: Any) -> Tuple[bool, str]:
+        """Validate boolean value"""
+        if isinstance(value, bool):
+            return True, ""
+        
+        if isinstance(value, (int, float)):
+            return value in [0, 1, 0.0, 1.0], ""
+        
+        if isinstance(value, str):
+            valid_values = {"true", "false", "1", "0", "yes", "no", "on", "off"}
+            return value.lower() in valid_values, ""
+        
+        return False, "Giá trị boolean không hợp lệ"
+    
+    def _normalize_boolean(self, value: Any) -> bool:
+        """Chuẩn hóa giá trị boolean"""
+        if isinstance(value, bool):
+            return value
+        
+        if isinstance(value, (int, float)):
+            return bool(value)
+        
+        if isinstance(value, str):
+            return value.lower() in ("true", "1", "yes", "on", "enabled", "active")
+        
+        return bool(value)
+    
+    def _apply_normalization_rule(self, field_key: str, value: Any, rule: Dict) -> Any:
+        """
+        [NEW] Áp dụng normalization rule cho field
+        
+        Rule format:
+        {
+            "type": "scale",  # scale, trim, round, lookup, custom
+            "params": {...}
+        }
+        """
+        rule_type = rule.get("type")
+        params = rule.get("params", {})
+        
+        if rule_type == "scale":
+            # Chia tỷ lệ giá trị (e.g., chia cho 100)
+            scale_factor = params.get("factor", 1)
+            try:
+                return float(value) / scale_factor
+            except (ValueError, TypeError):
+                return value
+        
+        elif rule_type == "trim":
+            # Cắt string whitespace
+            return str(value).strip() if value else value
+        
+        elif rule_type == "round":
+            # Làm tròn số
+            decimals = params.get("decimals", 2)
+            try:
+                return round(float(value), decimals)
+            except (ValueError, TypeError):
+                return value
+        
+        elif rule_type == "lookup":
+            # Ánh xạ giá trị
+            mapping = params.get("mapping", {})
+            return mapping.get(str(value), value)
+        
+        elif rule_type == "custom":
+            # Custom function - định nghĩa trong metadata
+            formula = params.get("formula")
+            # [TODO] Evaluate formula safely
+            return value
+        
+        return value
+    
+    def _check_outlier(self, field_key: str, value: float, field_config: Dict) -> Optional[str]:
+        """
+        [NEW] Phát hiện giá trị outlier
+        """
+        outlier_config = self.quality_config.get("outlier_detection", {})
+        if not outlier_config.get("enabled"):
+            return None
+        
+        # Sử dụng z-score hoặc IQR để phát hiện outlier
+        # [TODO] Cần dữ liệu thống kê từ DB
+        
+        min_realistic = field_config.get("min")
+        max_realistic = field_config.get("max")
+        
+        if min_realistic and value < min_realistic * 0.5:
+            return f"{field_config.get('label', field_key)} có giá trị quá thấp (có thể lỗi nhập liệu)"
+        
+        if max_realistic and value > max_realistic * 1.5:
+            return f"{field_config.get('label', field_key)} có giá trị quá cao (có thể lỗi nhập liệu)"
+        
+        return None
+    
+    def _validate_cross_field(self, form_data: Dict[str, Any]) -> List[ValidationError]:
+        """
+        [NEW] Validate dependencies giữa các field
+        
+        Ví dụ: height và weight phải cùng có hoặc cùng không
+        """
+        errors = []
+        cross_validations = self.risk_config.get("cross_field_validations", [])
+        
+        for validation in cross_validations:
+            fields_required = validation.get("fields_required")
+            fields_optional = validation.get("fields_optional")
+            condition = validation.get("condition")
+            message = validation.get("message")
+            
+            # [TODO] Implement cross-field validation logic
+        
+        return errors
+    
+    def _calculate_data_quality(self, form_data: Dict[str, Any]) -> float:
+        """
+        [NEW] Tính data quality score (0-100)
+        
+        Dựa trên:
+        - % field được điền
+        - Kiểu dữ liệu hợp lệ
+        - Không có outlier
+        """
+        quality_config = self.quality_config or {}
+        
+        # Tính % field được điền
+        filled_count = sum(1 for f in self.fields if form_data.get(f.get("key")) is not None)
+        total_required = sum(1 for f in self.fields if f.get("required"))
+        
+        completeness = (filled_count / total_required * 100) if total_required > 0 else 100
+        
+        # Weight của completeness
+        completeness_weight = quality_config.get("completeness_weight", 0.5)
+        
+        # Base score từ completeness
+        score = completeness * completeness_weight
+        
+        # Thêm điểm cho data consistency
+        consistency_score = 100  # [TODO] Calculate consistency
+        consistency_weight = quality_config.get("consistency_weight", 0.3)
+        
+        score += consistency_score * consistency_weight
+        
+        # Thêm điểm cho data accuracy (check outliers, ranges)
+        accuracy_score = 100  # [TODO] Calculate accuracy
+        accuracy_weight = quality_config.get("accuracy_weight", 0.2)
+        
+        score += accuracy_score * accuracy_weight
+        
+        return min(100, max(0, score))
 ```
 
 ### backend\auth\dang_ky.py
@@ -4134,11 +4937,8 @@ export default function MainRiskPage() {
 
   const loadPluginsList = async () => {
     try {
-      // [FIX] Updated endpoint to match backend router prefix
-      const res = await axios.get(`${API_BASE_URL}/api/plugins`);
-      
-      // [FIX] Parse the correct structure returned by backend { available_plugins: [...] }
-      const pluginIds = res.data.available_plugins ? res.data.available_plugins.map(p => p.id) : [];
+      const res = await axios.get(`${API_BASE_URL}/api/plugins/diseases`);
+      const pluginIds = res.data.diseases ? res.data.diseases.map(p => p.id) : [];
       setPlugins(pluginIds);
     } catch (e) {
       console.error("Load plugins error", e);
@@ -4148,8 +4948,7 @@ export default function MainRiskPage() {
   const loadPlugin = async (pluginName) => {
     try {
       setLoading(true);
-      // [FIX] Updated endpoint to match backend router prefix
-      const response = await axios.get(`${API_BASE_URL}/api/plugins/${pluginName}`);
+      const response = await axios.get(`${API_BASE_URL}/api/plugins/diseases/${pluginName}`);
       const pluginData = response.data;
       setPlugin(pluginData);
       const mergedForm = mergeWithHealthProfile(pluginData.fields);
@@ -4166,7 +4965,8 @@ export default function MainRiskPage() {
   const mergeWithHealthProfile = (fields) => {
     const initialData = {};
     fields.forEach((field) => {
-      initialData[field.key] = field.default !== undefined ? field.default : "";
+      const fieldKey = field.key || field.code; // [FIX] Hỗ trợ cả field.key và field.code
+      initialData[fieldKey] = field.default !== undefined ? field.default : "";
     });
 
     if (healthProfile) {
@@ -4194,13 +4994,13 @@ export default function MainRiskPage() {
       Object.keys(dbToFormMapping).forEach(dbKey => {
         if (healthProfile[dbKey] !== undefined && healthProfile[dbKey] !== null) {
           const formKey = dbToFormMapping[dbKey];
-          if (fields.some(f => f.key === formKey)) {
+          if (fields.some(f => (f.key || f.code) === formKey)) {
             initialData[formKey] = healthProfile[dbKey];
           }
         }
       });
 
-      if (healthProfile["hutThuoc"] && fields.some(f => f.key === "smoking_status")) {
+      if (healthProfile["hutThuoc"] && fields.some(f => (f.key || f.code) === "smoking_status")) {
         let val = healthProfile["hutThuoc"];
         if (val === "Đang hút") initialData["smoking_status"] = "current";
         else if (val === "Đã bỏ") initialData["smoking_status"] = "former";
@@ -4211,7 +5011,8 @@ export default function MainRiskPage() {
   };
 
   const handleChange = async (fieldOrKey, value) => {
-    const key = fieldOrKey.key || fieldOrKey;
+    // [FIX] Nếu fieldOrKey là Object (field), lấy key hoặc code. Nếu là String (truyền trực tiếp name), thì lấy chính nó.
+    const key = (typeof fieldOrKey === 'object') ? (fieldOrKey.key || fieldOrKey.code) : fieldOrKey;
     const updated = { ...formData, [key]: value };
 
     if (key === "chieuCao" || key === "canNang") {
@@ -4226,26 +5027,29 @@ export default function MainRiskPage() {
 
     setFormData(updated);
 
-    if (plugin?.fields?.some(f => f.key === key)) {
-      await validateField(key, updated);
+    if (plugin?.fields?.some(f => (f.key || f.code) === key)) {
+      await validateForm(updated);
     }
     
-    if ((key === "chieuCao" || key === "canNang") && plugin?.fields?.some(f => f.key === "bmi")) {
-      await validateField("bmi", updated);
+    if ((key === "chieuCao" || key === "canNang") && plugin?.fields?.some(f => (f.key || f.code) === "bmi")) {
+      await validateForm(updated);
     }
   };
 
-  const validateField = async (fieldKey, currentData) => {
+  const validateForm = async (currentData) => {
     try {
-      // [FIX] Updated endpoint to match backend router prefix
       const res = await axios.post(
-        `${API_BASE_URL}/api/plugins/${selectedPlugin}/validate-field/${fieldKey}`,
+        `${API_BASE_URL}/api/plugins/diseases/${selectedPlugin}/validate`,
         currentData
       );
-      setErrors(prev => ({
-        ...prev,
-        [fieldKey]: res.data.is_valid ? "" : (res.data.errors?.[0]?.message || "Lỗi validation")
-      }));
+      
+      const newErrors = {};
+      if (!res.data.is_valid && res.data.errors) {
+        res.data.errors.forEach(err => {
+          newErrors[err.field] = err.message;
+        });
+      }
+      setErrors(newErrors);
     } catch (e) {
       console.error("Validate error:", e);
     }
@@ -4256,7 +5060,8 @@ export default function MainRiskPage() {
 
     let missingFields = [];
     plugin.fields.forEach(field => {
-      if (field.required && (formData[field.key] === undefined || formData[field.key] === "")) {
+      const fieldKey = field.key || field.code;
+      if (field.required && (formData[fieldKey] === undefined || formData[fieldKey] === "")) {
         missingFields.push(field.label);
       }
     });
@@ -4272,21 +5077,21 @@ export default function MainRiskPage() {
   const calculateRisk = async (currentData) => {
     try {
       setIsCalculating(true);
-      const fullPayload = { ...(healthProfile || {}), ...currentData };
-
+      
       const cleanData = {};
-      Object.keys(fullPayload).forEach(key => {
-        if (fullPayload[key] !== "" && fullPayload[key] !== null && fullPayload[key] !== undefined) {
-          cleanData[key] = fullPayload[key];
+      Object.keys(currentData).forEach(key => {
+        if (currentData[key] !== "" && currentData[key] !== null && currentData[key] !== undefined) {
+          cleanData[key] = currentData[key];
         }
       });
 
-      // [FIX] Updated endpoint and payload structure to match FormSubmission schema
       const response = await axios.post(
-        `${API_BASE_URL}/api/plugins/${selectedPlugin}/calculate`,
+        `${API_BASE_URL}/api/plugins/diseases/${selectedPlugin}/assess`,
         {
-          ten_dang_nhap: tenDangNhap || null,
-          form_data: cleanData
+          health_profile: healthProfile || {},
+          form_data: cleanData,
+          include_breakdown: true,
+          calculate_progression: true
         }
       );
 
@@ -4302,7 +5107,9 @@ export default function MainRiskPage() {
         const errorList = error.response.data.detail.errors.map(err => `• ${err.field}: ${err.message}`).join("\n");
         errorMsg = `Hệ thống từ chối phân tích:\n\n${errorList}`;
       } else if (error.response?.data?.detail) {
-        errorMsg = error.response.data.detail;
+        errorMsg = typeof error.response.data.detail === 'string' 
+          ? error.response.data.detail 
+          : JSON.stringify(error.response.data.detail);
       }
       
       alert("❌ LỖI:\n" + errorMsg);
@@ -4347,10 +5154,11 @@ export default function MainRiskPage() {
           onChange={(e) => setSelectedPlugin(e.target.value)} 
           style={{ padding: "10px", fontSize: "16px", borderRadius: "6px" }}
         >
-          {plugins.map(p => (
-            <option key={p} value={p}>
+          {plugins.map((p, index) => (
+            <option key={`${p}_${index}`} value={p}>
               {p === "diabetes" ? "🍬 Tiểu đường" : 
                p === "hypertension" ? "🩸 Tăng huyết áp" : 
+               p === "stroke" ? "🧠 Đột quỵ" :
                p === "gout" ? "🦶 Bệnh Gout" : p}
             </option>
           ))}
@@ -4367,10 +5175,13 @@ export default function MainRiskPage() {
                     background: "white", padding: "30px", borderRadius: "12px", 
                     boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", maxWidth: "600px", margin: "0 auto" }}>
         
-        {plugin.fields.map((field) => {
-          if (field.key === "bmi") {
+        {plugin.fields.map((field, index) => {
+          // [FIX] Lấy key chuẩn
+          const fieldKey = field.key || field.code;
+
+          if (fieldKey === "bmi") {
             return (
-              <div key="bmi_group" style={{ width: "100%", background: "#f8fafc", padding: "16px", 
+              <div key={`bmi_group_${index}`} style={{ width: "100%", background: "#f8fafc", padding: "16px", 
                                             borderRadius: "8px", border: "1px dashed #cbd5e1", display: "flex", flexDirection: "column", gap: "10px" }}>
                 <p style={{ margin: 0, fontSize: "13px", color: "#64748b", fontStyle: "italic" }}>
                   * Chỉ số BMI được hệ thống tự động tính toán.
@@ -4403,34 +5214,35 @@ export default function MainRiskPage() {
           }
 
           return (
-            <div key={field.key} style={{ width: "100%", display: "flex", flexDirection: "column", gap: "6px" }}>
+            <div key={`${fieldKey}_${index}`} style={{ width: "100%", display: "flex", flexDirection: "column", gap: "6px" }}>
               <label style={{ fontWeight: "bold", color: "#475569" }}>
                 {field.label}{field.required && <span style={{color: "red"}}> *</span>}
               </label>
 
               {field.type === "number" && (
-                <input type="number" value={formData[field.key] ?? ""} 
-                       onChange={(e) => handleChange(field, e.target.value === "" ? "" : Number(e.target.value))} 
-                       style={{ width: "100%", padding: "12px", border: errors[field.key] ? "2px solid red" : "1px solid #cbd5e1", borderRadius: "8px" }} />
+                <input type="number" value={formData[fieldKey] ?? ""} 
+                       onChange={(e) => handleChange(fieldKey, e.target.value === "" ? "" : Number(e.target.value))} 
+                       style={{ width: "100%", padding: "12px", border: errors[fieldKey] ? "2px solid red" : "1px solid #cbd5e1", borderRadius: "8px" }} />
               )}
 
               {field.type === "select" && (
-                <select value={formData[field.key] ?? ""} onChange={(e) => handleChange(field, e.target.value)} 
+                <select value={formData[fieldKey] ?? ""} onChange={(e) => handleChange(fieldKey, e.target.value)} 
                         style={{ width: "100%", padding: "12px", border: "1px solid #cbd5e1", borderRadius: "8px" }}>
                   <option value="">-- Chọn --</option>
-                  {field.options?.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                  {field.options?.map((opt, optIndex) => <option key={`${opt.value}_${optIndex}`} value={opt.value}>{opt.label}</option>)}
                 </select>
               )}
 
               {field.type === "boolean" && (
                 <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "4px" }}>
-                  <input type="checkbox" checked={!!formData[field.key]} 
-                         onChange={(e) => handleChange(field, e.target.checked)} />
+                  {/* [FIX] Gọi handleChange với tên trường (string) thay vì object */}
+                  <input type="checkbox" checked={!!formData[fieldKey]} 
+                         onChange={(e) => handleChange(fieldKey, e.target.checked)} />
                   <span style={{ color: "#64748b" }}>Kích hoạt yếu tố này</span>
                 </div>
               )}
 
-              {errors[field.key] && <div style={{color: "#ef4444", fontSize: "13px"}}>{errors[field.key]}</div>}
+              {errors[fieldKey] && <div style={{color: "#ef4444", fontSize: "13px"}}>{errors[fieldKey]}</div>}
             </div>
           );
         })}
@@ -4466,6 +5278,24 @@ export default function MainRiskPage() {
               </div>
             </div>
           </div>
+          
+          {riskResult.explanation && (
+            <div style={{ marginTop: "20px", padding: "20px", background: "white", borderRadius: "10px", boxShadow: "0 2px 4px rgba(0,0,0,0.05)"}}>
+              <h3 style={{ color: "#334155", marginTop: 0 }}>💡 Chi tiết đánh giá</h3>
+              <p style={{ whiteSpace: "pre-wrap", color: "#475569" }}>{riskResult.explanation.summary}</p>
+              
+              {riskResult.recommendations && riskResult.recommendations.length > 0 && (
+                <div style={{ marginTop: "15px" }}>
+                  <h4 style={{ color: "#0f766e", marginBottom: "8px" }}>Khuyến nghị:</h4>
+                  <ul style={{ margin: 0, paddingLeft: "20px", color: "#475569" }}>
+                    {riskResult.recommendations.map((rec, idx) => (
+                      <li key={`rec_${idx}`} style={{ marginBottom: "4px" }}>{rec}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

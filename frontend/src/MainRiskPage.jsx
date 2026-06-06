@@ -48,11 +48,8 @@ export default function MainRiskPage() {
 
   const loadPluginsList = async () => {
     try {
-      // [FIX] Updated endpoint to match backend router prefix
-      const res = await axios.get(`${API_BASE_URL}/api/plugins`);
-      
-      // [FIX] Parse the correct structure returned by backend { available_plugins: [...] }
-      const pluginIds = res.data.available_plugins ? res.data.available_plugins.map(p => p.id) : [];
+      const res = await axios.get(`${API_BASE_URL}/api/plugins/diseases`);
+      const pluginIds = res.data.diseases ? res.data.diseases.map(p => p.id) : [];
       setPlugins(pluginIds);
     } catch (e) {
       console.error("Load plugins error", e);
@@ -62,8 +59,7 @@ export default function MainRiskPage() {
   const loadPlugin = async (pluginName) => {
     try {
       setLoading(true);
-      // [FIX] Updated endpoint to match backend router prefix
-      const response = await axios.get(`${API_BASE_URL}/api/plugins/${pluginName}`);
+      const response = await axios.get(`${API_BASE_URL}/api/plugins/diseases/${pluginName}`);
       const pluginData = response.data;
       setPlugin(pluginData);
       const mergedForm = mergeWithHealthProfile(pluginData.fields);
@@ -80,7 +76,8 @@ export default function MainRiskPage() {
   const mergeWithHealthProfile = (fields) => {
     const initialData = {};
     fields.forEach((field) => {
-      initialData[field.key] = field.default !== undefined ? field.default : "";
+      const fieldKey = field.key || field.code; // [FIX] Hỗ trợ cả field.key và field.code
+      initialData[fieldKey] = field.default !== undefined ? field.default : "";
     });
 
     if (healthProfile) {
@@ -108,13 +105,13 @@ export default function MainRiskPage() {
       Object.keys(dbToFormMapping).forEach(dbKey => {
         if (healthProfile[dbKey] !== undefined && healthProfile[dbKey] !== null) {
           const formKey = dbToFormMapping[dbKey];
-          if (fields.some(f => f.key === formKey)) {
+          if (fields.some(f => (f.key || f.code) === formKey)) {
             initialData[formKey] = healthProfile[dbKey];
           }
         }
       });
 
-      if (healthProfile["hutThuoc"] && fields.some(f => f.key === "smoking_status")) {
+      if (healthProfile["hutThuoc"] && fields.some(f => (f.key || f.code) === "smoking_status")) {
         let val = healthProfile["hutThuoc"];
         if (val === "Đang hút") initialData["smoking_status"] = "current";
         else if (val === "Đã bỏ") initialData["smoking_status"] = "former";
@@ -125,7 +122,8 @@ export default function MainRiskPage() {
   };
 
   const handleChange = async (fieldOrKey, value) => {
-    const key = fieldOrKey.key || fieldOrKey;
+    // [FIX] Nếu fieldOrKey là Object (field), lấy key hoặc code. Nếu là String (truyền trực tiếp name), thì lấy chính nó.
+    const key = (typeof fieldOrKey === 'object') ? (fieldOrKey.key || fieldOrKey.code) : fieldOrKey;
     const updated = { ...formData, [key]: value };
 
     if (key === "chieuCao" || key === "canNang") {
@@ -140,26 +138,29 @@ export default function MainRiskPage() {
 
     setFormData(updated);
 
-    if (plugin?.fields?.some(f => f.key === key)) {
-      await validateField(key, updated);
+    if (plugin?.fields?.some(f => (f.key || f.code) === key)) {
+      await validateForm(updated);
     }
     
-    if ((key === "chieuCao" || key === "canNang") && plugin?.fields?.some(f => f.key === "bmi")) {
-      await validateField("bmi", updated);
+    if ((key === "chieuCao" || key === "canNang") && plugin?.fields?.some(f => (f.key || f.code) === "bmi")) {
+      await validateForm(updated);
     }
   };
 
-  const validateField = async (fieldKey, currentData) => {
+  const validateForm = async (currentData) => {
     try {
-      // [FIX] Updated endpoint to match backend router prefix
       const res = await axios.post(
-        `${API_BASE_URL}/api/plugins/${selectedPlugin}/validate-field/${fieldKey}`,
+        `${API_BASE_URL}/api/plugins/diseases/${selectedPlugin}/validate`,
         currentData
       );
-      setErrors(prev => ({
-        ...prev,
-        [fieldKey]: res.data.is_valid ? "" : (res.data.errors?.[0]?.message || "Lỗi validation")
-      }));
+      
+      const newErrors = {};
+      if (!res.data.is_valid && res.data.errors) {
+        res.data.errors.forEach(err => {
+          newErrors[err.field] = err.message;
+        });
+      }
+      setErrors(newErrors);
     } catch (e) {
       console.error("Validate error:", e);
     }
@@ -170,13 +171,28 @@ export default function MainRiskPage() {
 
     let missingFields = [];
     plugin.fields.forEach(field => {
-      if (field.required && (formData[field.key] === undefined || formData[field.key] === "")) {
+      const fieldKey = field.key || field.code;
+      const value = formData[fieldKey];
+
+      // LOGIC KIỂM TRA MỚI:
+      // Nếu trường là bắt buộc (required):
+      // - Nếu là kiểu boolean: chỉ coi là thiếu nếu giá trị là undefined hoặc null.
+      //   (Giá trị false được coi là "đã trả lời là không", nên hợp lệ).
+      // - Nếu là các kiểu khác: kiểm tra empty string.
+      
+      const isMissing = field.required && (
+        value === undefined || 
+        value === null || 
+        (field.type !== "boolean" && value === "")
+      );
+
+      if (isMissing) {
         missingFields.push(field.label);
       }
     });
 
     if (missingFields.length > 0) {
-      alert(`⚠️ Vui lòng điền các trường bắt buộc:\n- ${missingFields.join('\n- ')}`);
+      alert(`⚠️ Vui lòng trả lời các câu hỏi sau:\n- ${missingFields.join('\n- ')}`);
       return;
     }
 
@@ -186,21 +202,21 @@ export default function MainRiskPage() {
   const calculateRisk = async (currentData) => {
     try {
       setIsCalculating(true);
-      const fullPayload = { ...(healthProfile || {}), ...currentData };
-
+      
       const cleanData = {};
-      Object.keys(fullPayload).forEach(key => {
-        if (fullPayload[key] !== "" && fullPayload[key] !== null && fullPayload[key] !== undefined) {
-          cleanData[key] = fullPayload[key];
+      Object.keys(currentData).forEach(key => {
+        if (currentData[key] !== "" && currentData[key] !== null && currentData[key] !== undefined) {
+          cleanData[key] = currentData[key];
         }
       });
 
-      // [FIX] Updated endpoint and payload structure to match FormSubmission schema
       const response = await axios.post(
-        `${API_BASE_URL}/api/plugins/${selectedPlugin}/calculate`,
+        `${API_BASE_URL}/api/plugins/diseases/${selectedPlugin}/assess`,
         {
-          ten_dang_nhap: tenDangNhap || null,
-          form_data: cleanData
+          health_profile: healthProfile || {},
+          form_data: cleanData,
+          include_breakdown: true,
+          calculate_progression: true
         }
       );
 
@@ -216,7 +232,9 @@ export default function MainRiskPage() {
         const errorList = error.response.data.detail.errors.map(err => `• ${err.field}: ${err.message}`).join("\n");
         errorMsg = `Hệ thống từ chối phân tích:\n\n${errorList}`;
       } else if (error.response?.data?.detail) {
-        errorMsg = error.response.data.detail;
+        errorMsg = typeof error.response.data.detail === 'string' 
+          ? error.response.data.detail 
+          : JSON.stringify(error.response.data.detail);
       }
       
       alert("❌ LỖI:\n" + errorMsg);
@@ -261,10 +279,11 @@ export default function MainRiskPage() {
           onChange={(e) => setSelectedPlugin(e.target.value)} 
           style={{ padding: "10px", fontSize: "16px", borderRadius: "6px" }}
         >
-          {plugins.map(p => (
-            <option key={p} value={p}>
+          {plugins.map((p, index) => (
+            <option key={`${p}_${index}`} value={p}>
               {p === "diabetes" ? "🍬 Tiểu đường" : 
                p === "hypertension" ? "🩸 Tăng huyết áp" : 
+               p === "stroke" ? "🧠 Đột quỵ" :
                p === "gout" ? "🦶 Bệnh Gout" : p}
             </option>
           ))}
@@ -281,10 +300,13 @@ export default function MainRiskPage() {
                     background: "white", padding: "30px", borderRadius: "12px", 
                     boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", maxWidth: "600px", margin: "0 auto" }}>
         
-        {plugin.fields.map((field) => {
-          if (field.key === "bmi") {
+        {plugin.fields.map((field, index) => {
+          // [FIX] Lấy key chuẩn
+          const fieldKey = field.key || field.code;
+
+          if (fieldKey === "bmi") {
             return (
-              <div key="bmi_group" style={{ width: "100%", background: "#f8fafc", padding: "16px", 
+              <div key={`bmi_group_${index}`} style={{ width: "100%", background: "#f8fafc", padding: "16px", 
                                             borderRadius: "8px", border: "1px dashed #cbd5e1", display: "flex", flexDirection: "column", gap: "10px" }}>
                 <p style={{ margin: 0, fontSize: "13px", color: "#64748b", fontStyle: "italic" }}>
                   * Chỉ số BMI được hệ thống tự động tính toán.
@@ -317,34 +339,35 @@ export default function MainRiskPage() {
           }
 
           return (
-            <div key={field.key} style={{ width: "100%", display: "flex", flexDirection: "column", gap: "6px" }}>
+            <div key={`${fieldKey}_${index}`} style={{ width: "100%", display: "flex", flexDirection: "column", gap: "6px" }}>
               <label style={{ fontWeight: "bold", color: "#475569" }}>
                 {field.label}{field.required && <span style={{color: "red"}}> *</span>}
               </label>
 
               {field.type === "number" && (
-                <input type="number" value={formData[field.key] ?? ""} 
-                       onChange={(e) => handleChange(field, e.target.value === "" ? "" : Number(e.target.value))} 
-                       style={{ width: "100%", padding: "12px", border: errors[field.key] ? "2px solid red" : "1px solid #cbd5e1", borderRadius: "8px" }} />
+                <input type="number" value={formData[fieldKey] ?? ""} 
+                       onChange={(e) => handleChange(fieldKey, e.target.value === "" ? "" : Number(e.target.value))} 
+                       style={{ width: "100%", padding: "12px", border: errors[fieldKey] ? "2px solid red" : "1px solid #cbd5e1", borderRadius: "8px" }} />
               )}
 
               {field.type === "select" && (
-                <select value={formData[field.key] ?? ""} onChange={(e) => handleChange(field, e.target.value)} 
+                <select value={formData[fieldKey] ?? ""} onChange={(e) => handleChange(fieldKey, e.target.value)} 
                         style={{ width: "100%", padding: "12px", border: "1px solid #cbd5e1", borderRadius: "8px" }}>
                   <option value="">-- Chọn --</option>
-                  {field.options?.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                  {field.options?.map((opt, optIndex) => <option key={`${opt.value}_${optIndex}`} value={opt.value}>{opt.label}</option>)}
                 </select>
               )}
 
               {field.type === "boolean" && (
                 <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "4px" }}>
-                  <input type="checkbox" checked={!!formData[field.key]} 
-                         onChange={(e) => handleChange(field, e.target.checked)} />
+                  {/* [FIX] Gọi handleChange với tên trường (string) thay vì object */}
+                  <input type="checkbox" checked={!!formData[fieldKey]} 
+                         onChange={(e) => handleChange(fieldKey, e.target.checked)} />
                   <span style={{ color: "#64748b" }}>Kích hoạt yếu tố này</span>
                 </div>
               )}
 
-              {errors[field.key] && <div style={{color: "#ef4444", fontSize: "13px"}}>{errors[field.key]}</div>}
+              {errors[fieldKey] && <div style={{color: "#ef4444", fontSize: "13px"}}>{errors[fieldKey]}</div>}
             </div>
           );
         })}
@@ -380,6 +403,24 @@ export default function MainRiskPage() {
               </div>
             </div>
           </div>
+          
+          {riskResult.explanation && (
+            <div style={{ marginTop: "20px", padding: "20px", background: "white", borderRadius: "10px", boxShadow: "0 2px 4px rgba(0,0,0,0.05)"}}>
+              <h3 style={{ color: "#334155", marginTop: 0 }}>💡 Chi tiết đánh giá</h3>
+              <p style={{ whiteSpace: "pre-wrap", color: "#475569" }}>{riskResult.explanation.summary}</p>
+              
+              {riskResult.recommendations && riskResult.recommendations.length > 0 && (
+                <div style={{ marginTop: "15px" }}>
+                  <h4 style={{ color: "#0f766e", marginBottom: "8px" }}>Khuyến nghị:</h4>
+                  <ul style={{ margin: 0, paddingLeft: "20px", color: "#475569" }}>
+                    {riskResult.recommendations.map((rec, idx) => (
+                      <li key={`rec_${idx}`} style={{ marginBottom: "4px" }}>{rec}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

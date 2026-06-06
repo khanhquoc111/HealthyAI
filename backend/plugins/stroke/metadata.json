@@ -1,0 +1,78 @@
+{
+  "disease_info": {
+    "id": "stroke",
+    "name": "Đột quỵ",
+    "version": "1.0",
+    "description": "Đánh giá nguy cơ đột quỵ dựa trên hồ sơ sức khỏe, tiền sử bệnh lý và các yếu tố nguy cơ tim mạch.",
+    "icon": "🧠"
+  },
+  "fields": [
+    {
+      "key": "family_history_stroke",
+      "label": "Gia đình có người từng bị đột quỵ không?",
+      "type": "boolean",
+      "required": true
+    },
+    {
+      "key": "heart_disease_history",
+      "label": "Bạn đã từng được chẩn đoán bệnh tim mạch chưa?",
+      "type": "boolean",
+      "required": true
+    },
+    {
+      "key": "diabetes_history",
+      "label": "Bạn đã từng được chẩn đoán đái tháo đường chưa?",
+      "type": "boolean",
+      "required": true
+    },
+    {
+      "key": "previous_stroke",
+      "label": "Bạn đã từng bị đột quỵ hoặc cơn thiếu máu não thoáng qua chưa?",
+      "type": "boolean",
+      "required": true
+    }
+  ],
+  "risk_config": {
+    "baseline_mapping": [
+      {
+        "name": "baseline",
+        "condition": null,
+        "score": 10
+      }
+    ],
+    "risk_modifiers": [
+      {
+        "id": "high_systolic",
+        "description": "Huyết áp tâm thu cao",
+        "condition": { "field": "huyetApTamThu", "op": "gte", "value": 140 },
+        "value": 1.5,
+        "priority": 10
+      },
+      {
+        "id": "smoking",
+        "description": "Hút thuốc lá",
+        "condition": { "field": "hutThuoc", "op": "eq", "value": "Đang hút" },
+        "value": 1.5,
+        "priority": 10
+      }
+    ],
+    "protective_factors": [],
+    "thresholds": [
+      { "level": "low", "threshold": 30 },
+      { "level": "medium", "threshold": 60 },
+      { "level": "high", "threshold": 101 }
+    ]
+  },
+  "recommendations": [
+    {
+      "id": "rec_low",
+      "condition": { "field": "risk_level", "op": "eq", "value": "low" },
+      "text": "Duy trì chế độ ăn uống lành mạnh và tập thể dục thường xuyên."
+    },
+    {
+      "id": "rec_high",
+      "condition": { "field": "risk_level", "op": "eq", "value": "high" },
+      "text": "Cần liên hệ chuyên gia tim mạch hoặc thần kinh để khám chuyên sâu ngay lập tức."
+    }
+  ]
+}

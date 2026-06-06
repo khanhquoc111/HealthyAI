@@ -3,10 +3,10 @@
   "disease_info": {
     "id": "hypertension",
     "name": "Đánh giá Nguy cơ Tăng huyết áp",
-    "version": "1.2",
-    "description": "Công cụ đánh giá nguy cơ phát triển tăng huyết áp và biến chứng tim mạch dựa trên các yếu tố nguy cơ chính.",
+    "version": "2.0",
+    "description": "Công cụ đánh giá nguy cơ tăng huyết áp và biến chứng tim mạch dựa trên các yếu tố nguy cơ chính theo hướng dẫn y tế.",
     "author": "LuanVanKTPM",
-    "last_updated": "2026-06-05"
+    "last_updated": "2026-06-06"
   },
   "fields": [
     {
@@ -92,72 +92,228 @@
   ],
   "risk_config": {
     "baseline_mapping": [
-      { "name": "Normal", "condition": { "field": "systolic", "op": "range", "min": 90, "max": 120 }, "score": 10 },
-      { "name": "Elevated", "condition": { "field": "systolic", "op": "range", "min": 120, "max": 130 }, "score": 25 },
-      { "name": "Stage 1", "condition": { "field": "systolic", "op": "range", "min": 130, "max": 140 }, "score": 45 },
-      { "name": "Stage 2", "condition": { "field": "systolic", "op": "gte", "value": 140 }, "score": 70 }
+      {
+        "name": "Normal",
+        "description": "Huyết áp bình thường",
+        "condition": {
+          "type": "AND",
+          "conditions": [
+            { "field": "systolic", "op": "lt", "value": 120 },
+            { "field": "diastolic", "op": "lt", "value": 80 }
+          ]
+        },
+        "score": 10,
+        "priority": 10
+      },
+      {
+        "name": "Elevated",
+        "description": "Huyết áp cao nhẹ",
+        "condition": {
+          "type": "AND",
+          "conditions": [
+            { "field": "systolic", "op": "gte", "value": 120 },
+            { "field": "systolic", "op": "lt", "value": 130 },
+            { "field": "diastolic", "op": "lt", "value": 80 }
+          ]
+        },
+        "score": 25,
+        "priority": 20
+      },
+      {
+        "name": "Stage 1 Hypertension",
+        "description": "Tăng huyết áp giai đoạn 1",
+        "condition": {
+          "type": "AND",
+          "conditions": [
+            { "field": "systolic", "op": "gte", "value": 130 },
+            { "field": "systolic", "op": "lt", "value": 140 }
+          ]
+        },
+        "score": 50,
+        "priority": 30
+      },
+      {
+        "name": "Stage 2 Hypertension",
+        "description": "Tăng huyết áp giai đoạn 2",
+        "condition": {
+          "field": "systolic",
+          "op": "gte",
+          "value": 140
+        },
+        "score": 80,
+        "priority": 40
+      }
     ],
     "risk_modifiers": [
       {
         "id": "age_high",
-        "description": "Tuổi cao (>60)",
+        "description": "Tuổi cao (≥60 tuổi)",
         "condition": { "field": "age", "op": "gte", "value": 60 },
         "effect_type": "multiplicative",
-        "value": 1.25,
-        "category": "modifier",
-        "priority": 20
+        "value": 1.3,
+        "priority": 25,
+        "note": "Độ co giãn mạch máu giảm theo tuổi"
       },
       {
         "id": "obesity",
         "description": "Béo phì (BMI ≥ 30)",
         "condition": { "field": "bmi", "op": "gte", "value": 30 },
         "effect_type": "multiplicative",
-        "value": 1.2,
-        "category": "modifier",
-        "priority": 15
+        "value": 1.25,
+        "priority": 20,
+        "note": "Béo phì làm tăng tình trạng viêm và kháng insulin"
       },
       {
         "id": "smoking",
         "description": "Đang hút thuốc",
         "condition": { "field": "smoking_status", "op": "eq", "value": "current" },
         "effect_type": "multiplicative",
-        "value": 1.3,
-        "category": "modifier",
-        "priority": 25
+        "value": 1.35,
+        "priority": 30,
+        "note": "Thuốc lá làm tổn thương nội mạc mạch máu"
+      },
+      {
+        "id": "diabetes",
+        "description": "Bị tiểu đường",
+        "condition": { "field": "diabetes_status", "op": "eq", "value": "yes" },
+        "effect_type": "multiplicative",
+        "value": 1.4,
+        "priority": 35,
+        "note": "Tiểu đường làm tăng nguy cơ biến chứng tim mạch"
+      },
+      {
+        "id": "family_history",
+        "description": "Tiền sử gia đình bị tăng huyết áp",
+        "condition": { "field": "family_history_hypertension", "op": "bool_true" },
+        "effect_type": "multiplicative",
+        "value": 1.2,
+        "priority": 15,
+        "note": "Yếu tố di truyền đóng vai trò 30-50% trong tăng huyết áp"
       }
     ],
     "protective_factors": [
       {
         "id": "regular_exercise",
-        "description": "Tập thể dục đều đặn",
+        "description": "Tập thể dục đều đặn (≥150 phút/tuần)",
         "condition": { "field": "exercise_minutes_per_week", "op": "gte", "value": 150 },
         "effect_type": "divisive",
-        "value": 1.15,
-        "category": "protective",
-        "priority": 10
+        "value": 1.2,
+        "priority": 10,
+        "note": "Tập thể dục giảm huyết áp 5-8 mmHg"
+      },
+      {
+        "id": "healthy_weight",
+        "description": "Cân nặng lý tưởng (BMI < 25)",
+        "condition": { "field": "bmi", "op": "lt", "value": 25 },
+        "effect_type": "divisive",
+        "value": 1.25,
+        "priority": 15,
+        "note": "Giảm 1kg cân nặng giảm 1 mmHg huyết áp"
+      },
+      {
+        "id": "no_smoking",
+        "description": "Không hút thuốc",
+        "condition": {
+          "type": "OR",
+          "conditions": [
+            { "field": "smoking_status", "op": "eq", "value": "never" },
+            { "field": "smoking_status", "op": "eq", "value": "former" }
+          ]
+        },
+        "effect_type": "divisive",
+        "value": 1.3,
+        "priority": 12,
+        "note": "Bỏ hút thuốc giảm huyết áp trong vài tuần"
       }
     ],
-    "interactions": [],
+    "interactions": [
+      {
+        "id": "smoking_age_synergy",
+        "description": "Tương tác: Tuổi cao + Hút thuốc",
+        "condition": {
+          "type": "AND",
+          "conditions": [
+            { "field": "age", "op": "gte", "value": 50 },
+            { "field": "smoking_status", "op": "eq", "value": "current" }
+          ]
+        },
+        "interaction_multiplier": 1.25,
+        "interaction_type": "synergy"
+      },
+      {
+        "id": "diabetes_hypertension_synergy",
+        "description": "Tương tác: Tiểu đường + Tăng huyết áp",
+        "condition": {
+          "type": "AND",
+          "conditions": [
+            { "field": "diabetes_status", "op": "eq", "value": "yes" },
+            { "field": "systolic", "op": "gte", "value": 130 }
+          ]
+        },
+        "interaction_multiplier": 1.35,
+        "interaction_type": "synergy"
+      },
+      {
+        "id": "obesity_smoking_synergy",
+        "description": "Tương tác: Béo phì + Hút thuốc",
+        "condition": {
+          "type": "AND",
+          "conditions": [
+            { "field": "bmi", "op": "gte", "value": 30 },
+            { "field": "smoking_status", "op": "eq", "value": "current" }
+          ]
+        },
+        "interaction_multiplier": 1.2,
+        "interaction_type": "synergy"
+      }
+    ],
     "thresholds": [
-      { "range": [0, 40], "level": "low" },
-      { "range": [40, 70], "level": "medium" },
-      { "range": [70, 100], "level": "high" }
+      { "range": [0, 30], "level": "low" },
+      { "range": [30, 60], "level": "medium" },
+      { "range": [60, 100], "level": "high" }
     ]
   },
   "recommendations": [
     {
-      "id": "lifestyle_change",
-      "condition": { "field": "final_score", "op": "gte", "value": 40 },
-      "text": "Tăng cường tập thể dục ít nhất 150 phút/tuần và giảm muối.",
+      "id": "low_risk_maintenance",
+      "condition": { "field": "final_score", "op": "lt", "value": 30 },
+      "text": "Duy trì lối sống lành mạnh, tập thể dục 150 phút/tuần, giảm muối, kiểm tra huyết áp định kỳ hàng năm.",
       "priority": 1,
       "action_type": "lifestyle"
     },
     {
-      "id": "medical_consult",
-      "condition": { "field": "final_score", "op": "gte", "value": 60 },
-      "text": "Nên gặp bác sĩ để kiểm tra và có thể dùng thuốc kiểm soát huyết áp.",
+      "id": "medium_risk_lifestyle",
+      "condition": {
+        "type": "AND",
+        "conditions": [
+          { "field": "final_score", "op": "gte", "value": 30 },
+          { "field": "final_score", "op": "lt", "value": 60 }
+        ]
+      },
+      "text": "Tăng cường tập thể dục ít nhất 150 phút/tuần, giảm muối, giảm cân (nếu BMI > 25), kiểm tra huyết áp mỗi 3-6 tháng.",
       "priority": 2,
+      "action_type": "lifestyle"
+    },
+    {
+      "id": "high_risk_medical",
+      "condition": { "field": "final_score", "op": "gte", "value": 60 },
+      "text": "⚠️ Cần gặp bác sĩ trong 1-2 tuần để kiểm tra và xem xét sử dụng thuốc kiểm soát huyết áp. Kiểm tra huyết áp hàng ngày hoặc theo chỉ dẫn của bác sĩ.",
+      "priority": 1,
       "action_type": "referral"
+    },
+    {
+      "id": "quit_smoking",
+      "condition": { "field": "smoking_status", "op": "eq", "value": "current" },
+      "text": "Bỏ hút thuốc là ưu tiên hàng đầu. Liên hệ các chương trình hỗ trợ bỏ hút thuốc hoặc tư vấn bác sĩ.",
+      "priority": 1,
+      "action_type": "lifestyle"
+    },
+    {
+      "id": "weight_loss",
+      "condition": { "field": "bmi", "op": "gte", "value": 30 },
+      "text": "Giảm cân 5-10% (khoảng 3-5kg) có thể giảm huyết áp 2-4 mmHg. Tư vấn chế độ ăn từ chuyên gia dinh dưỡng.",
+      "priority": 2,
+      "action_type": "lifestyle"
     }
   ]
 }
