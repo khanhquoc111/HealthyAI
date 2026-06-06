@@ -119,11 +119,15 @@ class ConditionEvaluator:
         field_value = form_data.get(field)
 
         if field_value is None:
-            # [ENHANCED] Xử lý null values với is_null/is_not_null
+            # [ENHANCED] Xử lý null values thông minh hơn với boolean
             if operator in ["is_null", "is_empty"]:
                 return True
             elif operator in ["is_not_null", "is_not_empty"]:
                 return False
+            elif operator == "bool_false":
+                # [FIX CHÍNH TẠI ĐÂY] Mặc định không truyền/ko chọn nghĩa là False
+                # Do đó điều kiện bool_false (phủ định) phải được thỏa mãn (Return True)
+                return True
             # Các operator khác: field không có xem như điều kiện không thỏa mãn
             return False
 

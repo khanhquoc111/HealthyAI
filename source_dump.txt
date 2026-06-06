@@ -411,26 +411,37 @@ class ConditionEvaluator:
         field_value = form_data.get(field)
 
         if field_value is None:
-            # [ENHANCED] Xử lý null values với is_null/is_not_null
+            # [ENHANCED] Xử lý null values thông minh hơn với boolean
             if operator in ["is_null", "is_empty"]:
                 return True
             elif operator in ["is_not_null", "is_not_empty"]:
                 return False
+            elif operator == "bool_false":
+                # [FIX CHÍNH TẠI ĐÂY] Mặc định không truyền/ko chọn nghĩa là False
+                # Do đó điều kiện bool_false (phủ định) phải được thỏa mãn (Return True)
+                return True
             # Các operator khác: field không có xem như điều kiện không thỏa mãn
             return False
 
-        # [ENHANCED] Support "range" operator cho baseline_mapping
+        # [FIXED] Support "range" operator - có thể có min/max hoặc list [min, max]
         if operator == "range":
             min_val = condition.get("min")
             max_val = condition.get("max")
+            
+            # [NEW] Support legacy format [min, max] trong metadata
+            if min_val is None and max_val is None:
+                # Có thể min/max được pass như properties khác
+                min_val = condition.get("lower")
+                max_val = condition.get("upper")
+            
             try:
                 num_val = float(field_value)
                 if min_val is not None and max_val is not None:
-                    return min_val <= num_val < max_val
+                    return min_val <= num_val <= max_val  # Inclusive on both ends
                 elif min_val is not None:
                     return num_val >= min_val
                 elif max_val is not None:
-                    return num_val < max_val
+                    return num_val <= max_val
             except (ValueError, TypeError):
                 logger.warning(f"Cannot convert {field}={field_value} to float for range comparison")
                 return False
@@ -901,7 +912,7 @@ class ExplanationEngine:
     
     def _list_primary_factors(self) -> List[Dict[str, Any]]:
         """
-        [NEW] Liệt kê các yếu tố chính tăng rủi ro
+        [ENHANCED] Liệt kê các yếu tố chính tăng rủi ro kèm giải thích
         """
         modifiers = self.risk_result.get("breakdown", {}).get("applied_modifiers", [])
         
@@ -917,14 +928,15 @@ class ExplanationEngine:
             factors.append({
                 "name": modifier.get("description", ""),
                 "impact": f"+{modifier.get('effect_on_score', 0):.1f}",
-                "explanation": self._get_factor_explanation(modifier.get("id", ""))
+                # [FIX] Ưu tiên lấy note từ config, nếu không có mới dùng get_factor_explanation
+                "explanation": modifier.get("note") or self._get_factor_explanation(modifier.get("id", ""))
             })
         
         return factors
     
     def _list_protective_factors(self) -> List[Dict[str, Any]]:
         """
-        [NEW] Liệt kê các yếu tố bảo vệ (giảm rủi ro)
+        [ENHANCED] Liệt kê các yếu tố bảo vệ (giảm rủi ro) kèm giải thích
         """
         protective = self.risk_result.get("breakdown", {}).get("applied_protective", [])
         
@@ -936,7 +948,8 @@ class ExplanationEngine:
             factors.append({
                 "name": prot.get("description", ""),
                 "benefit": f"{prot.get('effect_on_score', 0):.1f}",
-                "explanation": self._get_factor_explanation(prot.get("id", ""))
+                # [FIX] Ưu tiên lấy note từ config
+                "explanation": prot.get("note") or self._get_factor_explanation(prot.get("id", ""))
             })
         
         return factors
@@ -1067,12 +1080,19 @@ class ExplanationEngine:
 ```py
 # backend/app/plugin_api.py
 """
-Plugin API - UPGRADED VERSION
-Sử dụng các feature mới từ upgraded validation và risk engines
+Plugin API - METADATA-DRIVEN VERSION
+
+Key changes:
+  1. GET /diseases/{disease_id} now returns full fields including health_profile_key
+     so frontend can generically map any disease fields to/from the health profile.
+  2. POST /diseases/{disease_id}/assess auto-saves form_data back to the health
+     profile after a successful assessment (fields that have health_profile_key).
+  3. No hard-coded disease mappings anywhere in this file.
 """
 
-from fastapi import APIRouter, HTTPException
-from typing import Dict, Any, Optional
+from fastapi import APIRouter, HTTPException, Depends
+from typing import Any, Dict, Optional
+from sqlalchemy.orm import Session
 import logging
 
 from app.plugin_loader import get_plugin
@@ -1082,20 +1102,194 @@ from app.explanation_engine import ExplanationEngine
 from app.condition_evaluator import ConditionEvaluator
 
 logger = logging.getLogger(__name__)
+# Trong _save_form_data_to_profile
 
 router = APIRouter(prefix="/api/plugins", tags=["plugins"])
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _get_db():
+    """Lazily import DB session to avoid circular imports."""
+    from database.database import SessionLocal
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def _save_form_data_to_profile(
+    tenDangNhap: str,
+    form_data: Dict[str, Any],
+    plugin_fields: list,
+    db: Session,
+):
+    """
+    Persist form_data values back to the health profile tables.
+    - Ưu tiên health_profile_key từ metadata
+    - FALLBACK_MAP đầy đủ theo schema database hiện tại
+    """
+    from database.nguoi_dung import NguoiDung
+    from database.hs_suckhoe import HoSoSucKhoe
+    from database.cs_suckhoe import ChiSoSucKhoe
+
+    user = db.query(NguoiDung).filter(
+        NguoiDung.tenDangNhap == tenDangNhap
+    ).first()
+    if not user:
+        logger.warning("auto-save: user %s not found", tenDangNhap)
+        return
+
+    HO_SO_COLS = {
+        "tuoi", "gioiTinh", "chieuCao", "canNang", "bmi", "vongEo",
+        "huyetApTamThu", "huyetApTamTruong", "hutThuoc", "uongRuouBia",
+        "soPhutVanDongMoiTuan",
+    }
+
+    # FALLBACK MAP ĐẦY ĐỦ - THEO DATABASE SCHEMA
+    FALLBACK_MAP = {
+        # hoSoSucKhoe columns
+        "age": "tuoi",
+        "tuoi": "tuoi",
+        "gioiTinh": "gioiTinh",
+        "chieuCao": "chieuCao",
+        "canNang": "canNang",
+        "bmi": "bmi",
+        "vongEo": "vongEo",
+        "systolic": "huyetApTamThu",
+        "huyetApTamThu": "huyetApTamThu",
+        "diastolic": "huyetApTamTruong",
+        "huyetApTamTruong": "huyetApTamTruong",
+        "hutThuoc": "hutThuoc",
+        "smoking_status": "hutThuoc",
+        "uongRuouBia": "uongRuouBia",
+        "soPhutVanDongMoiTuan": "soPhutVanDongMoiTuan",
+        "exercise_minutes_per_week": "soPhutVanDongMoiTuan",
+
+        # chiSoSucKhoe (EAV)
+        "duongHuyet": "duongHuyet",
+        "fasting_glucose": "duongHuyet",
+        "hba1c": "hba1c",
+        "cholesterol": "cholesterol",
+        "total_cholesterol": "cholesterol",
+        "ldl": "ldl",
+        "hdl": "hdl",
+        "triglyceride": "triglyceride",
+        "creatinine": "creatinine",
+        "acidUric": "acidUric",
+
+        # Medical History
+        "caoHuyetAp": "caoHuyetAp",
+        "tieuDuong": "tieuDuong",
+        "benhTimMach": "benhTimMach",
+        "gout": "gout",
+
+        # Family History
+        "family_history_diabetes": "giaDinhTieuDuong",
+        "family_history_hypertension": "giaDinhCaoHuyetAp",
+        "family_history_cardiovascular": "giaDinhTimMach",
+        "giaDinhCaoHuyetAp": "giaDinhCaoHuyetAp",
+        "giaDinhTieuDuong": "giaDinhTieuDuong",
+        "giaDinhTimMach": "giaDinhTimMach",
+        "giaDinhGout": "giaDinhGout",
+    }
+
+    hoso_updates: Dict[str, Any] = {}
+    chiso_updates: Dict[str, Any] = {}
+
+    saved_count = 0
+
+    for field in plugin_fields:
+        plugin_key = field.get("key") or field.get("code")
+        if not plugin_key or plugin_key not in form_data:
+            continue
+
+        value = form_data[plugin_key]
+        if value is None or value == "":
+            continue
+
+        # --- [BỔ SUNG] REVERSE MAPPING: Dịch từ Plugin (Tiếng Anh) về DB (Tiếng Việt) ---
+        if plugin_key == "smoking_status":
+            smoke_map = {"never": "Chưa bao giờ", "former": "Đã bỏ", "current": "Đang hút"}
+            value = smoke_map.get(value, value)
+            
+        if plugin_key == "alcohol_status":
+            alc_map = {"never": "Chưa bao giờ", "occasional": "Thỉnh thoảng", "frequent": "Thường xuyên"}
+            value = alc_map.get(value, value)
+
+        if plugin_key in ["diabetes_status", "htn_status"]:
+            # Plugin dùng "yes"/"no", Database dùng Boolean (True/False)
+            if value in ["yes", "no"]:
+                value = True if value == "yes" else False
+        # --------------------------------------------------------------------------------
+
+        # Ưu tiên metadata → fallback map
+        hp_key = field.get("health_profile_key") or FALLBACK_MAP.get(plugin_key)
+
+        if not hp_key:
+            logger.debug(f"Skip field {plugin_key} - no mapping")
+            continue
+
+        if hp_key in HO_SO_COLS:
+            hoso_updates[hp_key] = value
+        else:
+            chiso_updates[hp_key] = value
+
+        saved_count += 1
+
+    # === Save to hoSoSucKhoe ===
+    if hoso_updates:
+        existing = db.query(HoSoSucKhoe).filter(
+            HoSoSucKhoe.idNguoiDung == user.idNguoiDung
+        ).first()
+        if existing:
+            for k, v in hoso_updates.items():
+                setattr(existing, k, v)
+        else:
+            db.add(HoSoSucKhoe(idNguoiDung=user.idNguoiDung, **hoso_updates))
+
+    # === Save to chiSoSucKhoe (EAV) ===
+    for key, value in chiso_updates.items():
+        str_value = ("true" if value else "false") if isinstance(value, bool) else str(value)
+
+        existing = db.query(ChiSoSucKhoe).filter(
+            ChiSoSucKhoe.idNguoiDung == user.idNguoiDung,
+            ChiSoSucKhoe.maChiSo == key,
+        ).first()
+        if existing:
+            existing.giaTri = str_value
+        else:
+            db.add(ChiSoSucKhoe(
+                idNguoiDung=user.idNguoiDung,
+                maChiSo=key,
+                giaTri=str_value,
+            ))
+
+    try:
+        db.commit()
+        logger.info(f"✅ Auto-save thành công cho user {tenDangNhap} | {saved_count} fields")
+        if hoso_updates:
+            logger.info(f"   hoSoSucKhoe: {list(hoso_updates.keys())}")
+        if chiso_updates:
+            logger.info(f"   chiSoSucKhoe: {list(chiso_updates.keys())}")
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"❌ Auto-save commit failed for user {tenDangNhap}: {exc}")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GET /diseases
+# ──────────────────────────────────────────────────────────────────────────────
+
 @router.get("/diseases")
 async def get_available_diseases():
-    """
-    Lấy danh sách các bệnh khả dụng
-    """
     from app.plugin_loader import get_plugin_loader
-    
     loader = get_plugin_loader()
     diseases = loader.list_diseases()
-    
+
     disease_info = []
     for disease in diseases:
         plugin = loader.load_plugin(disease)
@@ -1104,94 +1298,117 @@ async def get_available_diseases():
                 "id": disease,
                 "name": plugin.get("disease_info", {}).get("name", disease),
                 "description": plugin.get("disease_info", {}).get("description", ""),
-                "icon": plugin.get("disease_info", {}).get("icon", "🏥")
+                "icon": plugin.get("disease_info", {}).get("icon", ""),
             })
-    
+
     return {"diseases": disease_info}
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GET /diseases/{disease_id}
+# ──────────────────────────────────────────────────────────────────────────────
 
 @router.get("/diseases/{disease_id}")
 async def get_disease_plugin(disease_id: str):
     """
-    Lấy thông tin chi tiết plugin của một bệnh
+    Returns the full plugin descriptor including every field's health_profile_key
+    so the frontend can build the mapping dynamically without hard-coded logic.
     """
     plugin = get_plugin(disease_id)
-    
     if not plugin:
         raise HTTPException(status_code=404, detail=f"Disease plugin '{disease_id}' not found")
-    
-    # [ENHANCED] Return simplified metadata for frontend
+
     return {
         "id": disease_id,
         "disease_info": plugin.get("disease_info", {}),
+        # Return full field objects; frontend reads health_profile_key from each field
         "fields": plugin.get("fields", []),
         "risk_config": {
             "baseline_mapping": plugin.get("risk_config", {}).get("baseline_mapping", []),
-            "thresholds": plugin.get("risk_config", {}).get("thresholds", [])
-        }
+            "thresholds": plugin.get("risk_config", {}).get("thresholds", []),
+        },
     }
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# POST /diseases/{disease_id}/assess
+# ──────────────────────────────────────────────────────────────────────────────
+
 @router.post("/diseases/{disease_id}/assess")
-async def assess_risk(disease_id: str, payload: Dict[str, Any]):
+async def assess_risk(
+    disease_id: str,
+    payload: Dict[str, Any],
+    db: Session = Depends(_get_db),
+):
     """
-    [ENHANCED] Đánh giá nguy cơ bệnh
-    
+    Assess disease risk.
+
     Payload:
     {
-        "form_data": {...user input...},
-        "health_profile": {...optional existing data...},
-        "include_breakdown": bool,
+        "form_data":            {...user input...},
+        "health_profile":       {...optional cached profile...},
+        "tenDangNhap":          "username",          // optional; enables auto-save
+        "include_breakdown":    bool,
         "calculate_progression": bool
     }
     """
-    
-    # [STEP 1] Load plugin
     plugin_metadata = get_plugin(disease_id)
-    
     if not plugin_metadata:
         raise HTTPException(status_code=404, detail=f"Disease plugin '{disease_id}' not found")
-    
-    # [STEP 2] Extract payloads
+
     form_data = payload.get("form_data", {})
     health_profile = payload.get("health_profile", {})
+    tenDangNhap: Optional[str] = payload.get("tenDangNhap")
     include_breakdown = payload.get("include_breakdown", True)
     calculate_progression = payload.get("calculate_progression", True)
-    
-    # [STEP 3] Merge data: form_data ưu tiên cao hơn health_profile
+
+    # Merge: form_data overrides health_profile
     unified_data = {**health_profile, **form_data}
-    
-    # [STEP 4] Validation & Quality Assessment
-    val_engine = ValidationEngine(plugin_metadata.get("risk_config", {}))
+
+    # Validate
+    val_engine = ValidationEngine(plugin_metadata)
     val_result = val_engine.validate_form(unified_data)
-    
-    # Return validation errors
+
     if val_result.has_errors():
         raise HTTPException(
             status_code=400,
             detail={
                 "errors": [e.to_dict() for e in val_result.errors],
-                "message": "Validation failed"
-            }
+                "message": "Validation failed",
+            },
         )
-    
-    # [NEW] Log warnings if any
+
     if val_result.has_warnings():
-        logger.warning(f"Validation warnings for {disease_id}: {[w.to_dict() for w in val_result.warnings]}")
-    
-    # [STEP 5] Normalize form data
+        logger.warning(
+            "Validation warnings for %s: %s",
+            disease_id,
+            [w.to_dict() for w in val_result.warnings],
+        )
+
     normalized = val_engine.normalize_form_data(unified_data)
-    
-    # [STEP 6] Calculate risk using upgraded engine
+
+    # Risk evaluation
     risk_engine = RiskStratificationEngine(plugin_metadata.get("risk_config", {}))
     risk_result = risk_engine.evaluate(normalized)
-    
-    # [STEP 7] Generate explanation
+
+    # Explanation
     explanation_engine = ExplanationEngine(plugin_metadata, risk_result)
     explanation = explanation_engine.generate_explanation()
-    
-    # [STEP 8] Build response
-    # [FIX] Trọng yếu: Truyền thêm normalized payload vào function _generate_recommendations 
+
+    # Auto-save form_data back to health profile (only fields that have health_profile_key)
+    if tenDangNhap:
+        try:
+            _save_form_data_to_profile(
+                tenDangNhap,
+                form_data,
+                plugin_metadata.get("fields", []),
+                db,
+            )
+        except Exception as exc:
+            # Non-blocking: log and continue
+            logger.error("Auto-save health profile failed: %s", exc)
+
+    # Build response
     response = {
         "disease_id": disease_id,
         "final_score": risk_result.get("final_score"),
@@ -1201,94 +1418,118 @@ async def assess_risk(disease_id: str, payload: Dict[str, Any]):
         "explanation": explanation,
         "recommendations": _generate_recommendations(risk_result, plugin_metadata, normalized),
     }
-    
-    # [NEW] Include detailed breakdown if requested
+
     if include_breakdown:
         response["breakdown"] = risk_result.get("breakdown", {})
         response["evidence_breakdown"] = risk_result.get("evidence_breakdown", {})
-    
-    # [NEW] Include risk progression if requested
+
     if calculate_progression:
         response["risk_progression"] = risk_result.get("risk_progression", {})
-    
-    # [NEW] Include quality metrics
+
     response["quality_metrics"] = {
         "data_quality": val_result.data_quality_score,
         "confidence_level": _calculate_confidence(val_result, risk_result),
-        "fields_provided": sum(1 for k, v in normalized.items() if v is not None)
+        "fields_provided": sum(1 for v in normalized.values() if v is not None),
     }
-    
+
     return response
 
 
-@router.post("/diseases/{disease_id}/batch-assess")
-async def batch_assess_risk(disease_id: str, payloads: list):
-    """
-    [NEW] Đánh giá nguy cơ cho nhiều người dùng cùng một lúc
-    """
-    results = []
-    
-    for payload in payloads:
-        try:
-            result = await assess_risk(disease_id, payload)
-            results.append({
-                "success": True,
-                "data": result
-            })
-        except HTTPException as e:
-            results.append({
-                "success": False,
-                "error": str(e.detail)
-            })
-        except Exception as e:
-            results.append({
-                "success": False,
-                "error": str(e)
-            })
-    
-    return {"results": results}
-
+# ──────────────────────────────────────────────────────────────────────────────
+# POST /diseases/{disease_id}/validate
+# ──────────────────────────────────────────────────────────────────────────────
 
 @router.post("/diseases/{disease_id}/validate")
 async def validate_form(disease_id: str, form_data: Dict[str, Any]):
-    """
-    [NEW] Chỉ validate form data, không tính risk
-    Hữu ích cho real-time validation trong frontend
-    """
+    """Validate only — no risk calculation. Used for real-time field validation."""
     plugin_metadata = get_plugin(disease_id)
-    
     if not plugin_metadata:
         raise HTTPException(status_code=404, detail=f"Disease plugin '{disease_id}' not found")
-    
-    val_engine = ValidationEngine(plugin_metadata.get("risk_config", {}))
+
+    val_engine = ValidationEngine(plugin_metadata)
     val_result = val_engine.validate_form(form_data)
-    
+
     return {
         "is_valid": val_result.is_valid,
         "errors": [e.to_dict() for e in val_result.errors],
         "warnings": [w.to_dict() for w in val_result.warnings],
-        "data_quality_score": val_result.data_quality_score
+        "data_quality_score": val_result.data_quality_score,
     }
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# POST /diseases/{disease_id}/batch-assess
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.post("/diseases/{disease_id}/batch-assess")
+async def batch_assess_risk(disease_id: str, payloads: list, db: Session = Depends(_get_db)):
+    results = []
+    for payload in payloads:
+        try:
+            result = await assess_risk(disease_id, payload, db)
+            results.append({"success": True, "data": result})
+        except HTTPException as e:
+            results.append({"success": False, "error": str(e.detail)})
+        except Exception as e:
+            results.append({"success": False, "error": str(e)})
+    return {"results": results}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# POST /diseases/{disease_id}/compare-risk
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.post("/diseases/{disease_id}/compare-risk")
+async def compare_risk_scenarios(disease_id: str, scenarios: Dict[str, Dict[str, Any]]):
+    plugin_metadata = get_plugin(disease_id)
+    if not plugin_metadata:
+        raise HTTPException(status_code=404, detail=f"Disease plugin '{disease_id}' not found")
+
+    val_engine = ValidationEngine(plugin_metadata)
+    risk_engine = RiskStratificationEngine(plugin_metadata.get("risk_config", {}))
+
+    comparison = {}
+    for scenario_name, scenario_data in scenarios.items():
+        try:
+            normalized = val_engine.normalize_form_data(scenario_data)
+            result = risk_engine.evaluate(normalized)
+            comparison[scenario_name] = {
+                "score": result.get("final_score"),
+                "risk_level": result.get("risk_level"),
+                "percentile": result.get("risk_percentile"),
+            }
+        except Exception as e:
+            logger.error("Error evaluating scenario '%s': %s", scenario_name, e)
+            comparison[scenario_name] = {"error": str(e)}
+
+    if "current" in comparison and len(comparison) > 1:
+        current_score = comparison["current"].get("score", 0) or 0
+        for name, sc_result in comparison.items():
+            if name != "current":
+                other = sc_result.get("score", 0) or 0
+                sc_result["score_difference"] = round(current_score - other, 2)
+                sc_result["improvement_percentage"] = round(
+                    ((current_score - other) / current_score * 100) if current_score > 0 else 0, 2
+                )
+
+    return {"scenarios": comparison}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GET /diseases/{disease_id}/field-metadata/{field_key}
+# ──────────────────────────────────────────────────────────────────────────────
+
 @router.get("/diseases/{disease_id}/field-metadata/{field_key}")
 async def get_field_metadata(disease_id: str, field_key: str):
-    """
-    [NEW] Lấy metadata của một field cụ thể
-    Hữu ích cho dynamic form rendering
-    """
     plugin = get_plugin(disease_id)
-    
     if not plugin:
         raise HTTPException(status_code=404, detail=f"Disease plugin '{disease_id}' not found")
-    
+
     fields = plugin.get("fields", [])
     field = next((f for f in fields if f.get("key") == field_key), None)
-    
     if not field:
         raise HTTPException(status_code=404, detail=f"Field '{field_key}' not found")
-    
-    # [ENHANCED] Return rich field metadata
+
     return {
         "key": field.get("key"),
         "label": field.get("label"),
@@ -1299,88 +1540,42 @@ async def get_field_metadata(disease_id: str, field_key: str):
         "min": field.get("min"),
         "max": field.get("max"),
         "options": field.get("options", []),
-        "validation_rules": field.get("validation_rules", []),
-        "icon": field.get("icon", "")
+        "icon": field.get("icon", ""),
+        "health_profile_key": field.get("health_profile_key"),
     }
 
 
-@router.post("/diseases/{disease_id}/compare-risk")
-async def compare_risk_scenarios(disease_id: str, scenarios: Dict[str, Dict[str, Any]]):
-    """
-    [NEW] So sánh rủi ro giữa nhiều kịch bản
-    """
-    plugin_metadata = get_plugin(disease_id)
-    
-    if not plugin_metadata:
-        raise HTTPException(status_code=404, detail=f"Disease plugin '{disease_id}' not found")
-    
-    risk_engine = RiskStratificationEngine(plugin_metadata.get("risk_config", {}))
-    val_engine = ValidationEngine(plugin_metadata.get("risk_config", {}))
-    
-    comparison = {}
-    
-    for scenario_name, scenario_data in scenarios.items():
-        try:
-            normalized = val_engine.normalize_form_data(scenario_data)
-            result = risk_engine.evaluate(normalized)
-            
-            comparison[scenario_name] = {
-                "score": result.get("final_score"),
-                "risk_level": result.get("risk_level"),
-                "percentile": result.get("risk_percentile")
-            }
-        except Exception as e:
-            logger.error(f"Error evaluating scenario '{scenario_name}': {e}")
-            comparison[scenario_name] = {
-                "error": str(e)
-            }
-    
-    # [NEW] Calculate score differences
-    if "current" in comparison and len(comparison) > 1:
-        current_score = comparison["current"].get("score", 0)
-        
-        for scenario_name, scenario_result in comparison.items():
-            if scenario_name != "current":
-                other_score = scenario_result.get("score", 0)
-                scenario_result["score_difference"] = round(current_score - other_score, 2)
-                scenario_result["improvement_percentage"] = round(
-                    ((current_score - other_score) / current_score * 100) if current_score > 0 else 0, 2
-                )
-    
-    return {"scenarios": comparison}
+# ──────────────────────────────────────────────────────────────────────────────
+# HELPERS
+# ──────────────────────────────────────────────────────────────────────────────
 
-
-def _generate_recommendations(risk_result: Dict, plugin_metadata: Dict, form_data: Dict = None) -> list:
-    """
-    [NEW] Phân tích list condition trong metadata json để xuất ra recommendation chính xác.
-    """
+def _generate_recommendations(
+    risk_result: Dict, plugin_metadata: Dict, form_data: Dict = None
+) -> list:
     recommendations = []
-    
-    # Setup context đánh giá logic (đưa mọi params cần thiết vào context eval)
+
     context = {}
     if form_data:
         context.update(form_data)
     context["risk_level"] = risk_result.get("risk_level", "medium")
     context["final_score"] = risk_result.get("final_score", 50)
-    
-    # Recommendation từ JSON trả về sẽ là một Array(List)
+
     disease_recommendations = plugin_metadata.get("recommendations", [])
-    
+
     if isinstance(disease_recommendations, list):
         for rule in disease_recommendations:
-            if isinstance(rule, dict):
-                condition = rule.get("condition")
-                text = rule.get("text")
-                try:
-                    # Rất nhiều JSON rule sẽ null condition mặc định là apply luôn.
-                    # Hoặc có condition, nếu pass evaluate sẽ apply.
-                    if (condition is None) or ConditionEvaluator.evaluate(condition, context):
-                        if text and text not in recommendations:
-                            recommendations.append(text)
-                except Exception as e:
-                    logger.warning(f"Bỏ qua recommendation rule vì lỗi phân tích condition: {e}")
+            if not isinstance(rule, dict):
+                continue
+            condition = rule.get("condition")
+            text = rule.get("text")
+            try:
+                if condition is None or ConditionEvaluator.evaluate(condition, context):
+                    if text and text not in recommendations:
+                        recommendations.append(text)
+            except Exception as e:
+                logger.warning("Skipping recommendation rule: %s", e)
+
     elif isinstance(disease_recommendations, dict):
-        # Fallback phòng trường hợp version cũ dùng object/dict để format
         risk_level = risk_result.get("risk_level", "medium")
         for level_name, level_recs in disease_recommendations.items():
             if level_name == risk_level and isinstance(level_recs, list):
@@ -1389,29 +1584,23 @@ def _generate_recommendations(risk_result: Dict, plugin_metadata: Dict, form_dat
                         recommendations.append(rec)
                     elif isinstance(rec, dict) and "text" in rec:
                         recommendations.append(rec["text"])
-    
-    # [NEW] Add specific recommendations dựa trên các modifiers đã match (nếu có)
+
     active_modifiers = risk_result.get("breakdown", {}).get("applied_modifiers", [])
     for modifier in active_modifiers:
         rec_text = modifier.get("recommendation")
         if rec_text and rec_text not in recommendations:
             recommendations.append(rec_text)
-            
-    return recommendations[:5]  # Limit to top 5 recommendations để tránh UI bị quá tải chữ
+
+    return recommendations[:5]
 
 
 def _calculate_confidence(val_result: Any, risk_result: Dict) -> str:
-    """
-    [NEW] Tính độ tin cậy của kết quả
-    """
     quality_score = val_result.data_quality_score
-    
     if quality_score >= 90:
         return "high"
     elif quality_score >= 70:
         return "moderate"
-    else:
-        return "low"
+    return "low"
 ```
 
 ### backend\app\plugin_loader.py
@@ -1471,15 +1660,16 @@ def get_all_plugins():
 ```py
 # backend/app/risk_stratification_engine.py
 """
-RiskStratificationEngine - UPGRADED VERSION
-Nâng cấp thuật toán rule để đánh giá rủi ro bệnh mạn tính
-- Weighted baseline scoring
-- Percentile-based risk assessment
-- Evidence scoring system
-- Risk progression tracking
+RiskStratificationEngine - FIXED VERSION
+BUG FIX CHÍNH:
+  1. __init__ vẫn nhận risk_config (đúng), nhưng caller (plugin_api) đã được sửa
+     để truyền plugin_metadata["risk_config"] sau khi đã normalize đúng.
+  2. Interaction multiplier: tích lũy (nhân dồn) tất cả interaction match,
+     thay vì chỉ lấy cái cuối cùng (ghi đè biến interaction_multiplier).
+  3. _get_weighted_baseline_score: log rõ ràng khi không có stage nào match.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 import logging
 import math
 
@@ -1490,23 +1680,22 @@ logger = logging.getLogger(__name__)
 
 class RiskStratificationEngine:
     """
-    Engine đánh giá rủi ro nâng cấp
-    
+    Engine đánh giá rủi ro.
+
     Quy trình:
-    1. Tính toán computed fields
-    2. Xác định baseline score (weighted)
-    3. Áp dụng risk modifiers với evidence scoring
+    1. Tính computed fields
+    2. Xác định baseline score (priority-based)
+    3. Áp dụng risk modifiers (multiplicative / additive / divisive)
     4. Áp dụng protective factors
-    5. Áp dụng interactions (synergy effects)
-    6. Chuẩn hóa điểm (0-100)
-    7. Ánh xạ thành risk level với percentile thresholds
-    8. Tính risk progression score
+    5. Áp dụng interactions (tích lũy tất cả match)
+    6. Clamp [0, 100]
+    7. Map sang risk level
     """
-    
+
     def __init__(self, risk_config: Dict[str, Any]):
         """
         Args:
-            risk_config: Config từ metadata.json -> risk_config
+            risk_config: plugin_metadata["risk_config"]
         """
         self.risk_config = risk_config
         self.baseline_mapping = risk_config.get("baseline_mapping", [])
@@ -1515,352 +1704,273 @@ class RiskStratificationEngine:
         self.interactions = risk_config.get("interactions", [])
         self.thresholds = risk_config.get("thresholds", [])
         self.computed_fields = risk_config.get("computed_fields", [])
-        
-        # [NEW] Risk progression & evidence config
         self.evidence_scoring = risk_config.get("evidence_scoring", {})
-        self.risk_progression = risk_config.get("risk_progression", [])
-    
+        self.risk_progression_config = risk_config.get("risk_progression", [])
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # PUBLIC
+    # ──────────────────────────────────────────────────────────────────────────
+
     def evaluate(self, form_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Đánh giá rủi ro toàn diện
-        
-        Returns:
-            {
-                "final_score": float (0-100),
-                "risk_level": str (low/medium/high),
-                "risk_percentile": int (0-100),
-                "baseline_score": float,
-                "evidence_score": float,
-                "modifiers_effect": float,
-                "protective_effect": float,
-                "interaction_multiplier": float,
-                "risk_progression": dict,
-                "evidence_breakdown": dict,
-                "breakdown": {...detailed breakdown...}
-            }
+        Đánh giá rủi ro toàn diện.
+
+        Returns dict với final_score, risk_level, breakdown, ...
         """
-        
-        # [STEP 1] Tính toán computed fields
-        enriched_data = self._compute_fields(form_data)
-        
-        # [STEP 2] Xác định baseline score (weighted)
-        baseline_result = self._get_weighted_baseline_score(enriched_data)
-        baseline_score = baseline_result["score"]
-        baseline_stage = baseline_result.get("stage_name", "unknown")
-        
-        # [STEP 3] Tính evidence score
-        evidence_result = self._calculate_evidence_score(enriched_data)
+        # Bước 1: computed fields
+        enriched = self._compute_fields(form_data)
+
+        # Bước 2: baseline score
+        baseline_result = self._get_weighted_baseline_score(enriched)
+        baseline_score: float = baseline_result["score"]
+        baseline_stage: str = baseline_result.get("stage_name", "unknown")
+
+        # Bước 3: evidence score (informational)
+        evidence_result = self._calculate_evidence_score(enriched)
         evidence_score = evidence_result["total_score"]
         evidence_breakdown = evidence_result["breakdown"]
-        
-        # [STEP 4] Áp dụng risk modifiers với evidence weighting
+
+        # Bước 4: risk modifiers
         current_score = baseline_score
-        applied_modifiers = []
+        applied_modifiers: List[Dict] = []
         modifier_effect = 0.0
-        
+
         for modifier in self.risk_modifiers:
-            if self._check_condition(modifier.get("condition"), enriched_data):
-                mod_result = self._apply_modifier(current_score, modifier, enriched_data)
+            if self._check_condition(modifier.get("condition"), enriched):
+                mod_result = self._apply_modifier(current_score, modifier, enriched)
+                effect = mod_result["effect"]
                 applied_modifiers.append({
                     "id": modifier.get("id", "unknown"),
                     "description": modifier.get("description", ""),
                     "value": modifier.get("value", 1.0),
                     "effect_type": modifier.get("effect_type", "multiplicative"),
-                    "effect_on_score": mod_result["effect"],
-                    "evidence_weight": mod_result.get("evidence_weight", 1.0)
+                    "effect_on_score": round(effect, 3),
+                    "note": modifier.get("note", ""),
                 })
                 current_score = mod_result["new_score"]
-                modifier_effect += mod_result["effect"]
-        
-        # [STEP 5] Áp dụng protective factors
-        applied_protective = []
+                modifier_effect += effect
+
+        # Bước 5: protective factors
+        applied_protective: List[Dict] = []
         protective_effect = 0.0
-        
+
         for prot in self.protective_factors:
-            if self._check_condition(prot.get("condition"), enriched_data):
-                prot_result = self._apply_modifier(current_score, prot, enriched_data, is_protective=True)
+            if self._check_condition(prot.get("condition"), enriched):
+                prot_result = self._apply_modifier(current_score, prot, enriched, is_protective=True)
+                effect = prot_result["effect"]
                 applied_protective.append({
                     "id": prot.get("id", "unknown"),
                     "description": prot.get("description", ""),
                     "value": prot.get("value", 1.0),
-                    "effect_type": prot.get("effect_type", "multiplicative"),
-                    "effect_on_score": prot_result["effect"],
-                    "evidence_weight": prot_result.get("evidence_weight", 1.0)
+                    "effect_type": prot.get("effect_type", "divisive"),
+                    "effect_on_score": round(effect, 3),
+                    "note": prot.get("note", ""),
                 })
                 current_score = prot_result["new_score"]
-                protective_effect += prot_result["effect"]
-        
-        # [STEP 6] Áp dụng interactions (synergy effects)
-        interaction_multiplier = 1.0
-        applied_interactions = []
-        
+                protective_effect += effect
+
+        # Bước 6: interactions - [FIX] nhân DỒN tất cả multiplier match
+        combined_interaction_multiplier = 1.0
+        applied_interactions: List[Dict] = []
+
         for interaction in self.interactions:
-            if self._check_condition(interaction.get("condition"), enriched_data):
-                # [ENHANCED] Support both fixed multiplier and dynamic calculation
-                if "multiplier_formula" in interaction:
-                    multiplier = self._evaluate_formula(
-                        interaction.get("multiplier_formula"), 
-                        enriched_data
-                    )
-                else:
-                    multiplier = interaction.get("interaction_multiplier", 1.0)
-                
-                interaction_multiplier = multiplier
+            if self._check_condition(interaction.get("condition"), enriched):
+                multiplier = interaction.get("interaction_multiplier", 1.0)
+                combined_interaction_multiplier *= multiplier        # tích lũy
                 applied_interactions.append({
                     "id": interaction.get("id", "unknown"),
                     "description": interaction.get("description", ""),
-                    "multiplier": round(interaction_multiplier, 3),
-                    "type": interaction.get("interaction_type", "synergy")
+                    "multiplier": round(multiplier, 3),
+                    "type": interaction.get("interaction_type", "synergy"),
                 })
-        
-        current_score = current_score * interaction_multiplier
-        
-        # [STEP 7] Chuẩn hóa điểm (0-100)
-        final_score = max(0, min(100, current_score))
-        
-        # [STEP 8] Tính percentile
-        risk_percentile = self._calculate_percentile(final_score, baseline_stage)
-        
-        # [STEP 9] Ánh xạ thành risk level
-        risk_level = self._map_to_risk_level(final_score, risk_percentile)
-        
-        # [STEP 10] Tính risk progression
+
+        current_score = current_score * combined_interaction_multiplier
+
+        # Bước 7: clamp
+        final_score = max(0.0, min(100.0, current_score))
+
+        # Bước 8: risk level
+        risk_level = self._map_to_risk_level(final_score)
+
+        # Bước 9: percentile (xấp xỉ)
+        risk_percentile = self._calculate_percentile(final_score)
+
+        # Bước 10: progression
         risk_progression = self._calculate_risk_progression(
-            final_score,
-            risk_level,
-            applied_modifiers,
-            enriched_data
+            final_score, risk_level, applied_modifiers, enriched
         )
-        
+
         return {
             "final_score": round(final_score, 2),
             "risk_level": risk_level,
             "risk_percentile": risk_percentile,
-            "baseline_score": baseline_score,
+            "baseline_score": round(baseline_score, 2),
             "baseline_stage": baseline_stage,
             "evidence_score": round(evidence_score, 2),
             "modifiers_effect": round(modifier_effect, 2),
             "protective_effect": round(protective_effect, 2),
-            "interaction_multiplier": round(interaction_multiplier, 3),
+            "interaction_multiplier": round(combined_interaction_multiplier, 3),
             "risk_progression": risk_progression,
             "evidence_breakdown": evidence_breakdown,
             "breakdown": {
                 "baseline": {
-                    "score": baseline_score,
-                    "stage": baseline_stage
+                    "score": round(baseline_score, 2),
+                    "stage": baseline_stage,
                 },
                 "evidence": evidence_breakdown,
                 "applied_modifiers": applied_modifiers,
                 "applied_protective": applied_protective,
-                "applied_interactions": applied_interactions
-            }
+                "applied_interactions": applied_interactions,
+            },
         }
-    
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # PRIVATE
+    # ──────────────────────────────────────────────────────────────────────────
+
     def _compute_fields(self, form_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Tính toán các computed fields từ formula"""
         enriched = form_data.copy()
-        
         for computed in self.computed_fields:
             key = computed.get("key")
             formula = computed.get("formula", "")
             dependencies = computed.get("dependencies", [])
-            
             try:
-                all_available = all(dep in enriched and enriched[dep] is not None for dep in dependencies)
-                
-                if all_available:
-                    result = eval(formula, {"__builtins__": {}}, enriched)
+                if all(dep in enriched and enriched[dep] is not None for dep in dependencies):
+                    result = eval(formula, {"__builtins__": {}}, enriched)  # noqa: S307
                     enriched[key] = float(result)
-                    logger.debug(f"Computed {key} = {enriched[key]}")
             except Exception as e:
                 logger.warning(f"Cannot compute field {key}: {e}")
-        
         return enriched
-    
+
     def _get_weighted_baseline_score(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        [ENHANCED] Xác định baseline score với weighted stages
-        
-        Nếu nhiều stage match, tính weighted average dựa trên priority
+        Chọn baseline stage có priority cao nhất trong số các stage match điều kiện.
+        Nếu không có stage nào match → default 50.
         """
-        matching_stages = []
-        
+        matching: List[Dict] = []
+
         for stage in self.baseline_mapping:
-            if self._check_condition(stage.get("condition"), data):
-                matching_stages.append({
-                    "name": stage.get("name", "unknown"),
-                    "score": stage.get("score", 50),
-                    "priority": stage.get("priority", 0),
-                    "weight": stage.get("weight", 1.0)  # [NEW] Weight for averaging
-                })
-        
-        if not matching_stages:
-            return {
-                "score": 50,
-                "stage_name": "default",
-                "note": "No baseline stage matched, using default score"
-            }
-        
-        # [ENHANCED] Nếu có weight, tính weighted average; nếu không, lấy priority cao nhất
-        if any(stage.get("weight", 1.0) != 1.0 for stage in matching_stages):
-            # Weighted average
-            total_weight = sum(s["weight"] for s in matching_stages)
-            weighted_score = sum(s["score"] * s["weight"] for s in matching_stages) / total_weight
-            
-            return {
-                "score": weighted_score,
-                "stage_name": "weighted_multiple",
-                "matching_count": len(matching_stages),
-                "calculation": "weighted_average"
-            }
-        else:
-            # Priority-based selection
-            matching_stages.sort(key=lambda x: x["priority"], reverse=True)
-            selected = matching_stages[0]
-            
-            return {
-                "score": selected["score"],
-                "stage_name": selected["name"],
-                "matching_count": len(matching_stages),
-                "calculation": "priority_based"
-            }
-    
-    def _calculate_evidence_score(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        [NEW] Tính evidence score dựa trên các yếu tố đã ghi nhận
-        
-        Evidence scoring thể hiện độ tin cậy của dữ liệu đầu vào
-        """
-        evidence_config = self.evidence_scoring
-        total_score = 0
-        breakdown = {}
-        
-        if not evidence_config:
-            return {"total_score": 100, "breakdown": {"default": "No evidence config"}}
-        
-        # Tính evidence từ các field được định nghĩa
-        evidence_fields = evidence_config.get("fields", [])
-        
-        for field_config in evidence_fields:
-            field_name = field_config.get("name")
-            base_evidence = field_config.get("evidence", 0)
-            
-            if field_name in data and data[field_name] is not None:
-                total_score += base_evidence
-                breakdown[field_name] = base_evidence
-            else:
-                breakdown[field_name] = 0
-        
-        # Tính total evidence score (0-100)
-        max_evidence = sum(f.get("evidence", 0) for f in evidence_fields) or 100
-        evidence_percentage = min(100, (total_score / max_evidence * 100)) if max_evidence > 0 else 100
-        
+            if "condition" in stage:
+                if self._check_condition(stage["condition"], data):
+                    matching.append({
+                        "name": stage.get("name", "unknown"),
+                        "score": stage.get("score", 50),
+                        "priority": stage.get("priority", 0),
+                    })
+            elif "range" in stage:
+                # Legacy format (không dùng trong metadata hiện tại)
+                if "condition" in stage and self._check_condition(stage["condition"], data):
+                    matching.append({
+                        "name": stage.get("name", "unknown"),
+                        "score": stage.get("score", 50),
+                        "priority": stage.get("priority", 0),
+                    })
+
+        if not matching:
+            logger.warning(
+                "_get_weighted_baseline_score: no stage matched data=%s – using default score 50",
+                {k: v for k, v in data.items() if v is not None},
+            )
+            return {"score": 50.0, "stage_name": "default"}
+
+        matching.sort(key=lambda x: x["priority"], reverse=True)
+        selected = matching[0]
         return {
-            "total_score": round(evidence_percentage, 2),
-            "breakdown": breakdown,
-            "evidence_count": len([f for f in breakdown.values() if f > 0])
+            "score": float(selected["score"]),
+            "stage_name": selected["name"],
+            "matching_count": len(matching),
         }
-    
+
+    def _calculate_evidence_score(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        evidence_config = self.evidence_scoring
+        if not evidence_config:
+            return {"total_score": 100, "breakdown": {}}
+
+        total = 0
+        breakdown = {}
+        evidence_fields = evidence_config.get("fields", [])
+
+        for fc in evidence_fields:
+            fname = fc.get("name")
+            base = fc.get("evidence", 0)
+            if fname in data and data[fname] is not None:
+                total += base
+                breakdown[fname] = base
+            else:
+                breakdown[fname] = 0
+
+        max_ev = sum(f.get("evidence", 0) for f in evidence_fields) or 100
+        pct = min(100.0, total / max_ev * 100) if max_ev > 0 else 100.0
+
+        return {
+            "total_score": round(pct, 2),
+            "breakdown": breakdown,
+            "evidence_count": sum(1 for v in breakdown.values() if v > 0),
+        }
+
     def _apply_modifier(
         self,
         current_score: float,
         modifier: Dict[str, Any],
         enriched_data: Dict[str, Any],
-        is_protective: bool = False
+        is_protective: bool = False,
     ) -> Dict[str, Any]:
         """
-        [ENHANCED] Áp dụng modifier với evidence weighting và dynamic values
-        
+        Áp dụng modifier / protective factor vào current_score.
+
         effect_type:
-        - additive: score = score + value
-        - multiplicative: score = score * value
-        - divisive: score = score / value
-        - formula: score = eval(formula)
+          - multiplicative : score * value  (risk) / score / value  (protective)
+          - divisive       : score / value  (risk) / score * value  (protective) — đảo ngược
+          - additive       : score + value  (risk) / score - value  (protective)
         """
         effect_type = modifier.get("effect_type", "multiplicative")
-        value = modifier.get("value", 1.0)
-        
-        # [NEW] Support formula-based values
-        if "value_formula" in modifier:
-            try:
-                value = self._evaluate_formula(modifier.get("value_formula"), enriched_data)
-            except Exception as e:
-                logger.warning(f"Cannot evaluate value formula: {e}")
-        
-        # [NEW] Evidence-based weighting
-        evidence_weight = modifier.get("evidence_weight", 1.0)
-        if evidence_weight != 1.0:
-            # Adjust effect based on evidence confidence
-            value = value * evidence_weight
-        
+        value = float(modifier.get("value", 1.0))
+
         new_score = current_score
         effect = 0.0
-        
+
         if effect_type == "additive":
-            effect = -value if is_protective else value
-            new_score = current_score + effect
+            delta = -value if is_protective else value
+            new_score = current_score + delta
+            effect = delta
+
         elif effect_type == "multiplicative":
-            multiplier = 1.0 / value if is_protective else value
-            effect = current_score * (multiplier - 1)
+            # risk: nhân lên; protective: chia ra
+            multiplier = (1.0 / value) if is_protective else value
             new_score = current_score * multiplier
+            effect = new_score - current_score
+
         elif effect_type == "divisive":
-            effect = current_score * (1 - 1/value) if is_protective else current_score * (value - 1)
-            new_score = current_score / value if is_protective else current_score * value
-        elif effect_type == "formula":
-            try:
-                new_score = self._evaluate_formula(
-                    modifier.get("formula"),
-                    {**enriched_data, "current_score": current_score}
-                )
-                effect = new_score - current_score
-            except Exception as e:
-                logger.error(f"Cannot evaluate modifier formula: {e}")
-        
+            # divisive dùng cho protective factors: score / value (giảm)
+            # risk dùng divisive hiếm, nhưng xử lý: score * value (tăng)
+            if is_protective:
+                new_score = current_score / value
+            else:
+                new_score = current_score * value
+            effect = new_score - current_score
+
         return {
-            "new_score": max(0, new_score),
+            "new_score": max(0.0, new_score),
             "effect": effect,
-            "evidence_weight": evidence_weight
         }
-    
+
     def _check_condition(self, condition: Any, data: Dict[str, Any]) -> bool:
-        """Kiểm tra điều kiện sử dụng ConditionEvaluator"""
         if condition is None:
             return True
-        
         try:
             return ConditionEvaluator.evaluate(condition, data)
         except Exception as e:
             logger.error(f"Error checking condition: {e}")
             return False
-    
+
     def _evaluate_formula(self, formula: str, context: Dict[str, Any]) -> float:
-        """
-        [NEW] Đánh giá công thức toán học an toàn
-        """
-        try:
-            # Safe evaluation - chỉ cho phép math operations
-            safe_dict = {
-                "math": math,
-                "__builtins__": {},
-                **context
-            }
-            result = eval(formula, safe_dict)
-            return float(result)
-        except Exception as e:
-            logger.error(f"Formula evaluation error '{formula}': {e}")
-            raise
-    
-    def _calculate_percentile(self, score: float, stage_name: str) -> int:
-        """
-        [NEW] Tính percentile dựa trên score và stage
-        Giúp so sánh rủi ro của người dùng với dân số
-        """
-        # [TODO] Trong thực tế, cần dữ liệu thống kê dân số từ DB
-        # Ở đây sử dụng công thức xấp xỉ
-        
+        safe = {"math": math, "__builtins__": {}, **context}
+        return float(eval(formula, safe))  # noqa: S307
+
+    def _calculate_percentile(self, score: float) -> int:
         if score < 20:
             return 10
-        elif score < 40:
+        elif score < 35:
             return 25
         elif score < 60:
             return 50
@@ -1868,62 +1978,62 @@ class RiskStratificationEngine:
             return 75
         else:
             return 90
-    
-    def _map_to_risk_level(self, score: float, percentile: int = None) -> str:
+
+    def _map_to_risk_level(self, score: float) -> str:
         """
-        [ENHANCED] Ánh xạ score thành risk level
-        Có thể dựa vào percentile nếu có
+        Ánh xạ score thành risk level dựa trên thresholds trong metadata.
+        Format: [{"range": [min, max], "level": "low"}, ...]
+        Dùng min <= score < max, trừ range cuối (inclusive cả max).
         """
-        sorted_thresholds = sorted(self.thresholds, key=lambda x: x.get("threshold", 0))
-        
-        for threshold_config in sorted_thresholds:
-            threshold_value = threshold_config.get("threshold", 0)
-            if score < threshold_value:
-                return threshold_config.get("level", "low")
-        
-        return sorted_thresholds[-1].get("level", "high") if sorted_thresholds else "medium"
-    
+        for i, tc in enumerate(self.thresholds):
+            if "range" not in tc:
+                continue
+            rv = tc["range"]
+            if len(rv) < 2:
+                continue
+            lo, hi = rv[0], rv[1]
+            is_last = (i == len(self.thresholds) - 1)
+            if is_last:
+                if lo <= score <= hi:
+                    return tc.get("level", "high")
+            else:
+                if lo <= score < hi:
+                    return tc.get("level", "low")
+
+        # Fallback: dùng level của threshold cuối
+        if self.thresholds:
+            return self.thresholds[-1].get("level", "high")
+        return "medium"
+
     def _calculate_risk_progression(
         self,
         final_score: float,
         risk_level: str,
         modifiers: List[Dict],
-        enriched_data: Dict[str, Any]
+        enriched_data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """
-        [NEW] Tính risk progression - dự báo sự tiến triển rủi ro
-        
-        Dựa trên số lượng risk factors và mức độ ảnh hưởng của chúng
-        """
-        risk_progression_config = self.risk_progression or []
-        
-        # Tính trajectory dựa trên số modifiers được áp dụng
         modifier_count = len(modifiers)
-        
+        trajectory = "stable"
+        if modifier_count >= 3:
+            trajectory = "increasing"
+        elif modifier_count == 0:
+            trajectory = "decreasing"
+
         progression = {
             "current_score": final_score,
             "current_level": risk_level,
             "active_risk_factors": modifier_count,
-            "trajectory": "stable"  # stable, increasing, decreasing
+            "trajectory": trajectory,
         }
-        
-        # Xác định trajectory
-        if modifier_count >= 3:
-            progression["trajectory"] = "increasing"
-        elif modifier_count == 0:
-            progression["trajectory"] = "decreasing"
-        
-        # Dự báo điểm trong tương lai (6 months, 1 year)
-        for config in risk_progression_config:
+
+        for config in (self.risk_progression_config or []):
             timeframe = config.get("timeframe")
             rate = config.get("progression_rate", 1.0)
-            
             if timeframe:
-                projected_score = final_score * rate
                 progression[f"projected_{timeframe}"] = round(
-                    min(100, max(0, projected_score)), 2
+                    min(100.0, max(0.0, final_score * rate)), 2
                 )
-        
+
         return progression
 ```
 
@@ -2511,8 +2621,11 @@ if __name__ == "__main__":
 ```py
 # backend/app/validation_engine.py
 """
-ValidationEngine - UPGRADED VERSION
-Nâng cấp validation với data quality scoring, smart normalization, và better error handling
+ValidationEngine - FIXED VERSION
+BUG FIX CHÍNH:
+  - __init__ nhận đúng plugin_metadata (root level) thay vì chỉ risk_config
+  - self.fields lấy từ plugin_metadata["fields"], không phải risk_config["fields"]
+  - normalize_form_data giờ mới thực sự xử lý đúng các field
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -2529,7 +2642,7 @@ class ValidationError:
     message: str
     severity: str = "error"  # error, warning, info
     code: str = "invalid"
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "field": self.field,
@@ -2545,58 +2658,71 @@ class ValidationResult:
     errors: List[ValidationError] = None
     warnings: List[ValidationError] = None
     data_quality_score: float = 100.0  # 0-100
-    
+
     def __post_init__(self):
         if self.errors is None:
             self.errors = []
         if self.warnings is None:
             self.warnings = []
-    
+
     @property
     def is_valid(self) -> bool:
         return len(self.errors) == 0
-    
+
     def has_errors(self) -> bool:
         return len(self.errors) > 0
-    
+
     def has_warnings(self) -> bool:
         return len(self.warnings) > 0
 
 
 class ValidationEngine:
     """
-    Engine validation nâng cấp với quality scoring
+    Engine validation nâng cấp với quality scoring.
+
+    QUAN TRỌNG: Nhận plugin_metadata (toàn bộ dict từ metadata.json),
+    KHÔNG phải chỉ plugin_metadata["risk_config"].
     """
-    
-    def __init__(self, risk_config: Dict[str, Any]):
+
+    def __init__(self, plugin_metadata: Dict[str, Any]):
         """
         Args:
-            risk_config: Config từ metadata.json -> risk_config
+            plugin_metadata: Toàn bộ dict từ metadata.json
+                             (có key "fields", "risk_config", "disease_info", ...)
         """
-        self.risk_config = risk_config
-        self.fields = risk_config.get("fields", [])
-        self.field_map = {f.get("key"): f for f in self.fields}
-        
-        # [NEW] Data quality config
-        self.quality_config = risk_config.get("data_quality", {})
-        self.normalization_rules = risk_config.get("normalization_rules", {})
-    
+        # ── [FIX] Lấy fields từ root của metadata, không phải từ risk_config ──
+        self.fields = plugin_metadata.get("fields", [])
+        self.risk_config = plugin_metadata.get("risk_config", {})
+
+        # Build lookup map theo key
+        self.field_map = {
+            (f.get("key") or f.get("code")): f
+            for f in self.fields
+            if f.get("key") or f.get("code")
+        }
+
+        # Optional quality / normalization config (trong risk_config nếu có)
+        self.quality_config = self.risk_config.get("data_quality", {})
+        self.normalization_rules = self.risk_config.get("normalization_rules", {})
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # PUBLIC API
+    # ──────────────────────────────────────────────────────────────────────────
+
     def validate_form(self, form_data: Dict[str, Any]) -> ValidationResult:
-        """
-        Validate form data toàn diện
-        
-        Returns:
-            ValidationResult với errors, warnings, và data_quality_score
-        """
-        errors = []
-        warnings = []
-        
-        # [STEP 1] Validate required fields
+        """Validate form data dựa trên field definitions."""
+        errors: List[ValidationError] = []
+        warnings: List[ValidationError] = []
+
         for field in self.fields:
-            key = field.get("key")
+            key = field.get("key") or field.get("code")
+            if not key:
+                continue
+
             required = field.get("required", False)
             value = form_data.get(key)
-            
+
+            # Kiểm tra required
             if required and (value is None or value == ""):
                 errors.append(ValidationError(
                     field=key,
@@ -2604,14 +2730,15 @@ class ValidationEngine:
                     code="required_missing"
                 ))
                 continue
-            
+
+            # Bỏ qua optional field chưa điền
             if value is None or value == "":
                 continue
-            
-            # [STEP 2] Type validation
+
             field_type = field.get("type")
+
+            # Validate kiểu
             type_valid, type_error = self._validate_type(key, value, field_type, field)
-            
             if not type_valid:
                 errors.append(ValidationError(
                     field=key,
@@ -2619,61 +2746,45 @@ class ValidationEngine:
                     code="invalid_type"
                 ))
                 continue
-            
-            # [STEP 3] Value range validation
+
+            # Validate range cho number
             if field_type == "number":
                 min_val = field.get("min")
                 max_val = field.get("max")
-                
                 try:
                     num_val = float(value)
-                    
                     if min_val is not None and num_val < min_val:
                         errors.append(ValidationError(
                             field=key,
                             message=f"{field.get('label', key)} phải >= {min_val}",
                             code="below_minimum"
                         ))
-                    
                     if max_val is not None and num_val > max_val:
                         errors.append(ValidationError(
                             field=key,
                             message=f"{field.get('label', key)} phải <= {max_val}",
                             code="above_maximum"
                         ))
-                    
-                    # [NEW] Outlier detection
-                    if self.quality_config.get("detect_outliers"):
-                        outlier_msg = self._check_outlier(key, num_val, field)
-                        if outlier_msg:
-                            warnings.append(ValidationError(
-                                field=key,
-                                message=outlier_msg,
-                                severity="warning",
-                                code="potential_outlier"
-                            ))
-                
                 except (ValueError, TypeError):
                     errors.append(ValidationError(
                         field=key,
                         message=f"{field.get('label', key)} phải là số",
                         code="not_numeric"
                     ))
-            
+
             elif field_type == "select":
                 options = field.get("options", [])
                 valid_values = [
                     opt.get("value") if isinstance(opt, dict) else opt
                     for opt in options
                 ]
-                
                 if value not in valid_values:
                     errors.append(ValidationError(
                         field=key,
                         message=f"{field.get('label', key)} không hợp lệ",
                         code="invalid_option"
                     ))
-            
+
             elif field_type == "boolean":
                 bool_valid, bool_error = self._validate_boolean(value)
                 if not bool_valid:
@@ -2682,265 +2793,141 @@ class ValidationEngine:
                         message=bool_error,
                         code="invalid_boolean"
                     ))
-            
-            elif field_type == "string":
-                str_val = str(value)
-                min_len = field.get("min_length")
-                max_len = field.get("max_length")
-                pattern = field.get("pattern")
-                
-                if min_len and len(str_val) < min_len:
-                    errors.append(ValidationError(
-                        field=key,
-                        message=f"{field.get('label', key)} quá ngắn",
-                        code="too_short"
-                    ))
-                
-                if max_len and len(str_val) > max_len:
-                    errors.append(ValidationError(
-                        field=key,
-                        message=f"{field.get('label', key)} quá dài",
-                        code="too_long"
-                    ))
-                
-                if pattern:
-                    import re
-                    if not re.match(pattern, str_val):
-                        errors.append(ValidationError(
-                            field=key,
-                            message=f"{field.get('label', key)} định dạng không hợp lệ",
-                            code="invalid_format"
-                        ))
-        
-        # [STEP 4] Cross-field validation
-        cross_field_errors = self._validate_cross_field(form_data)
-        errors.extend(cross_field_errors)
-        
-        # [STEP 5] Calculate data quality score
+
         quality_score = self._calculate_data_quality(form_data)
-        
+
         return ValidationResult(
             errors=errors,
             warnings=warnings,
             data_quality_score=quality_score
         )
-    
+
     def normalize_form_data(self, form_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        [ENHANCED] Chuẩn hóa dữ liệu form
-        
-        - Convert types theo field definition
-        - Apply normalization rules
-        - Compute derived fields
+        Chuẩn hóa dữ liệu form theo type định nghĩa trong fields.
+        Chỉ trả về các key có trong plugin fields (loại bỏ chieuCao, canNang, ... không thuộc plugin).
         """
-        normalized = {}
-        
+        normalized: Dict[str, Any] = {}
+
         for field in self.fields:
-            key = field.get("key")
+            key = field.get("key") or field.get("code")
+            if not key:
+                continue
+
             value = form_data.get(key)
-            
-            if value is None:
+
+            if value is None or value == "":
                 normalized[key] = None
                 continue
-            
-            field_type = field.get("type")
-            
-            # [NEW] Apply field-specific normalization rules
+
+            # Áp dụng normalization rule nếu có
             if key in self.normalization_rules:
                 value = self._apply_normalization_rule(key, value, self.normalization_rules[key])
-            
-            # Type normalization
+
+            field_type = field.get("type")
+
             if field_type == "number":
                 try:
                     normalized[key] = float(value)
                 except (ValueError, TypeError):
                     normalized[key] = None
-            
+
             elif field_type == "boolean":
                 normalized[key] = self._normalize_boolean(value)
-            
+
             elif field_type == "select":
-                normalized[key] = value
-            
+                normalized[key] = str(value) if value is not None else None
+
             elif field_type == "string":
                 normalized[key] = str(value).strip() if value else None
-            
+
             else:
                 normalized[key] = value
-        
+
         return normalized
-    
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # PRIVATE HELPERS
+    # ──────────────────────────────────────────────────────────────────────────
+
     def _validate_type(self, field_key: str, value: Any, field_type: str, field_config: Dict) -> Tuple[bool, str]:
-        """Validate kiểu dữ liệu"""
         if field_type == "number":
             try:
                 float(value)
                 return True, ""
             except (ValueError, TypeError):
                 return False, f"{field_config.get('label', field_key)} phải là số"
-        
+
         elif field_type == "boolean":
-            bool_valid, error = self._validate_boolean(value)
-            return bool_valid, error
-        
-        elif field_type == "select":
-            return True, ""
-        
-        elif field_type == "string":
-            return True, ""
-        
+            return self._validate_boolean(value)
+
         return True, ""
-    
+
     def _validate_boolean(self, value: Any) -> Tuple[bool, str]:
-        """Validate boolean value"""
         if isinstance(value, bool):
             return True, ""
-        
         if isinstance(value, (int, float)):
             return value in [0, 1, 0.0, 1.0], ""
-        
         if isinstance(value, str):
             valid_values = {"true", "false", "1", "0", "yes", "no", "on", "off"}
             return value.lower() in valid_values, ""
-        
         return False, "Giá trị boolean không hợp lệ"
-    
+
     def _normalize_boolean(self, value: Any) -> bool:
-        """Chuẩn hóa giá trị boolean"""
         if isinstance(value, bool):
             return value
-        
         if isinstance(value, (int, float)):
             return bool(value)
-        
         if isinstance(value, str):
             return value.lower() in ("true", "1", "yes", "on", "enabled", "active")
-        
         return bool(value)
-    
+
     def _apply_normalization_rule(self, field_key: str, value: Any, rule: Dict) -> Any:
-        """
-        [NEW] Áp dụng normalization rule cho field
-        
-        Rule format:
-        {
-            "type": "scale",  # scale, trim, round, lookup, custom
-            "params": {...}
-        }
-        """
         rule_type = rule.get("type")
         params = rule.get("params", {})
-        
+
         if rule_type == "scale":
-            # Chia tỷ lệ giá trị (e.g., chia cho 100)
             scale_factor = params.get("factor", 1)
             try:
                 return float(value) / scale_factor
             except (ValueError, TypeError):
                 return value
-        
+
         elif rule_type == "trim":
-            # Cắt string whitespace
             return str(value).strip() if value else value
-        
+
         elif rule_type == "round":
-            # Làm tròn số
             decimals = params.get("decimals", 2)
             try:
                 return round(float(value), decimals)
             except (ValueError, TypeError):
                 return value
-        
+
         elif rule_type == "lookup":
-            # Ánh xạ giá trị
             mapping = params.get("mapping", {})
             return mapping.get(str(value), value)
-        
-        elif rule_type == "custom":
-            # Custom function - định nghĩa trong metadata
-            formula = params.get("formula")
-            # [TODO] Evaluate formula safely
-            return value
-        
+
         return value
-    
-    def _check_outlier(self, field_key: str, value: float, field_config: Dict) -> Optional[str]:
-        """
-        [NEW] Phát hiện giá trị outlier
-        """
-        outlier_config = self.quality_config.get("outlier_detection", {})
-        if not outlier_config.get("enabled"):
-            return None
-        
-        # Sử dụng z-score hoặc IQR để phát hiện outlier
-        # [TODO] Cần dữ liệu thống kê từ DB
-        
-        min_realistic = field_config.get("min")
-        max_realistic = field_config.get("max")
-        
-        if min_realistic and value < min_realistic * 0.5:
-            return f"{field_config.get('label', field_key)} có giá trị quá thấp (có thể lỗi nhập liệu)"
-        
-        if max_realistic and value > max_realistic * 1.5:
-            return f"{field_config.get('label', field_key)} có giá trị quá cao (có thể lỗi nhập liệu)"
-        
-        return None
-    
-    def _validate_cross_field(self, form_data: Dict[str, Any]) -> List[ValidationError]:
-        """
-        [NEW] Validate dependencies giữa các field
-        
-        Ví dụ: height và weight phải cùng có hoặc cùng không
-        """
-        errors = []
-        cross_validations = self.risk_config.get("cross_field_validations", [])
-        
-        for validation in cross_validations:
-            fields_required = validation.get("fields_required")
-            fields_optional = validation.get("fields_optional")
-            condition = validation.get("condition")
-            message = validation.get("message")
-            
-            # [TODO] Implement cross-field validation logic
-        
-        return errors
-    
+
     def _calculate_data_quality(self, form_data: Dict[str, Any]) -> float:
-        """
-        [NEW] Tính data quality score (0-100)
-        
-        Dựa trên:
-        - % field được điền
-        - Kiểu dữ liệu hợp lệ
-        - Không có outlier
-        """
-        quality_config = self.quality_config or {}
-        
-        # Tính % field được điền
-        filled_count = sum(1 for f in self.fields if form_data.get(f.get("key")) is not None)
-        total_required = sum(1 for f in self.fields if f.get("required"))
-        
-        completeness = (filled_count / total_required * 100) if total_required > 0 else 100
-        
-        # Weight của completeness
-        completeness_weight = quality_config.get("completeness_weight", 0.5)
-        
-        # Base score từ completeness
-        score = completeness * completeness_weight
-        
-        # Thêm điểm cho data consistency
-        consistency_score = 100  # [TODO] Calculate consistency
-        consistency_weight = quality_config.get("consistency_weight", 0.3)
-        
-        score += consistency_score * consistency_weight
-        
-        # Thêm điểm cho data accuracy (check outliers, ranges)
-        accuracy_score = 100  # [TODO] Calculate accuracy
-        accuracy_weight = quality_config.get("accuracy_weight", 0.2)
-        
-        score += accuracy_score * accuracy_weight
-        
-        return min(100, max(0, score))
+        required_fields = [f for f in self.fields if f.get("required")]
+        optional_fields = [f for f in self.fields if not f.get("required")]
+
+        total_fields = len(self.fields) or 1
+
+        filled_required = sum(
+            1 for f in required_fields
+            if form_data.get(f.get("key") or f.get("code")) not in (None, "")
+        )
+        filled_optional = sum(
+            1 for f in optional_fields
+            if form_data.get(f.get("key") or f.get("code")) not in (None, "")
+        )
+
+        required_score = (filled_required / len(required_fields) * 60) if required_fields else 60
+        optional_score = (filled_optional / len(optional_fields) * 40) if optional_fields else 40
+
+        return min(100.0, max(0.0, required_score + optional_score))
 ```
 
 ### backend\auth\dang_ky.py
@@ -4375,44 +4362,44 @@ export default function DangNhap({ onLoginSuccess, onSwitchToRegister }) {
 
 ### frontend\src\hoso_suckhoe.jsx
 ```jsx
-// frontend/src/ui_hs_suckhoe.jsx
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+// frontend/src/hoso_suckhoe.jsx
+import React, { useState, useEffect, useRef } from "react";
+import axios from "axios";
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = "http://localhost:8000";
+
+// Fields that should be auto-saved individually on change
+// (all fields are eligible — the old bug excluded family history fields)
+const NUMERIC_FIELDS = new Set([
+  "tuoi", "chieuCao", "canNang", "bmi", "vongEo",
+  "huyetApTamThu", "huyetApTamTruong",
+  "duongHuyet", "hba1c", "cholesterol", "ldl", "hdl",
+  "triglyceride", "creatinine", "acidUric", "soPhutVanDongMoiTuan",
+]);
 
 export default function HealthProfileForm() {
-  const [tenDangNhap, setTenDangNhap] = useState(
-  localStorage.getItem('userName') || ''   // ← SỬA Ở ĐÂY
-);
-  
+  const tenDangNhap = localStorage.getItem("userName") || "";
+
   const [formData, setFormData] = useState({
-    // BLOCK 1: Physical & Vitals
-    tuoi: '',
-    gioiTinh: 'Nam',
-    chieuCao: '',
-    canNang: '',
-    bmi: '',
-    vongEo: '',
-    huyetApTamThu: '',
-    huyetApTamTruong: '',
-    
-    // BLOCK 2: Biochemistry (EAV model - stored in chiSoSucKhoe)
-    duongHuyet: '',
-    hba1c: '',
-    cholesterol: '',
-    ldl: '',
-    hdl: '',
-    triglyceride: '',
-    creatinine: '',
-    acidUric: '',
-    
-    // BLOCK 3: Lifestyle
-    hutThuoc: 'Không',
-    uongRuouBia: 'Không',
-    soPhutVanDongMoiTuan: '',
-    
-    // BLOCK 4: Medical History (stored in chiSoSucKhoe as boolean)
+    tuoi: "",
+    gioiTinh: "Nam",
+    chieuCao: "",
+    canNang: "",
+    bmi: "",
+    vongEo: "",
+    huyetApTamThu: "",
+    huyetApTamTruong: "",
+    duongHuyet: "",
+    hba1c: "",
+    cholesterol: "",
+    ldl: "",
+    hdl: "",
+    triglyceride: "",
+    creatinine: "",
+    acidUric: "",
+    hutThuoc: "Chưa bao giờ",
+    uongRuouBia: "Chưa bao giờ",
+    soPhutVanDongMoiTuan: "",
     caoHuyetAp: false,
     tieuDuong: false,
     benhTimMach: false,
@@ -4422,11 +4409,14 @@ export default function HealthProfileForm() {
     giaDinhTimMach: false,
     giaDinhGout: false,
   });
-  
-  const [message, setMessage] = useState('');
+
+  const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [completionRate, setCompletionRate] = useState(0);
+
+  // Debounce timer ref for auto-save
+  const autoSaveTimer = useRef(null);
 
   // Load health profile on mount
   useEffect(() => {
@@ -4437,308 +4427,259 @@ export default function HealthProfileForm() {
 
   // Calculate completion rate
   useEffect(() => {
+    const totalFields = Object.keys(formData).length;
     const filledFields = Object.values(formData).filter(
-      val => val !== '' && val !== false
+      (val) => val !== "" && val !== false && val !== null && val !== undefined
     ).length;
-    const rate = Math.round((filledFields / Object.keys(formData).length) * 100);
-    setCompletionRate(rate);
+    setCompletionRate(Math.round((filledFields / totalFields) * 100));
   }, [formData]);
+
+  // Auto-calculate BMI when height or weight changes
+  useEffect(() => {
+    const h = parseFloat(formData.chieuCao);
+    const w = parseFloat(formData.canNang);
+    if (h > 0 && w > 0) {
+      const bmi = (w / Math.pow(h / 100, 2)).toFixed(1);
+      setFormData((prev) => ({ ...prev, bmi }));
+    }
+  }, [formData.chieuCao, formData.canNang]);
+
+  // Auto-calculate LDL when cholesterol, HDL, triglyceride are available and LDL is empty
+  useEffect(() => {
+    if (formData.cholesterol && formData.hdl && formData.triglyceride && !formData.ldl) {
+      const total = parseFloat(formData.cholesterol);
+      const hdl = parseFloat(formData.hdl);
+      const trig = parseFloat(formData.triglyceride);
+      if (!isNaN(total) && !isNaN(hdl) && !isNaN(trig)) {
+        const ldl = (total - hdl - trig / 5).toFixed(1);
+        setFormData((prev) => ({ ...prev, ldl }));
+      }
+    }
+  }, [formData.cholesterol, formData.hdl, formData.triglyceride, formData.ldl]);
 
   const loadHealthProfile = async () => {
     try {
       setLoading(true);
       const response = await axios.get(`${API_BASE_URL}/health-profile/${tenDangNhap}`);
-      
       if (response.data.data) {
-        setFormData(prev => ({
-          ...prev,
-          ...response.data.data
-        }));
+        setFormData((prev) => ({ ...prev, ...response.data.data }));
       }
     } catch (error) {
-      console.error('Error loading health profile:', error);
+      console.error("Error loading health profile:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  // Auto-calculate BMI when height or weight changes
-  useEffect(() => {
-    if (formData.chieuCao && formData.canNang) {
-      try {
-        const height = parseFloat(formData.chieuCao) / 100;
-        const weight = parseFloat(formData.canNang);
-        const bmi = weight / (height * height);
-        setFormData(prev => ({
-          ...prev,
-          bmi: bmi.toFixed(1)
-        }));
-      } catch (e) {
-        // Ignore calculation errors
-      }
-    }
-  }, [formData.chieuCao, formData.canNang]);
+  // ─── Auto-save a single field ────────────────────────────────────────────
+  // Saves any field change to the backend with debounce for number/text inputs.
+  const autoSaveField = (fieldName, fieldValue) => {
+    if (!tenDangNhap) return;
 
-  // Auto-calculate LDL if missing (LDL = Total - HDL - Triglyceride/5)
-  useEffect(() => {
-    if (
-      formData.cholesterol &&
-      formData.hdl &&
-      formData.triglyceride &&
-      !formData.ldl
-    ) {
-      try {
-        const total = parseFloat(formData.cholesterol);
-        const hdl = parseFloat(formData.hdl);
-        const trig = parseFloat(formData.triglyceride);
-        const ldl = total - hdl - (trig / 5);
-        setFormData(prev => ({
-          ...prev,
-          ldl: ldl.toFixed(1)
-        }));
-      } catch (e) {
-        // Ignore calculation errors
-      }
-    }
-  }, [formData.cholesterol, formData.hdl, formData.triglyceride, formData.ldl]);
-
-  const handleChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    
-    if (type === 'checkbox') {
-      setFormData(prev => ({
-        ...prev,
-        [name]: checked
-      }));
+    // Debounce numeric input changes by 800ms to avoid excessive API calls
+    if (NUMERIC_FIELDS.has(fieldName)) {
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+      autoSaveTimer.current = setTimeout(() => {
+        sendAutoSave(fieldName, fieldValue);
+      }, 800);
     } else {
-      setFormData(prev => ({
-        ...prev,
-        [name]: value
-      }));
-    }
-
-    // Auto-save for non-array fields
-    if (!name.includes('GiaD')) {
-      autoSaveField(name, type === 'checkbox' ? checked : value);
+      // Boolean / select fields save immediately
+      sendAutoSave(fieldName, fieldValue);
     }
   };
 
-  const autoSaveField = async (fieldName, fieldValue) => {
+  const sendAutoSave = async (fieldName, fieldValue) => {
     try {
       await axios.post(`${API_BASE_URL}/health-profile/`, {
-        tenDangNhap: tenDangNhap,
-        [fieldName]: fieldValue
+        tenDangNhap,
+        [fieldName]: fieldValue,
       });
     } catch (error) {
       console.error(`Auto-save error for field ${fieldName}:`, error);
     }
   };
 
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    const newValue = type === "checkbox" ? checked : value;
+
+    setFormData((prev) => ({ ...prev, [name]: newValue }));
+    autoSaveField(name, newValue);
+  };
+
+  // Manual full save
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!tenDangNhap) {
-      setMessage('⚠️ Vui lòng đăng nhập trước!');
+      setMessage("Vui long dang nhap truoc!");
       return;
     }
 
     try {
       setSaving(true);
       const payload = { tenDangNhap };
-      
-      // Numeric fields that should be converted to numbers
-      const numericFields = [
-        'tuoi', 'chieuCao', 'canNang', 'bmi', 'vongEo',
-        'huyetApTamThu', 'huyetApTamTruong',
-        'duongHuyet', 'hba1c', 'cholesterol', 'ldl', 'hdl',
-        'triglyceride', 'creatinine', 'acidUric', 'soPhutVanDongMoiTuan'
-      ];
 
-      Object.keys(formData).forEach(key => {
-        if (numericFields.includes(key)) {
-          payload[key] = formData[key] ? Number(formData[key]) : null;
+      Object.keys(formData).forEach((key) => {
+        if (NUMERIC_FIELDS.has(key)) {
+          payload[key] = formData[key] !== "" ? Number(formData[key]) : null;
         } else {
           payload[key] = formData[key];
         }
       });
 
       await axios.post(`${API_BASE_URL}/health-profile/`, payload);
-      setMessage('✅ Lưu dữ liệu hồ sơ sức khỏe thành công!');
-      setTimeout(() => setMessage(''), 3000);
+      setMessage("Luu du lieu ho so suc khoe thanh cong!");
+      setTimeout(() => setMessage(""), 3000);
     } catch (error) {
-      setMessage('❌ Lỗi khi lưu dữ liệu!');
-      console.error('Save error:', error);
+      setMessage("Loi khi luu du lieu!");
+      console.error("Save error:", error);
     } finally {
       setSaving(false);
     }
   };
 
-  const BMI_CATEGORY = (bmi) => {
+  const getBMICategory = (bmi) => {
     const b = Number(bmi);
-    if (isNaN(b) || b === 0) return '-';
-    if (b < 18.5) return 'Gầy';
-    if (b < 25) return 'Bình thường';
-    if (b < 30) return 'Thừa cân';
-    return 'Béo phì';
+    if (isNaN(b) || b === 0) return "-";
+    if (b < 18.5) return "Gay";
+    if (b < 25) return "Binh thuong";
+    if (b < 30) return "Thua can";
+    return "Beo phi";
   };
 
   const inputStyle = {
-    width: '100%',
-    padding: '8px',
-    border: '1px solid #cbd5e1',
-    borderRadius: '6px',
-    boxSizing: 'border-box',
-    marginTop: '4px',
-    fontFamily: 'inherit'
+    width: "100%",
+    padding: "8px",
+    border: "1px solid #cbd5e1",
+    borderRadius: "6px",
+    boxSizing: "border-box",
+    marginTop: "4px",
+    fontFamily: "inherit",
   };
 
   const checkLabel = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    margin: '8px 0',
-    cursor: 'pointer'
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    margin: "8px 0",
+    cursor: "pointer",
   };
 
   if (loading) {
     return (
-      <div style={{ maxWidth: '750px', margin: '0 auto', padding: '20px', textAlign: 'center' }}>
-        <p>Đang tải dữ liệu...</p>
+      <div style={{ maxWidth: "750px", margin: "0 auto", padding: "20px", textAlign: "center" }}>
+        <p>Dang tai du lieu...</p>
       </div>
     );
   }
 
   return (
-    <div style={{ maxWidth: '750px', margin: '0 auto', padding: '20px', fontFamily: 'Segoe UI, sans-serif' }}>
-      <h2 style={{ color: '#1e293b', marginTop: 0 }}>📋 Đồng Bộ Hồ Sơ Sức Khỏe Cá Nhân</h2>
-      <p style={{ color: '#64748b' }}>
-        <i>👤 Tài khoản: <strong>{tenDangNhap || 'Chưa đăng nhập'}</strong></i>
+    <div style={{ maxWidth: "750px", margin: "0 auto", padding: "20px", fontFamily: "Segoe UI, sans-serif" }}>
+      <h2 style={{ color: "#1e293b", marginTop: 0 }}>Ho So Suc Khoe Ca Nhan</h2>
+      <p style={{ color: "#64748b" }}>
+        Tai khoan: <strong>{tenDangNhap || "Chua dang nhap"}</strong>
       </p>
 
-      {/* Progress Bar */}
-      <div style={{ marginBottom: '24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-          <span style={{ fontSize: '12px', fontWeight: '600', color: '#64748b' }}>
-            Mức độ điền đầy đủ dữ liệu
+      {/* Completion progress bar */}
+      <div style={{ marginBottom: "24px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
+          <span style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>
+            Muc do dien day du du lieu
           </span>
           <span style={{
-            fontSize: '12px',
-            fontWeight: 'bold',
-            color: completionRate > 70 ? '#22c55e' : '#f97316'
+            fontSize: "12px",
+            fontWeight: "bold",
+            color: completionRate > 70 ? "#22c55e" : "#f97316",
           }}>
             {completionRate}%
           </span>
         </div>
-        <div style={{
-          width: '100%',
-          height: '8px',
-          backgroundColor: '#e2e8f0',
-          borderRadius: '4px',
-          overflow: 'hidden'
-        }}>
+        <div style={{ width: "100%", height: "8px", backgroundColor: "#e2e8f0", borderRadius: "4px", overflow: "hidden" }}>
           <div style={{
-            height: '100%',
+            height: "100%",
             width: `${completionRate}%`,
-            backgroundColor: completionRate > 70 ? '#22c55e' : '#f97316',
-            transition: 'width 0.3s'
+            backgroundColor: completionRate > 70 ? "#22c55e" : "#f97316",
+            transition: "width 0.3s",
           }} />
         </div>
       </div>
 
-      {completionRate <= 15 && (
-        <div style={{
-          padding: '16px',
-          marginBottom: '20px',
-          borderRadius: '8px',
-          backgroundColor: '#eff6ff',
-          color: '#1e3a8a',
-          border: '1px solid #bfdbfe',
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: '12px'
-        }}>
-          <span style={{ fontSize: '24px' }}>👋</span>
-          <div>
-            <h4 style={{ margin: '0 0 4px 0', color: '#1d4ed8' }}>Chào mừng!</h4>
-            <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.5' }}>
-              Hệ thống cần thu thập dữ liệu sức khỏe cơ bản. Hãy dành 1-2 phút để thiết lập hồ sơ sức khỏe.
-            </p>
-          </div>
-        </div>
-      )}
-
       {message && (
         <div style={{
-          padding: '12px',
-          marginBottom: '16px',
-          borderRadius: '6px',
-          backgroundColor: message.includes('✅') ? '#dcfce7' : '#fee2e2',
-          color: message.includes('✅') ? '#166534' : '#991b1b'
+          padding: "12px",
+          marginBottom: "16px",
+          borderRadius: "6px",
+          backgroundColor: message.includes("thanh cong") ? "#dcfce7" : "#fee2e2",
+          color: message.includes("thanh cong") ? "#166534" : "#991b1b",
         }}>
           {message}
         </div>
       )}
 
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-        
+      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+
         {/* BLOCK 1: Physical & Vitals */}
-        <fieldset style={{ border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', backgroundColor: '#f8fafc' }}>
-          <legend style={{ fontWeight: 'bold', color: '#0f766e', padding: '0 8px' }}>
-            📏 1. Thể chất & Sinh tồn
+        <fieldset style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", backgroundColor: "#f8fafc" }}>
+          <legend style={{ fontWeight: "bold", color: "#0f766e", padding: "0 8px" }}>
+            1. The chat va Sinh ton
           </legend>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
-              <label>Tuổi (năm)</label>
+              <label>Tuoi (nam)</label>
               <input type="number" name="tuoi" value={formData.tuoi} onChange={handleChange} style={inputStyle} />
             </div>
             <div>
-              <label>Giới tính</label>
+              <label>Gioi tinh</label>
               <select name="gioiTinh" value={formData.gioiTinh} onChange={handleChange} style={inputStyle}>
                 <option value="Nam">Nam</option>
-                <option value="Nữ">Nữ</option>
+                <option value="Nu">Nu</option>
               </select>
             </div>
             <div>
-              <label>Chiều cao (cm)</label>
+              <label>Chieu cao (cm)</label>
               <input type="number" name="chieuCao" value={formData.chieuCao} onChange={handleChange} style={inputStyle} />
             </div>
             <div>
-              <label>Cân nặng (kg)</label>
+              <label>Can nang (kg)</label>
               <input type="number" name="canNang" value={formData.canNang} onChange={handleChange} style={inputStyle} />
             </div>
             <div>
-              <label>BMI: {BMI_CATEGORY(formData.bmi)} <span style={{ color: '#059669', fontSize: '12px' }}>(Tự động)</span></label>
+              <label>
+                BMI: {getBMICategory(formData.bmi)}{" "}
+                <span style={{ color: "#059669", fontSize: "12px" }}>(Tu dong)</span>
+              </label>
               <input
                 type="number"
                 name="bmi"
                 value={formData.bmi}
                 readOnly
-                style={{ ...inputStyle, backgroundColor: '#e2e8f0', cursor: 'not-allowed', color: '#64748b' }}
+                style={{ ...inputStyle, backgroundColor: "#e2e8f0", cursor: "not-allowed", color: "#64748b" }}
               />
             </div>
             <div>
-              <label>Vòng eo (cm)</label>
+              <label>Vong eo (cm)</label>
               <input type="number" name="vongEo" value={formData.vongEo} onChange={handleChange} style={inputStyle} />
             </div>
             <div>
-              <label>HA Tâm thu (mmHg)</label>
+              <label>HA Tam thu (mmHg)</label>
               <input type="number" name="huyetApTamThu" value={formData.huyetApTamThu} onChange={handleChange} style={inputStyle} />
             </div>
             <div>
-              <label>HA Tâm trương (mmHg)</label>
+              <label>HA Tam truong (mmHg)</label>
               <input type="number" name="huyetApTamTruong" value={formData.huyetApTamTruong} onChange={handleChange} style={inputStyle} />
             </div>
           </div>
         </fieldset>
 
         {/* BLOCK 2: Biochemistry */}
-        <fieldset style={{ border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', backgroundColor: '#f0fdf4' }}>
-          <legend style={{ fontWeight: 'bold', color: '#166534', padding: '0 8px' }}>
-            🔬 2. Chỉ số Sinh hóa
+        <fieldset style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", backgroundColor: "#f0fdf4" }}>
+          <legend style={{ fontWeight: "bold", color: "#166534", padding: "0 8px" }}>
+            2. Chi so Sinh hoa
           </legend>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
-              <label>Đường huyết đói (mg/dL)</label>
+              <label>Duong huyet doi (mg/dL)</label>
               <input type="number" name="duongHuyet" value={formData.duongHuyet} onChange={handleChange} style={inputStyle} />
             </div>
             <div>
@@ -4759,10 +4700,17 @@ export default function HealthProfileForm() {
             </div>
             <div>
               <label>LDL-Cholesterol (mg/dL)</label>
-              <input type="number" name="ldl" value={formData.ldl} onChange={handleChange} placeholder="Tự động tính nếu trống" style={inputStyle} />
+              <input
+                type="number"
+                name="ldl"
+                value={formData.ldl}
+                onChange={handleChange}
+                placeholder="Tu dong tinh neu trong"
+                style={inputStyle}
+              />
             </div>
             <div>
-              <label>Creatinine máu (mg/dL)</label>
+              <label>Creatinine mau (mg/dL)</label>
               <input type="number" step="0.01" name="creatinine" value={formData.creatinine} onChange={handleChange} style={inputStyle} />
             </div>
             <div>
@@ -4773,77 +4721,77 @@ export default function HealthProfileForm() {
         </fieldset>
 
         {/* BLOCK 3: Lifestyle */}
-        <fieldset style={{ border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', backgroundColor: '#f8fafc' }}>
-          <legend style={{ fontWeight: 'bold', color: '#7c3aed', padding: '0 8px' }}>
-            🏃 3. Lối sống
+        <fieldset style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", backgroundColor: "#f8fafc" }}>
+          <legend style={{ fontWeight: "bold", color: "#7c3aed", padding: "0 8px" }}>
+            3. Loi song
           </legend>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
-              <label>Hút thuốc</label>
+              <label>Hut thuoc</label>
               <select name="hutThuoc" value={formData.hutThuoc} onChange={handleChange} style={inputStyle}>
-                <option value="Không">Không</option>
+                <option value="Chưa bao giờ">Chưa bao giờ</option>
                 <option value="Đã bỏ">Đã bỏ</option>
                 <option value="Đang hút">Đang hút</option>
               </select>
             </div>
             <div>
-              <label>Uống rượu/bia</label>
+              <label>Uong ruou/bia</label>
               <select name="uongRuouBia" value={formData.uongRuouBia} onChange={handleChange} style={inputStyle}>
-                <option value="Không">Không</option>
+                <option value="Chưa bao giờ">Chưa bao giờ</option>
                 <option value="Thỉnh thoảng">Thỉnh thoảng</option>
                 <option value="Thường xuyên">Thường xuyên</option>
               </select>
             </div>
             <div>
-              <label>Phút vận động/tuần</label>
+              <label>Phut van dong/tuan</label>
               <input type="number" name="soPhutVanDongMoiTuan" value={formData.soPhutVanDongMoiTuan} onChange={handleChange} style={inputStyle} />
             </div>
           </div>
         </fieldset>
 
         {/* BLOCK 4: Medical History */}
-        <fieldset style={{ border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', backgroundColor: '#fff5f5' }}>
-          <legend style={{ fontWeight: 'bold', color: '#dc2626', padding: '0 8px' }}>
-            ⚠️ 4. Tiền sử bệnh lý
+        <fieldset style={{ border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px", backgroundColor: "#fff5f5" }}>
+          <legend style={{ fontWeight: "bold", color: "#dc2626", padding: "0 8px" }}>
+            4. Tien su benh ly
           </legend>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
             <div>
-              <h4 style={{ margin: '5px 0' }}>Bản thân bị:</h4>
-              <label style={checkLabel}>
-                <input type="checkbox" name="caoHuyetAp" checked={formData.caoHuyetAp} onChange={handleChange} />
-                Cao huyết áp
-              </label>
-              <label style={checkLabel}>
-                <input type="checkbox" name="tieuDuong" checked={formData.tieuDuong} onChange={handleChange} />
-                Tiểu đường
-              </label>
-              <label style={checkLabel}>
-                <input type="checkbox" name="benhTimMach" checked={formData.benhTimMach} onChange={handleChange} />
-                Tim mạch
-              </label>
-              <label style={checkLabel}>
-                <input type="checkbox" name="gout" checked={formData.gout} onChange={handleChange} />
-                Gout
-              </label>
+              <h4 style={{ margin: "5px 0" }}>Ban than bi:</h4>
+              {[
+                { name: "caoHuyetAp", label: "Cao huyet ap" },
+                { name: "tieuDuong", label: "Tieu duong" },
+                { name: "benhTimMach", label: "Tim mach" },
+                { name: "gout", label: "Gout" },
+              ].map(({ name, label }) => (
+                <label key={name} style={checkLabel}>
+                  <input
+                    type="checkbox"
+                    name={name}
+                    checked={!!formData[name]}
+                    onChange={handleChange}
+                  />
+                  {label}
+                </label>
+              ))}
             </div>
             <div>
-              <h4 style={{ margin: '5px 0' }}>Gia đình cận huyết bị:</h4>
-              <label style={checkLabel}>
-                <input type="checkbox" name="giaDinhCaoHuyetAp" checked={formData.giaDinhCaoHuyetAp} onChange={handleChange} />
-                Cao huyết áp
-              </label>
-              <label style={checkLabel}>
-                <input type="checkbox" name="giaDinhTieuDuong" checked={formData.giaDinhTieuDuong} onChange={handleChange} />
-                Tiểu đường
-              </label>
-              <label style={checkLabel}>
-                <input type="checkbox" name="giaDinhTimMach" checked={formData.giaDinhTimMach} onChange={handleChange} />
-                Tim mạch
-              </label>
-              <label style={checkLabel}>
-                <input type="checkbox" name="giaDinhGout" checked={formData.giaDinhGout} onChange={handleChange} />
-                Gout
-              </label>
+              <h4 style={{ margin: "5px 0" }}>Gia dinh can huyet bi:</h4>
+              {[
+                { name: "giaDinhCaoHuyetAp", label: "Cao huyet ap" },
+                { name: "giaDinhTieuDuong", label: "Tieu duong" },
+                { name: "giaDinhTimMach", label: "Tim mach" },
+                { name: "giaDinhGout", label: "Gout" },
+              ].map(({ name, label }) => (
+                <label key={name} style={checkLabel}>
+                  <input
+                    type="checkbox"
+                    name={name}
+                    checked={!!formData[name]}
+                    onChange={handleChange}
+                  />
+                  {label}
+                </label>
+              ))}
             </div>
           </div>
         </fieldset>
@@ -4852,17 +4800,17 @@ export default function HealthProfileForm() {
           type="submit"
           disabled={saving}
           style={{
-            padding: '12px',
-            backgroundColor: saving ? '#cbd5e1' : '#0284c7',
-            color: 'white',
-            fontWeight: '600',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: saving ? 'not-allowed' : 'pointer',
-            fontSize: '16px'
+            padding: "12px",
+            backgroundColor: saving ? "#cbd5e1" : "#0284c7",
+            color: "white",
+            fontWeight: "600",
+            border: "none",
+            borderRadius: "6px",
+            cursor: saving ? "not-allowed" : "pointer",
+            fontSize: "16px",
           }}
         >
-          {saving ? '⏳ Đang đồng bộ...' : '💾 LƯU HỒ SƠ SỨC KHỎE'}
+          {saving ? "Dang dong bo..." : "LUU HO SO SUC KHOE"}
         </button>
       </form>
     </div>
@@ -4893,9 +4841,12 @@ import axios from "axios";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 
+// Keys used only for BMI calculation — not part of any plugin field
+const AUX_KEYS = new Set(["chieuCao", "canNang"]);
+
 export default function MainRiskPage() {
-  const [selectedPlugin, setSelectedPlugin] = useState("diabetes");
-  const [plugins, setPlugins] = useState([]);
+  const [selectedPlugin, setSelectedPlugin] = useState(null);
+  const [plugins, setPlugins] = useState([]);        // [{id, name, icon}, ...]
   const [plugin, setPlugin] = useState(null);
   const [formData, setFormData] = useState({});
   const [errors, setErrors] = useState({});
@@ -4908,28 +4859,29 @@ export default function MainRiskPage() {
 
   useEffect(() => { loadPluginsList(); }, []);
 
-  useEffect(() => { 
+  useEffect(() => {
     if (tenDangNhap) {
-      fetchHealthProfile(); 
+      fetchHealthProfile();
     } else {
       setProfileLoaded(true);
     }
   }, [tenDangNhap]);
 
-  useEffect(() => { 
-    if (profileLoaded) {
-      loadPlugin(selectedPlugin); 
+  useEffect(() => {
+    // Chỉ load lại form khi đổi Bệnh (selectedPlugin) hoặc lần đầu load xong profile
+    if (profileLoaded && selectedPlugin) {
+      loadPlugin(selectedPlugin);
     }
-  }, [selectedPlugin, profileLoaded, healthProfile]);
+  }, [selectedPlugin, profileLoaded]); // ĐÃ XÓA healthProfile KHỎI MẢNG NÀY
+
+  // ─── Data loading ──────────────────────────────────────────────────────────
 
   const fetchHealthProfile = async () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/health-profile/${tenDangNhap}`);
-      if (res.data.data) {
-        setHealthProfile(res.data.data);
-      }
+      if (res.data.data) setHealthProfile(res.data.data);
     } catch (error) {
-      console.error("Lỗi lấy hồ sơ:", error);
+      console.error("Error fetching health profile:", error);
     } finally {
       setProfileLoaded(true);
     }
@@ -4938,10 +4890,13 @@ export default function MainRiskPage() {
   const loadPluginsList = async () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/api/plugins/diseases`);
-      const pluginIds = res.data.diseases ? res.data.diseases.map(p => p.id) : [];
-      setPlugins(pluginIds);
+      const diseaseList = res.data.diseases || [];
+      setPlugins(diseaseList);
+      if (diseaseList.length > 0 && !selectedPlugin) {
+        setSelectedPlugin(diseaseList[0].id);
+      }
     } catch (e) {
-      console.error("Load plugins error", e);
+      console.error("Load plugins error:", e);
     }
   };
 
@@ -4951,70 +4906,135 @@ export default function MainRiskPage() {
       const response = await axios.get(`${API_BASE_URL}/api/plugins/diseases/${pluginName}`);
       const pluginData = response.data;
       setPlugin(pluginData);
-      const mergedForm = mergeWithHealthProfile(pluginData.fields);
+
+      // Build form with defaults, then merge health profile data using metadata mapping
+      const mergedForm = buildFormFromMetadata(pluginData.fields);
       setFormData(mergedForm);
       setRiskResult(null);
       setErrors({});
     } catch (error) {
-      console.error(`Load plugin error:`, error);
+      console.error("Load plugin error:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  const mergeWithHealthProfile = (fields) => {
-    const initialData = {};
-    fields.forEach((field) => {
-      const fieldKey = field.key || field.code; // [FIX] Hỗ trợ cả field.key và field.code
-      initialData[fieldKey] = field.default !== undefined ? field.default : "";
-    });
+  // ─── Metadata-driven form initialization ───────────────────────────────────
+  //
+  // Each field in metadata may declare a `health_profile_key` — the key name
+  // as it appears in the health profile returned by the backend. If present,
+  // the field's initial value is taken from healthProfile[health_profile_key].
+  // No field-name mapping table lives in this file.
 
-    if (healthProfile) {
-      initialData.chieuCao = healthProfile.chieuCao || "";
-      initialData.canNang = healthProfile.canNang || "";
+  // frontend/src/MainRiskPage.jsx
+const buildFormFromMetadata = (fields) => {
+  const initialData = {};
 
-      const dbToFormMapping = {
-        "tuoi": "age", 
-        "bmi": "bmi", 
-        "vongEo": "waist",
-        "huyetApTamThu": "systolic", 
-        "huyetApTamTruong": "diastolic",
-        "duongHuyet": "fasting_glucose", 
-        "hba1c": "hba1c",
-        "cholesterol": "total_cholesterol", 
-        "ldl": "ldl", 
-        "hdl": "hdl",
-        "creatinine": "creatinine", 
-        "soPhutVanDongMoiTuan": "exercise_minutes_per_week",
-        "giaDinhTieuDuong": "family_history_diabetes",
-        "giaDinhCaoHuyetAp": "family_history_hypertension",
-        "giaDinhTimMach": "family_history_cardiovascular",
-      };
+  fields.forEach((field) => {
+    const key = field.key || field.code;
+    initialData[key] = field.default !== undefined 
+      ? field.default 
+      : (field.type === "boolean" ? false : "");
+  });
 
-      Object.keys(dbToFormMapping).forEach(dbKey => {
-        if (healthProfile[dbKey] !== undefined && healthProfile[dbKey] !== null) {
-          const formKey = dbToFormMapping[dbKey];
-          if (fields.some(f => (f.key || f.code) === formKey)) {
-            initialData[formKey] = healthProfile[dbKey];
-          }
-        }
-      });
+  initialData.chieuCao = "";
+  initialData.canNang = "";
 
-      if (healthProfile["hutThuoc"] && fields.some(f => (f.key || f.code) === "smoking_status")) {
-        let val = healthProfile["hutThuoc"];
-        if (val === "Đang hút") initialData["smoking_status"] = "current";
-        else if (val === "Đã bỏ") initialData["smoking_status"] = "former";
-        else if (val === "Không") initialData["smoking_status"] = "never";
-      }
-    }
-    return initialData;
+  if (!healthProfile) return initialData;
+
+  // Load hard columns
+  ["tuoi", "gioiTinh", "chieuCao", "canNang", "bmi", "vongEo", 
+   "huyetApTamThu", "huyetApTamTruong", "hutThuoc", "uongRuouBia", 
+   "soPhutVanDongMoiTuan"].forEach(k => {
+    if (healthProfile[k] !== undefined) initialData[k] = healthProfile[k];
+  });
+
+  // Load EAV fields + fallback
+  // Load EAV fields + fallback
+  const EAV_FALLBACK = {
+    // --- Lối sống ---
+    "smoking_status": "hutThuoc",
+    "exercise_minutes_per_week": "soPhutVanDongMoiTuan",
+    
+    // --- Thể chất & Sinh tồn ---
+    "age": "tuoi",
+    "systolic": "huyetApTamThu",
+    "diastolic": "huyetApTamTruong",
+    
+    // --- Tiền sử bệnh/gia đình ---
+    "diabetes_status": "tieuDuong", // Lấy từ hồ sơ để map qua "yes/no"
+    "family_history_diabetes": "giaDinhTieuDuong",
+    "family_history_hypertension": "giaDinhCaoHuyetAp",
+    "family_history_cardiovascular": "giaDinhTimMach",
+    
+    // --- Sinh hóa ---
+    "fasting_glucose": "duongHuyet",
+    "hba1c": "hba1c",
+    "total_cholesterol": "cholesterol",
+    "ldl": "ldl",
+    "hdl": "hdl",
+    "triglyceride": "triglyceride",
+    "creatinine": "creatinine"
   };
 
+  fields.forEach((field) => {
+    const key = field.key || field.code;
+    let hpKey = field.health_profile_key || EAV_FALLBACK[key] || key;
+
+    let value = healthProfile[hpKey];
+    if (value === undefined || value === null) return;
+
+    // --- MAPPING VALUES (Xử lý khác biệt giá trị giữa Hồ sơ và Plugin) ---
+    
+    // 1. Ánh xạ tình trạng hút thuốc (Tiếng Việt -> Tiếng Anh)
+    if (key === "smoking_status") {
+      const smokingMap = {
+        "Chưa bao giờ": "never",
+        "Đã bỏ": "former",
+        "Đang hút": "current"
+      };
+      value = smokingMap[value] || value;
+    }
+
+    // 2. Ánh xạ tình trạng bệnh lý (Boolean true/false -> Select "yes"/"no")
+    if (key === "diabetes_status" || key === "htn_status") {
+      if (typeof value === "boolean") {
+        value = value ? "yes" : "no";
+      }
+    }
+
+    // ----------------------------------------------------------------------
+
+    // Đẩy vào form với đúng format
+    if (field.type === "boolean") {
+      initialData[key] = Boolean(value);
+    } else if (field.type === "number") {
+      initialData[key] = Number(value);
+    } else {
+      initialData[key] = value;
+    }
+  });
+
+  // Tính BMI
+  const h = parseFloat(initialData.chieuCao);
+  const w = parseFloat(initialData.canNang);
+  if (h > 0 && w > 0) {
+    initialData.bmi = Number((w / (h / 100) ** 2).toFixed(1));
+  }
+
+  return initialData;
+};
+
+  // ─── Input handling ────────────────────────────────────────────────────────
+
   const handleChange = async (fieldOrKey, value) => {
-    // [FIX] Nếu fieldOrKey là Object (field), lấy key hoặc code. Nếu là String (truyền trực tiếp name), thì lấy chính nó.
-    const key = (typeof fieldOrKey === 'object') ? (fieldOrKey.key || fieldOrKey.code) : fieldOrKey;
+    const key = typeof fieldOrKey === "object"
+      ? (fieldOrKey.key || fieldOrKey.code)
+      : fieldOrKey;
+
     const updated = { ...formData, [key]: value };
 
+    // Auto-calculate BMI when height or weight changes
     if (key === "chieuCao" || key === "canNang") {
       const c = parseFloat(updated.chieuCao);
       const n = parseFloat(updated.canNang);
@@ -5027,25 +5047,36 @@ export default function MainRiskPage() {
 
     setFormData(updated);
 
-    if (plugin?.fields?.some(f => (f.key || f.code) === key)) {
-      await validateForm(updated);
-    }
-    
-    if ((key === "chieuCao" || key === "canNang") && plugin?.fields?.some(f => (f.key || f.code) === "bmi")) {
+    // Real-time validation for plugin fields
+    const isPluginField = plugin?.fields?.some((f) => (f.key || f.code) === key);
+    const isBmiRelated = (key === "chieuCao" || key === "canNang") &&
+      plugin?.fields?.some((f) => (f.key || f.code) === "bmi");
+
+    if (isPluginField || isBmiRelated) {
       await validateForm(updated);
     }
   };
 
+  // ─── Validation ────────────────────────────────────────────────────────────
+
   const validateForm = async (currentData) => {
     try {
+      const pluginKeys = new Set(plugin?.fields?.map((f) => f.key || f.code) || []);
+      const payload = {};
+      for (const [k, v] of Object.entries(currentData)) {
+        if (pluginKeys.has(k) && v !== "" && v !== null && v !== undefined) {
+          payload[k] = v;
+        }
+      }
+
       const res = await axios.post(
         `${API_BASE_URL}/api/plugins/diseases/${selectedPlugin}/validate`,
-        currentData
+        payload
       );
-      
+
       const newErrors = {};
       if (!res.data.is_valid && res.data.errors) {
-        res.data.errors.forEach(err => {
+        res.data.errors.forEach((err) => {
           newErrors[err.field] = err.message;
         });
       }
@@ -5055,19 +5086,23 @@ export default function MainRiskPage() {
     }
   };
 
+  // ─── Risk analysis ─────────────────────────────────────────────────────────
+
   const handleAnalyzeClick = () => {
     if (!plugin) return;
 
-    let missingFields = [];
-    plugin.fields.forEach(field => {
+    const missingFields = [];
+    plugin.fields.forEach((field) => {
       const fieldKey = field.key || field.code;
-      if (field.required && (formData[fieldKey] === undefined || formData[fieldKey] === "")) {
-        missingFields.push(field.label);
-      }
+      const value = formData[fieldKey];
+      const isMissing =
+        field.required &&
+        (value === undefined || value === null || (field.type !== "boolean" && value === ""));
+      if (isMissing) missingFields.push(field.label);
     });
 
     if (missingFields.length > 0) {
-      alert(`⚠️ Vui lòng điền các trường bắt buộc:\n- ${missingFields.join('\n- ')}`);
+      alert(`Vui long dien cac truong bat buoc:\n- ${missingFields.join("\n- ")}`);
       return;
     }
 
@@ -5077,226 +5112,466 @@ export default function MainRiskPage() {
   const calculateRisk = async (currentData) => {
     try {
       setIsCalculating(true);
-      
+
+      // Only send plugin field keys, exclude aux keys and empty values
+      const pluginKeys = new Set(plugin?.fields?.map((f) => f.key || f.code) || []);
       const cleanData = {};
-      Object.keys(currentData).forEach(key => {
-        if (currentData[key] !== "" && currentData[key] !== null && currentData[key] !== undefined) {
-          cleanData[key] = currentData[key];
+      for (const [k, v] of Object.entries(currentData)) {
+        if (
+          pluginKeys.has(k) &&
+          !AUX_KEYS.has(k) &&
+          v !== "" &&
+          v !== null &&
+          v !== undefined
+        ) {
+          cleanData[k] = v;
         }
-      });
+      }
 
       const response = await axios.post(
         `${API_BASE_URL}/api/plugins/diseases/${selectedPlugin}/assess`,
         {
           health_profile: healthProfile || {},
           form_data: cleanData,
+          tenDangNhap: tenDangNhap || null,
           include_breakdown: true,
-          calculate_progression: true
+          calculate_progression: true,
         }
       );
 
       setRiskResult(response.data);
-      setErrors({}); 
-      
+      setErrors({});
+
+      // Refresh local health profile cache so next load reflects saved data
+      if (tenDangNhap) {
+        try {
+          const profileRes = await axios.get(`${API_BASE_URL}/health-profile/${tenDangNhap}`);
+          if (profileRes.data.data) setHealthProfile(profileRes.data.data);
+        } catch (_) {
+          // Non-blocking
+        }
+      }
     } catch (error) {
       console.error("Calculate risk error:", error);
       setRiskResult(null);
-      
-      let errorMsg = "Không thể phân tích dữ liệu.";
+
+      let errorMsg = "Khong the phan tich du lieu.";
       if (error.response?.data?.detail?.errors) {
-        const errorList = error.response.data.detail.errors.map(err => `• ${err.field}: ${err.message}`).join("\n");
-        errorMsg = `Hệ thống từ chối phân tích:\n\n${errorList}`;
+        const errorList = error.response.data.detail.errors
+          .map((err) => `- ${err.field}: ${err.message}`)
+          .join("\n");
+        errorMsg = `He thong tu choi phan tich:\n\n${errorList}`;
       } else if (error.response?.data?.detail) {
-        errorMsg = typeof error.response.data.detail === 'string' 
-          ? error.response.data.detail 
-          : JSON.stringify(error.response.data.detail);
+        errorMsg =
+          typeof error.response.data.detail === "string"
+            ? error.response.data.detail
+            : JSON.stringify(error.response.data.detail);
       }
-      
-      alert("❌ LỖI:\n" + errorMsg);
+      alert("LOI:\n" + errorMsg);
     } finally {
       setIsCalculating(false);
     }
   };
 
+  // ─── UI helpers ────────────────────────────────────────────────────────────
+
   const getRiskColor = (level) => {
     const l = String(level).toLowerCase();
-    if (l.includes('high') || l.includes('cao')) return '#ef4444';
-    if (l.includes('medium') || l.includes('trung')) return '#f97316';
-    return '#22c55e';
+    if (l.includes("high") || l.includes("cao")) return "#ef4444";
+    if (l.includes("medium") || l.includes("trung")) return "#f97316";
+    return "#22c55e";
   };
 
   const getRiskLabel = (level) => {
     const l = String(level).toLowerCase();
-    if (l.includes('high') || l.includes('cao')) return 'CAO ⚠️';
-    if (l.includes('medium') || l.includes('trung')) return 'TRUNG BÌNH ⚡';
-    if (l.includes('low') || l.includes('thấp')) return 'THẤP ✓';
-    return level; 
+    if (l.includes("high") || l.includes("cao")) return "CAO";
+    if (l.includes("medium") || l.includes("trung")) return "TRUNG BINH";
+    if (l.includes("low") || l.includes("thap")) return "THAP";
+    return level;
   };
 
-  if (loading || !plugin) {
-    return <div style={{ padding: "40px", textAlign: "center" }}>Đang tải dữ liệu...</div>;
+  // ─── Render ────────────────────────────────────────────────────────────────
+
+  if (!profileLoaded || (loading && !plugin)) {
+    return <div style={{ padding: "40px", textAlign: "center" }}>Dang tai du lieu...</div>;
   }
 
-  const disease = plugin.disease_info || plugin;
+  const disease = plugin?.disease_info || {};
 
   return (
     <div style={{ padding: "24px", maxWidth: "1400px", margin: "0 auto", fontFamily: "Segoe UI, Arial, sans-serif" }}>
-      <h1 style={{ textAlign: "center", color: "#1e293b" }}>🏥 Hệ thống Đánh giá Nguy cơ Bệnh Mạn tính</h1>
+      <h1 style={{ textAlign: "center", color: "#1e293b" }}>He thong Danh gia Nguy co Benh Man tinh</h1>
 
       <div style={{ textAlign: "center", marginBottom: "20px" }}>
-        <strong>👤 {tenDangNhap || "Khách"}</strong>
+        <strong>Nguoi dung: {tenDangNhap || "Khach"}</strong>
       </div>
 
+      {/* Disease selector — labels come from metadata, not hardcoded */}
       <div style={{ marginBottom: "24px", textAlign: "center" }}>
-        <label><strong>Chọn Bệnh: </strong></label>
-        <select 
-          value={selectedPlugin} 
-          onChange={(e) => setSelectedPlugin(e.target.value)} 
+        <label><strong>Chon Benh: </strong></label>
+        <select
+          value={selectedPlugin || ""}
+          onChange={(e) => setSelectedPlugin(e.target.value)}
           style={{ padding: "10px", fontSize: "16px", borderRadius: "6px" }}
         >
-          {plugins.map((p, index) => (
-            <option key={`${p}_${index}`} value={p}>
-              {p === "diabetes" ? "🍬 Tiểu đường" : 
-               p === "hypertension" ? "🩸 Tăng huyết áp" : 
-               p === "stroke" ? "🧠 Đột quỵ" :
-               p === "gout" ? "🦶 Bệnh Gout" : p}
+          {plugins.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.icon ? `${p.icon} ` : ""}{p.name || p.id}
             </option>
           ))}
         </select>
       </div>
 
-      <h2 style={{ textAlign: "center", color: "#334155" }}>{disease.name}</h2>
-      <p style={{ textAlign: "center", color: "#64748b", fontStyle: "italic", marginBottom: "30px" }}>
-        {disease.description}
-      </p>
-
-      {/* Form */}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px", 
-                    background: "white", padding: "30px", borderRadius: "12px", 
-                    boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", maxWidth: "600px", margin: "0 auto" }}>
-        
-        {plugin.fields.map((field, index) => {
-          // [FIX] Lấy key chuẩn
-          const fieldKey = field.key || field.code;
-
-          if (fieldKey === "bmi") {
-            return (
-              <div key={`bmi_group_${index}`} style={{ width: "100%", background: "#f8fafc", padding: "16px", 
-                                            borderRadius: "8px", border: "1px dashed #cbd5e1", display: "flex", flexDirection: "column", gap: "10px" }}>
-                <p style={{ margin: 0, fontSize: "13px", color: "#64748b", fontStyle: "italic" }}>
-                  * Chỉ số BMI được hệ thống tự động tính toán.
-                </p>
-                <div style={{ display: "flex", gap: "12px" }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ fontWeight: "bold", color: "#475569", fontSize: "14px" }}>Chiều cao (cm)</label>
-                    <input type="number" value={formData.chieuCao || ""} 
-                           onChange={(e) => handleChange("chieuCao", e.target.value === "" ? "" : Number(e.target.value))} 
-                           style={{ width: "100%", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "6px" }} />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ fontWeight: "bold", color: "#475569", fontSize: "14px" }}>Cân nặng (kg)</label>
-                    <input type="number" value={formData.canNang || ""} 
-                           onChange={(e) => handleChange("canNang", e.target.value === "" ? "" : Number(e.target.value))} 
-                           style={{ width: "100%", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "6px" }} />
-                  </div>
-                </div>
-                <div>
-                  <label style={{ fontWeight: "bold", color: "#0f766e" }}>
-                    {field.label} {field.required && <span style={{color: "red"}}>*</span>}
-                  </label>
-                  <input type="number" value={formData.bmi || ""} readOnly 
-                         style={{ width: "100%", padding: "12px", border: errors.bmi ? "2px solid red" : "1px solid #cbd5e1", 
-                                  borderRadius: "8px", backgroundColor: "#e2e8f0", color: "#64748b" }} />
-                  {errors.bmi && <div style={{color: "#ef4444", fontSize: "13px"}}>{errors.bmi}</div>}
-                </div>
-              </div>
-            );
-          }
-
-          return (
-            <div key={`${fieldKey}_${index}`} style={{ width: "100%", display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontWeight: "bold", color: "#475569" }}>
-                {field.label}{field.required && <span style={{color: "red"}}> *</span>}
-              </label>
-
-              {field.type === "number" && (
-                <input type="number" value={formData[fieldKey] ?? ""} 
-                       onChange={(e) => handleChange(fieldKey, e.target.value === "" ? "" : Number(e.target.value))} 
-                       style={{ width: "100%", padding: "12px", border: errors[fieldKey] ? "2px solid red" : "1px solid #cbd5e1", borderRadius: "8px" }} />
-              )}
-
-              {field.type === "select" && (
-                <select value={formData[fieldKey] ?? ""} onChange={(e) => handleChange(fieldKey, e.target.value)} 
-                        style={{ width: "100%", padding: "12px", border: "1px solid #cbd5e1", borderRadius: "8px" }}>
-                  <option value="">-- Chọn --</option>
-                  {field.options?.map((opt, optIndex) => <option key={`${opt.value}_${optIndex}`} value={opt.value}>{opt.label}</option>)}
-                </select>
-              )}
-
-              {field.type === "boolean" && (
-                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "4px" }}>
-                  {/* [FIX] Gọi handleChange với tên trường (string) thay vì object */}
-                  <input type="checkbox" checked={!!formData[fieldKey]} 
-                         onChange={(e) => handleChange(fieldKey, e.target.checked)} />
-                  <span style={{ color: "#64748b" }}>Kích hoạt yếu tố này</span>
-                </div>
-              )}
-
-              {errors[fieldKey] && <div style={{color: "#ef4444", fontSize: "13px"}}>{errors[fieldKey]}</div>}
-            </div>
-          );
-        })}
-
-        <div style={{ width: "100%", marginTop: "20px" }}>
-          <button onClick={handleAnalyzeClick} disabled={isCalculating}
-                  style={{
-                    width: "100%", padding: "16px", backgroundColor: isCalculating ? "#94a3b8" : "#2563eb",
-                    color: "white", fontSize: "16px", fontWeight: "bold", border: "none", borderRadius: "8px",
-                    cursor: isCalculating ? "not-allowed" : "pointer"
-                  }}>
-            {isCalculating ? "⏳ Đang phân tích..." : "🔍 PHÂN TÍCH NGUY CƠ & LƯU HỒ SƠ"}
-          </button>
+      {loading && (
+        <div style={{ textAlign: "center", padding: "20px", color: "#64748b" }}>
+          Dang tai plugin...
         </div>
-      </div>
+      )}
 
-      {riskResult && (
-        <div style={{ marginTop: "40px", background: "#f8fafc", padding: "24px", borderRadius: "12px", border: "1px solid #e2e8f0" }}>
-          <h2 style={{ textAlign: "center" }}>📊 Kết quả Đánh giá Nguy cơ</h2>
-          
-          <div style={{ display: "flex", justifyContent: "center", gap: "40px", marginTop: "20px", flexWrap: "wrap" }}>
-            <div style={{ textAlign: "center", padding: "20px", background: "white", borderRadius: "10px", boxShadow: "0 2px 4px rgba(0,0,0,0.05)", minWidth: "200px" }}>
-              <div style={{ fontSize: "16px", color: "#64748b", fontWeight: "600" }}>Mức độ Nguy cơ</div>
-              <div style={{ fontSize: "28px", fontWeight: "900", color: getRiskColor(riskResult.risk_level), marginTop: "10px" }}>
-                {getRiskLabel(riskResult.risk_level)}
-              </div>
-            </div>
+      {!loading && plugin && (
+        <>
+          <h2 style={{ textAlign: "center", color: "#334155" }}>{disease.name}</h2>
+          <p style={{ textAlign: "center", color: "#64748b", fontStyle: "italic", marginBottom: "30px" }}>
+            {disease.description}
+          </p>
 
-            <div style={{ textAlign: "center", padding: "20px", background: "white", borderRadius: "10px", boxShadow: "0 2px 4px rgba(0,0,0,0.05)", minWidth: "200px" }}>
-              <div style={{ fontSize: "16px", color: "#64748b", fontWeight: "600" }}>Điểm số (0-100)</div>
-              <div style={{ fontSize: "36px", fontWeight: "900", color: "#1e293b", marginTop: "4px" }}>
-                {riskResult.final_score}
-              </div>
+          {/* Form */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "20px",
+              background: "white",
+              padding: "30px",
+              borderRadius: "12px",
+              boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)",
+              maxWidth: "600px",
+              margin: "0 auto",
+            }}
+          >
+            {plugin.fields.map((field, index) => {
+              const fieldKey = field.key || field.code;
+
+              // BMI field: show height + weight inputs above the readonly BMI field
+              if (fieldKey === "bmi") {
+                return (
+                  <div
+                    key={`bmi_group_${index}`}
+                    style={{
+                      width: "100%",
+                      background: "#f8fafc",
+                      padding: "16px",
+                      borderRadius: "8px",
+                      border: "1px dashed #cbd5e1",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "10px",
+                    }}
+                  >
+                    <p style={{ margin: 0, fontSize: "13px", color: "#64748b", fontStyle: "italic" }}>
+                      Chi so BMI duoc tu dong tinh tu chieu cao va can nang.
+                    </p>
+                    <div style={{ display: "flex", gap: "12px" }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontWeight: "bold", color: "#475569", fontSize: "14px" }}>Chieu cao (cm)</label>
+                        <input
+                          type="number"
+                          value={formData.chieuCao || ""}
+                          onChange={(e) =>
+                            handleChange("chieuCao", e.target.value === "" ? "" : Number(e.target.value))
+                          }
+                          style={{ width: "100%", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }}
+                        />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontWeight: "bold", color: "#475569", fontSize: "14px" }}>Can nang (kg)</label>
+                        <input
+                          type="number"
+                          value={formData.canNang || ""}
+                          onChange={(e) =>
+                            handleChange("canNang", e.target.value === "" ? "" : Number(e.target.value))
+                          }
+                          style={{ width: "100%", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ fontWeight: "bold", color: "#0f766e" }}>
+                        {field.label}{field.unit ? ` (${field.unit})` : ""}
+                        {field.required && <span style={{ color: "red" }}> *</span>}
+                      </label>
+                      <input
+                        type="number"
+                        value={formData.bmi || ""}
+                        readOnly
+                        style={{
+                          width: "100%",
+                          padding: "12px",
+                          border: errors.bmi ? "2px solid red" : "1px solid #cbd5e1",
+                          borderRadius: "8px",
+                          backgroundColor: "#e2e8f0",
+                          color: "#64748b",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                      {errors.bmi && <div style={{ color: "#ef4444", fontSize: "13px" }}>{errors.bmi}</div>}
+                    </div>
+                  </div>
+                );
+              }
+
+              // Generic field rendering
+              return (
+                <div
+                  key={`${fieldKey}_${index}`}
+                  style={{ width: "100%", display: "flex", flexDirection: "column", gap: "6px" }}
+                >
+                  <label style={{ fontWeight: "bold", color: "#475569" }}>
+                    {field.label}
+                    {field.unit ? <span style={{ fontWeight: "normal", color: "#94a3b8" }}> ({field.unit})</span> : null}
+                    {field.required && <span style={{ color: "red" }}> *</span>}
+                  </label>
+
+                  {field.type === "number" && (
+                    <input
+                      type="number"
+                      step={field.step || "any"}
+                      min={field.min}
+                      max={field.max}
+                      value={formData[fieldKey] ?? ""}
+                      onChange={(e) =>
+                        handleChange(fieldKey, e.target.value === "" ? "" : Number(e.target.value))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: "12px",
+                        border: errors[fieldKey] ? "2px solid red" : "1px solid #cbd5e1",
+                        borderRadius: "8px",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  )}
+
+                  {field.type === "select" && (
+                    <select
+                      value={formData[fieldKey] ?? ""}
+                      onChange={(e) => handleChange(fieldKey, e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "12px",
+                        border: errors[fieldKey] ? "2px solid red" : "1px solid #cbd5e1",
+                        borderRadius: "8px",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      <option value="">-- Chon --</option>
+                      {field.options?.map((opt, optIndex) => (
+                        <option key={`${opt.value}_${optIndex}`} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  {field.type === "boolean" && (
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "4px" }}>
+                      <input
+                        type="checkbox"
+                        checked={!!formData[fieldKey]}
+                        onChange={(e) => handleChange(fieldKey, e.target.checked)}
+                      />
+                      <span style={{ color: "#64748b" }}>Co</span>
+                    </div>
+                  )}
+
+                  {field.hint && (
+                    <div style={{ fontSize: "12px", color: "#94a3b8", fontStyle: "italic" }}>{field.hint}</div>
+                  )}
+
+                  {errors[fieldKey] && (
+                    <div style={{ color: "#ef4444", fontSize: "13px" }}>{errors[fieldKey]}</div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Submit button */}
+            <div style={{ width: "100%", marginTop: "20px" }}>
+              <button
+                onClick={handleAnalyzeClick}
+                disabled={isCalculating}
+                style={{
+                  width: "100%",
+                  padding: "16px",
+                  backgroundColor: isCalculating ? "#94a3b8" : "#2563eb",
+                  color: "white",
+                  fontSize: "16px",
+                  fontWeight: "bold",
+                  border: "none",
+                  borderRadius: "8px",
+                  cursor: isCalculating ? "not-allowed" : "pointer",
+                }}
+              >
+                {isCalculating ? "Dang phan tich..." : "PHAN TICH NGUY CO"}
+              </button>
             </div>
           </div>
-          
-          {riskResult.explanation && (
-            <div style={{ marginTop: "20px", padding: "20px", background: "white", borderRadius: "10px", boxShadow: "0 2px 4px rgba(0,0,0,0.05)"}}>
-              <h3 style={{ color: "#334155", marginTop: 0 }}>💡 Chi tiết đánh giá</h3>
-              <p style={{ whiteSpace: "pre-wrap", color: "#475569" }}>{riskResult.explanation.summary}</p>
-              
-              {riskResult.recommendations && riskResult.recommendations.length > 0 && (
-                <div style={{ marginTop: "15px" }}>
-                  <h4 style={{ color: "#0f766e", marginBottom: "8px" }}>Khuyến nghị:</h4>
-                  <ul style={{ margin: 0, paddingLeft: "20px", color: "#475569" }}>
-                    {riskResult.recommendations.map((rec, idx) => (
-                      <li key={`rec_${idx}`} style={{ marginBottom: "4px" }}>{rec}</li>
-                    ))}
-                  </ul>
+
+          {/* Result */}
+          {riskResult && (
+            <div
+              style={{
+                marginTop: "40px",
+                background: "#f8fafc",
+                padding: "24px",
+                borderRadius: "12px",
+                border: "1px solid #e2e8f0",
+                maxWidth: "600px",
+                margin: "40px auto 0",
+              }}
+            >
+              <h2 style={{ textAlign: "center" }}>Ket qua Danh gia Nguy co</h2>
+
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  gap: "40px",
+                  marginTop: "20px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "20px",
+                    background: "white",
+                    borderRadius: "10px",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+                    minWidth: "200px",
+                  }}
+                >
+                  <div style={{ fontSize: "16px", color: "#64748b", fontWeight: "600" }}>Muc do Nguy co</div>
+                  <div
+                    style={{
+                      fontSize: "28px",
+                      fontWeight: "900",
+                      color: getRiskColor(riskResult.risk_level),
+                      marginTop: "10px",
+                    }}
+                  >
+                    {getRiskLabel(riskResult.risk_level)}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "20px",
+                    background: "white",
+                    borderRadius: "10px",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+                    minWidth: "200px",
+                  }}
+                >
+                  <div style={{ fontSize: "16px", color: "#64748b", fontWeight: "600" }}>Diem so (0-100)</div>
+                  <div style={{ fontSize: "36px", fontWeight: "900", color: "#1e293b", marginTop: "4px" }}>
+                    {riskResult.final_score}
+                  </div>
+                </div>
+              </div>
+
+              {riskResult.explanation && (
+                <div
+                  style={{
+                    marginTop: "20px",
+                    padding: "20px",
+                    background: "white",
+                    borderRadius: "10px",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+                  }}
+                >
+                  <h3 style={{ color: "#334155", marginTop: 0 }}>Chi tiet danh gia</h3>
+                  <p style={{ whiteSpace: "pre-wrap", color: "#475569" }}>{riskResult.explanation.summary}</p>
+
+                  {riskResult.recommendations && riskResult.recommendations.length > 0 && (
+                    <div style={{ marginTop: "15px" }}>
+                      <h4 style={{ color: "#0f766e", marginBottom: "8px" }}>Khuyen nghi:</h4>
+                      <ul style={{ margin: 0, paddingLeft: "20px", color: "#475569" }}>
+                        {riskResult.recommendations.map((rec, idx) => (
+                          <li key={`rec_${idx}`} style={{ marginBottom: "4px" }}>
+                            {rec}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Breakdown */}
+              {riskResult.breakdown && (
+                <div
+                  style={{
+                    marginTop: "20px",
+                    padding: "16px",
+                    background: "white",
+                    borderRadius: "10px",
+                    fontSize: "13px",
+                    color: "#475569",
+                  }}
+                >
+                  <h4 style={{ color: "#334155", marginTop: 0 }}>Phan tich chi tiet</h4>
+                  <p>
+                    <strong>Baseline ({riskResult.breakdown.baseline?.stage}):</strong>{" "}
+                    {riskResult.breakdown.baseline?.score}
+                  </p>
+
+                  {riskResult.breakdown.applied_modifiers?.length > 0 && (
+                    <>
+                      <p><strong>Yeu to nguy co ap dung:</strong></p>
+                      <ul>
+                        {riskResult.breakdown.applied_modifiers.map((m, i) => (
+                          <li key={i}>
+                            {m.description} {m.effect_on_score > 0 ? "+" : ""}
+                            {m.effect_on_score?.toFixed(1)} diem
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+
+                  {riskResult.breakdown.applied_protective?.length > 0 && (
+                    <>
+                      <p><strong>Yeu to bao ve ap dung:</strong></p>
+                      <ul>
+                        {riskResult.breakdown.applied_protective.map((p, i) => (
+                          <li key={i}>
+                            {p.description} {p.effect_on_score?.toFixed(1)} diem
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+
+                  {riskResult.breakdown.applied_interactions?.length > 0 && (
+                    <>
+                      <p><strong>Tuong tac yeu to:</strong></p>
+                      <ul>
+                        {riskResult.breakdown.applied_interactions.map((it, i) => (
+                          <li key={i}>
+                            {it.description} (x{it.multiplier})
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
                 </div>
               )}
             </div>
           )}
-        </div>
+        </>
       )}
     </div>
   );

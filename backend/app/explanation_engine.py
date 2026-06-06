@@ -150,7 +150,7 @@ class ExplanationEngine:
     
     def _list_primary_factors(self) -> List[Dict[str, Any]]:
         """
-        [NEW] Liệt kê các yếu tố chính tăng rủi ro
+        [ENHANCED] Liệt kê các yếu tố chính tăng rủi ro kèm giải thích
         """
         modifiers = self.risk_result.get("breakdown", {}).get("applied_modifiers", [])
         
@@ -166,14 +166,15 @@ class ExplanationEngine:
             factors.append({
                 "name": modifier.get("description", ""),
                 "impact": f"+{modifier.get('effect_on_score', 0):.1f}",
-                "explanation": self._get_factor_explanation(modifier.get("id", ""))
+                # [FIX] Ưu tiên lấy note từ config, nếu không có mới dùng get_factor_explanation
+                "explanation": modifier.get("note") or self._get_factor_explanation(modifier.get("id", ""))
             })
         
         return factors
     
     def _list_protective_factors(self) -> List[Dict[str, Any]]:
         """
-        [NEW] Liệt kê các yếu tố bảo vệ (giảm rủi ro)
+        [ENHANCED] Liệt kê các yếu tố bảo vệ (giảm rủi ro) kèm giải thích
         """
         protective = self.risk_result.get("breakdown", {}).get("applied_protective", [])
         
@@ -185,7 +186,8 @@ class ExplanationEngine:
             factors.append({
                 "name": prot.get("description", ""),
                 "benefit": f"{prot.get('effect_on_score', 0):.1f}",
-                "explanation": self._get_factor_explanation(prot.get("id", ""))
+                # [FIX] Ưu tiên lấy note từ config
+                "explanation": prot.get("note") or self._get_factor_explanation(prot.get("id", ""))
             })
         
         return factors

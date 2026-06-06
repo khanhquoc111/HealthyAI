@@ -1,14 +1,15 @@
 # backend/app/risk_stratification_engine.py
 """
-RiskStratificationEngine - UPGRADED VERSION
-Nâng cấp thuật toán rule để đánh giá rủi ro bệnh mạn tính
-- Weighted baseline scoring
-- Percentile-based risk assessment
-- Evidence scoring system
-- Risk progression tracking
+RiskStratificationEngine - FIXED VERSION
+BUG FIX CHÍNH:
+  1. __init__ vẫn nhận risk_config (đúng), nhưng caller (plugin_api) đã được sửa
+     để truyền plugin_metadata["risk_config"] sau khi đã normalize đúng.
+  2. Interaction multiplier: tích lũy (nhân dồn) tất cả interaction match,
+     thay vì chỉ lấy cái cuối cùng (ghi đè biến interaction_multiplier).
+  3. _get_weighted_baseline_score: log rõ ràng khi không có stage nào match.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 import logging
 import math
 
@@ -19,23 +20,22 @@ logger = logging.getLogger(__name__)
 
 class RiskStratificationEngine:
     """
-    Engine đánh giá rủi ro nâng cấp
-    
+    Engine đánh giá rủi ro.
+
     Quy trình:
-    1. Tính toán computed fields
-    2. Xác định baseline score (weighted)
-    3. Áp dụng risk modifiers với evidence scoring
+    1. Tính computed fields
+    2. Xác định baseline score (priority-based)
+    3. Áp dụng risk modifiers (multiplicative / additive / divisive)
     4. Áp dụng protective factors
-    5. Áp dụng interactions (synergy effects)
-    6. Chuẩn hóa điểm (0-100)
-    7. Ánh xạ thành risk level với percentile thresholds
-    8. Tính risk progression score
+    5. Áp dụng interactions (tích lũy tất cả match)
+    6. Clamp [0, 100]
+    7. Map sang risk level
     """
-    
+
     def __init__(self, risk_config: Dict[str, Any]):
         """
         Args:
-            risk_config: Config từ metadata.json -> risk_config
+            risk_config: plugin_metadata["risk_config"]
         """
         self.risk_config = risk_config
         self.baseline_mapping = risk_config.get("baseline_mapping", [])
@@ -44,361 +44,273 @@ class RiskStratificationEngine:
         self.interactions = risk_config.get("interactions", [])
         self.thresholds = risk_config.get("thresholds", [])
         self.computed_fields = risk_config.get("computed_fields", [])
-        
-        # [NEW] Risk progression & evidence config
         self.evidence_scoring = risk_config.get("evidence_scoring", {})
-        self.risk_progression = risk_config.get("risk_progression", [])
-    
+        self.risk_progression_config = risk_config.get("risk_progression", [])
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # PUBLIC
+    # ──────────────────────────────────────────────────────────────────────────
+
     def evaluate(self, form_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Đánh giá rủi ro toàn diện
-        
-        Returns:
-            {
-                "final_score": float (0-100),
-                "risk_level": str (low/medium/high),
-                "risk_percentile": int (0-100),
-                "baseline_score": float,
-                "evidence_score": float,
-                "modifiers_effect": float,
-                "protective_effect": float,
-                "interaction_multiplier": float,
-                "risk_progression": dict,
-                "evidence_breakdown": dict,
-                "breakdown": {...detailed breakdown...}
-            }
+        Đánh giá rủi ro toàn diện.
+
+        Returns dict với final_score, risk_level, breakdown, ...
         """
-        
-        # [STEP 1] Tính toán computed fields
-        enriched_data = self._compute_fields(form_data)
-        
-        # [STEP 2] Xác định baseline score (weighted)
-        baseline_result = self._get_weighted_baseline_score(enriched_data)
-        baseline_score = baseline_result["score"]
-        baseline_stage = baseline_result.get("stage_name", "unknown")
-        
-        # [STEP 3] Tính evidence score
-        evidence_result = self._calculate_evidence_score(enriched_data)
+        # Bước 1: computed fields
+        enriched = self._compute_fields(form_data)
+
+        # Bước 2: baseline score
+        baseline_result = self._get_weighted_baseline_score(enriched)
+        baseline_score: float = baseline_result["score"]
+        baseline_stage: str = baseline_result.get("stage_name", "unknown")
+
+        # Bước 3: evidence score (informational)
+        evidence_result = self._calculate_evidence_score(enriched)
         evidence_score = evidence_result["total_score"]
         evidence_breakdown = evidence_result["breakdown"]
-        
-        # [STEP 4] Áp dụng risk modifiers với evidence weighting
+
+        # Bước 4: risk modifiers
         current_score = baseline_score
-        applied_modifiers = []
+        applied_modifiers: List[Dict] = []
         modifier_effect = 0.0
-        
+
         for modifier in self.risk_modifiers:
-            if self._check_condition(modifier.get("condition"), enriched_data):
-                mod_result = self._apply_modifier(current_score, modifier, enriched_data)
+            if self._check_condition(modifier.get("condition"), enriched):
+                mod_result = self._apply_modifier(current_score, modifier, enriched)
+                effect = mod_result["effect"]
                 applied_modifiers.append({
                     "id": modifier.get("id", "unknown"),
                     "description": modifier.get("description", ""),
                     "value": modifier.get("value", 1.0),
                     "effect_type": modifier.get("effect_type", "multiplicative"),
-                    "effect_on_score": mod_result["effect"],
-                    "evidence_weight": mod_result.get("evidence_weight", 1.0)
+                    "effect_on_score": round(effect, 3),
+                    "note": modifier.get("note", ""),
                 })
                 current_score = mod_result["new_score"]
-                modifier_effect += mod_result["effect"]
-        
-        # [STEP 5] Áp dụng protective factors
-        applied_protective = []
+                modifier_effect += effect
+
+        # Bước 5: protective factors
+        applied_protective: List[Dict] = []
         protective_effect = 0.0
-        
+
         for prot in self.protective_factors:
-            if self._check_condition(prot.get("condition"), enriched_data):
-                prot_result = self._apply_modifier(current_score, prot, enriched_data, is_protective=True)
+            if self._check_condition(prot.get("condition"), enriched):
+                prot_result = self._apply_modifier(current_score, prot, enriched, is_protective=True)
+                effect = prot_result["effect"]
                 applied_protective.append({
                     "id": prot.get("id", "unknown"),
                     "description": prot.get("description", ""),
                     "value": prot.get("value", 1.0),
-                    "effect_type": prot.get("effect_type", "multiplicative"),
-                    "effect_on_score": prot_result["effect"],
-                    "evidence_weight": prot_result.get("evidence_weight", 1.0)
+                    "effect_type": prot.get("effect_type", "divisive"),
+                    "effect_on_score": round(effect, 3),
+                    "note": prot.get("note", ""),
                 })
                 current_score = prot_result["new_score"]
-                protective_effect += prot_result["effect"]
-        
-        # [STEP 6] Áp dụng interactions (synergy effects)
-        interaction_multiplier = 1.0
-        applied_interactions = []
-        
+                protective_effect += effect
+
+        # Bước 6: interactions - [FIX] nhân DỒN tất cả multiplier match
+        combined_interaction_multiplier = 1.0
+        applied_interactions: List[Dict] = []
+
         for interaction in self.interactions:
-            if self._check_condition(interaction.get("condition"), enriched_data):
-                # [ENHANCED] Support both fixed multiplier and dynamic calculation
-                if "multiplier_formula" in interaction:
-                    multiplier = self._evaluate_formula(
-                        interaction.get("multiplier_formula"), 
-                        enriched_data
-                    )
-                else:
-                    multiplier = interaction.get("interaction_multiplier", 1.0)
-                
-                interaction_multiplier = multiplier
+            if self._check_condition(interaction.get("condition"), enriched):
+                multiplier = interaction.get("interaction_multiplier", 1.0)
+                combined_interaction_multiplier *= multiplier        # tích lũy
                 applied_interactions.append({
                     "id": interaction.get("id", "unknown"),
                     "description": interaction.get("description", ""),
-                    "multiplier": round(interaction_multiplier, 3),
-                    "type": interaction.get("interaction_type", "synergy")
+                    "multiplier": round(multiplier, 3),
+                    "type": interaction.get("interaction_type", "synergy"),
                 })
-        
-        current_score = current_score * interaction_multiplier
-        
-        # [STEP 7] Chuẩn hóa điểm (0-100)
-        final_score = max(0, min(100, current_score))
-        
-        # [STEP 8] Tính percentile
-        risk_percentile = self._calculate_percentile(final_score, baseline_stage)
-        
-        # [STEP 9] Ánh xạ thành risk level
-        risk_level = self._map_to_risk_level(final_score, risk_percentile)
-        
-        # [STEP 10] Tính risk progression
+
+        current_score = current_score * combined_interaction_multiplier
+
+        # Bước 7: clamp
+        final_score = max(0.0, min(100.0, current_score))
+
+        # Bước 8: risk level
+        risk_level = self._map_to_risk_level(final_score)
+
+        # Bước 9: percentile (xấp xỉ)
+        risk_percentile = self._calculate_percentile(final_score)
+
+        # Bước 10: progression
         risk_progression = self._calculate_risk_progression(
-            final_score,
-            risk_level,
-            applied_modifiers,
-            enriched_data
+            final_score, risk_level, applied_modifiers, enriched
         )
-        
+
         return {
             "final_score": round(final_score, 2),
             "risk_level": risk_level,
             "risk_percentile": risk_percentile,
-            "baseline_score": baseline_score,
+            "baseline_score": round(baseline_score, 2),
             "baseline_stage": baseline_stage,
             "evidence_score": round(evidence_score, 2),
             "modifiers_effect": round(modifier_effect, 2),
             "protective_effect": round(protective_effect, 2),
-            "interaction_multiplier": round(interaction_multiplier, 3),
+            "interaction_multiplier": round(combined_interaction_multiplier, 3),
             "risk_progression": risk_progression,
             "evidence_breakdown": evidence_breakdown,
             "breakdown": {
                 "baseline": {
-                    "score": baseline_score,
-                    "stage": baseline_stage
+                    "score": round(baseline_score, 2),
+                    "stage": baseline_stage,
                 },
                 "evidence": evidence_breakdown,
                 "applied_modifiers": applied_modifiers,
                 "applied_protective": applied_protective,
-                "applied_interactions": applied_interactions
-            }
+                "applied_interactions": applied_interactions,
+            },
         }
-    
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # PRIVATE
+    # ──────────────────────────────────────────────────────────────────────────
+
     def _compute_fields(self, form_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Tính toán các computed fields từ formula"""
         enriched = form_data.copy()
-        
         for computed in self.computed_fields:
             key = computed.get("key")
             formula = computed.get("formula", "")
             dependencies = computed.get("dependencies", [])
-            
             try:
-                all_available = all(dep in enriched and enriched[dep] is not None for dep in dependencies)
-                
-                if all_available:
-                    result = eval(formula, {"__builtins__": {}}, enriched)
+                if all(dep in enriched and enriched[dep] is not None for dep in dependencies):
+                    result = eval(formula, {"__builtins__": {}}, enriched)  # noqa: S307
                     enriched[key] = float(result)
-                    logger.debug(f"Computed {key} = {enriched[key]}")
             except Exception as e:
                 logger.warning(f"Cannot compute field {key}: {e}")
-        
         return enriched
-    
+
     def _get_weighted_baseline_score(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        [FIXED] Xác định baseline score - hỗ trợ format metadata hiện tại
-        
-        Hỗ trợ 2 format:
-        1. Old format: {"range": [min, max]}
-        2. New format: condition object
-        
-        Lấy stage có priority cao nhất nếu match
+        Chọn baseline stage có priority cao nhất trong số các stage match điều kiện.
+        Nếu không có stage nào match → default 50.
         """
-        matching_stages = []
-        
+        matching: List[Dict] = []
+
         for stage in self.baseline_mapping:
-            stage_matches = False
-            
-            # Format 1: range [min, max]
-            if "range" in stage:
-                range_vals = stage.get("range", [0, 100])
-                if len(range_vals) >= 2:
-                    # Check có field check không (e.g., systolic, bmi)
-                    # Lấy field đầu tiên từ condition nếu có
-                    if "condition" in stage:
-                        stage_matches = self._check_condition(stage.get("condition"), data)
-                    else:
-                        # Legacy: sử dụng range cho final_score
-                        stage_matches = False
-            
-            # Format 2: condition object
-            elif "condition" in stage:
-                stage_matches = self._check_condition(stage.get("condition"), data)
-            
-            if stage_matches:
-                matching_stages.append({
-                    "name": stage.get("name", "unknown"),
-                    "score": stage.get("score", 50),
-                    "priority": stage.get("priority", 0),
-                    "weight": stage.get("weight", 1.0)
-                })
-        
-        if not matching_stages:
-            return {
-                "score": 50,
-                "stage_name": "default",
-                "note": "No baseline stage matched, using default score"
-            }
-        
-        # Lấy stage có priority cao nhất
-        matching_stages.sort(key=lambda x: x["priority"], reverse=True)
-        selected = matching_stages[0]
-        
+            if "condition" in stage:
+                if self._check_condition(stage["condition"], data):
+                    matching.append({
+                        "name": stage.get("name", "unknown"),
+                        "score": stage.get("score", 50),
+                        "priority": stage.get("priority", 0),
+                    })
+            elif "range" in stage:
+                # Legacy format (không dùng trong metadata hiện tại)
+                if "condition" in stage and self._check_condition(stage["condition"], data):
+                    matching.append({
+                        "name": stage.get("name", "unknown"),
+                        "score": stage.get("score", 50),
+                        "priority": stage.get("priority", 0),
+                    })
+
+        if not matching:
+            logger.warning(
+                "_get_weighted_baseline_score: no stage matched data=%s – using default score 50",
+                {k: v for k, v in data.items() if v is not None},
+            )
+            return {"score": 50.0, "stage_name": "default"}
+
+        matching.sort(key=lambda x: x["priority"], reverse=True)
+        selected = matching[0]
         return {
-            "score": selected["score"],
+            "score": float(selected["score"]),
             "stage_name": selected["name"],
-            "matching_count": len(matching_stages),
-            "calculation": "priority_based"
+            "matching_count": len(matching),
         }
-    
+
     def _calculate_evidence_score(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        [NEW] Tính evidence score dựa trên các yếu tố đã ghi nhận
-        
-        Evidence scoring thể hiện độ tin cậy của dữ liệu đầu vào
-        """
         evidence_config = self.evidence_scoring
-        total_score = 0
-        breakdown = {}
-        
         if not evidence_config:
-            return {"total_score": 100, "breakdown": {"default": "No evidence config"}}
-        
-        # Tính evidence từ các field được định nghĩa
+            return {"total_score": 100, "breakdown": {}}
+
+        total = 0
+        breakdown = {}
         evidence_fields = evidence_config.get("fields", [])
-        
-        for field_config in evidence_fields:
-            field_name = field_config.get("name")
-            base_evidence = field_config.get("evidence", 0)
-            
-            if field_name in data and data[field_name] is not None:
-                total_score += base_evidence
-                breakdown[field_name] = base_evidence
+
+        for fc in evidence_fields:
+            fname = fc.get("name")
+            base = fc.get("evidence", 0)
+            if fname in data and data[fname] is not None:
+                total += base
+                breakdown[fname] = base
             else:
-                breakdown[field_name] = 0
-        
-        # Tính total evidence score (0-100)
-        max_evidence = sum(f.get("evidence", 0) for f in evidence_fields) or 100
-        evidence_percentage = min(100, (total_score / max_evidence * 100)) if max_evidence > 0 else 100
-        
+                breakdown[fname] = 0
+
+        max_ev = sum(f.get("evidence", 0) for f in evidence_fields) or 100
+        pct = min(100.0, total / max_ev * 100) if max_ev > 0 else 100.0
+
         return {
-            "total_score": round(evidence_percentage, 2),
+            "total_score": round(pct, 2),
             "breakdown": breakdown,
-            "evidence_count": len([f for f in breakdown.values() if f > 0])
+            "evidence_count": sum(1 for v in breakdown.values() if v > 0),
         }
-    
+
     def _apply_modifier(
         self,
         current_score: float,
         modifier: Dict[str, Any],
         enriched_data: Dict[str, Any],
-        is_protective: bool = False
+        is_protective: bool = False,
     ) -> Dict[str, Any]:
         """
-        [ENHANCED] Áp dụng modifier với evidence weighting và dynamic values
-        
+        Áp dụng modifier / protective factor vào current_score.
+
         effect_type:
-        - additive: score = score + value
-        - multiplicative: score = score * value
-        - divisive: score = score / value
-        - formula: score = eval(formula)
+          - multiplicative : score * value  (risk) / score / value  (protective)
+          - divisive       : score / value  (risk) / score * value  (protective) — đảo ngược
+          - additive       : score + value  (risk) / score - value  (protective)
         """
         effect_type = modifier.get("effect_type", "multiplicative")
-        value = modifier.get("value", 1.0)
-        
-        # [NEW] Support formula-based values
-        if "value_formula" in modifier:
-            try:
-                value = self._evaluate_formula(modifier.get("value_formula"), enriched_data)
-            except Exception as e:
-                logger.warning(f"Cannot evaluate value formula: {e}")
-        
-        # [NEW] Evidence-based weighting
-        evidence_weight = modifier.get("evidence_weight", 1.0)
-        if evidence_weight != 1.0:
-            # Adjust effect based on evidence confidence
-            value = value * evidence_weight
-        
+        value = float(modifier.get("value", 1.0))
+
         new_score = current_score
         effect = 0.0
-        
+
         if effect_type == "additive":
-            effect = -value if is_protective else value
-            new_score = current_score + effect
+            delta = -value if is_protective else value
+            new_score = current_score + delta
+            effect = delta
+
         elif effect_type == "multiplicative":
-            multiplier = 1.0 / value if is_protective else value
-            effect = current_score * (multiplier - 1)
+            # risk: nhân lên; protective: chia ra
+            multiplier = (1.0 / value) if is_protective else value
             new_score = current_score * multiplier
+            effect = new_score - current_score
+
         elif effect_type == "divisive":
-            effect = current_score * (1 - 1/value) if is_protective else current_score * (value - 1)
-            new_score = current_score / value if is_protective else current_score * value
-        elif effect_type == "formula":
-            try:
-                new_score = self._evaluate_formula(
-                    modifier.get("formula"),
-                    {**enriched_data, "current_score": current_score}
-                )
-                effect = new_score - current_score
-            except Exception as e:
-                logger.error(f"Cannot evaluate modifier formula: {e}")
-        
+            # divisive dùng cho protective factors: score / value (giảm)
+            # risk dùng divisive hiếm, nhưng xử lý: score * value (tăng)
+            if is_protective:
+                new_score = current_score / value
+            else:
+                new_score = current_score * value
+            effect = new_score - current_score
+
         return {
-            "new_score": max(0, new_score),
+            "new_score": max(0.0, new_score),
             "effect": effect,
-            "evidence_weight": evidence_weight
         }
-    
+
     def _check_condition(self, condition: Any, data: Dict[str, Any]) -> bool:
-        """Kiểm tra điều kiện sử dụng ConditionEvaluator"""
         if condition is None:
             return True
-        
         try:
             return ConditionEvaluator.evaluate(condition, data)
         except Exception as e:
             logger.error(f"Error checking condition: {e}")
             return False
-    
+
     def _evaluate_formula(self, formula: str, context: Dict[str, Any]) -> float:
-        """
-        [NEW] Đánh giá công thức toán học an toàn
-        """
-        try:
-            # Safe evaluation - chỉ cho phép math operations
-            safe_dict = {
-                "math": math,
-                "__builtins__": {},
-                **context
-            }
-            result = eval(formula, safe_dict)
-            return float(result)
-        except Exception as e:
-            logger.error(f"Formula evaluation error '{formula}': {e}")
-            raise
-    
-    def _calculate_percentile(self, score: float, stage_name: str) -> int:
-        """
-        [NEW] Tính percentile dựa trên score và stage
-        Giúp so sánh rủi ro của người dùng với dân số
-        """
-        # [TODO] Trong thực tế, cần dữ liệu thống kê dân số từ DB
-        # Ở đây sử dụng công thức xấp xỉ
-        
+        safe = {"math": math, "__builtins__": {}, **context}
+        return float(eval(formula, safe))  # noqa: S307
+
+    def _calculate_percentile(self, score: float) -> int:
         if score < 20:
             return 10
-        elif score < 40:
+        elif score < 35:
             return 25
         elif score < 60:
             return 50
@@ -406,60 +318,60 @@ class RiskStratificationEngine:
             return 75
         else:
             return 90
-    
-    def _map_to_risk_level(self, score: float, percentile: int = None) -> str:
+
+    def _map_to_risk_level(self, score: float) -> str:
         """
-        [ENHANCED] Ánh xạ score thành risk level
-        Có thể dựa vào percentile nếu có
+        Ánh xạ score thành risk level dựa trên thresholds trong metadata.
+        Format: [{"range": [min, max], "level": "low"}, ...]
+        Dùng min <= score < max, trừ range cuối (inclusive cả max).
         """
-        sorted_thresholds = sorted(self.thresholds, key=lambda x: x.get("threshold", 0))
-        
-        for threshold_config in sorted_thresholds:
-            threshold_value = threshold_config.get("threshold", 0)
-            if score < threshold_value:
-                return threshold_config.get("level", "low")
-        
-        return sorted_thresholds[-1].get("level", "high") if sorted_thresholds else "medium"
-    
+        for i, tc in enumerate(self.thresholds):
+            if "range" not in tc:
+                continue
+            rv = tc["range"]
+            if len(rv) < 2:
+                continue
+            lo, hi = rv[0], rv[1]
+            is_last = (i == len(self.thresholds) - 1)
+            if is_last:
+                if lo <= score <= hi:
+                    return tc.get("level", "high")
+            else:
+                if lo <= score < hi:
+                    return tc.get("level", "low")
+
+        # Fallback: dùng level của threshold cuối
+        if self.thresholds:
+            return self.thresholds[-1].get("level", "high")
+        return "medium"
+
     def _calculate_risk_progression(
         self,
         final_score: float,
         risk_level: str,
         modifiers: List[Dict],
-        enriched_data: Dict[str, Any]
+        enriched_data: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """
-        [NEW] Tính risk progression - dự báo sự tiến triển rủi ro
-        
-        Dựa trên số lượng risk factors và mức độ ảnh hưởng của chúng
-        """
-        risk_progression_config = self.risk_progression or []
-        
-        # Tính trajectory dựa trên số modifiers được áp dụng
         modifier_count = len(modifiers)
-        
+        trajectory = "stable"
+        if modifier_count >= 3:
+            trajectory = "increasing"
+        elif modifier_count == 0:
+            trajectory = "decreasing"
+
         progression = {
             "current_score": final_score,
             "current_level": risk_level,
             "active_risk_factors": modifier_count,
-            "trajectory": "stable"  # stable, increasing, decreasing
+            "trajectory": trajectory,
         }
-        
-        # Xác định trajectory
-        if modifier_count >= 3:
-            progression["trajectory"] = "increasing"
-        elif modifier_count == 0:
-            progression["trajectory"] = "decreasing"
-        
-        # Dự báo điểm trong tương lai (6 months, 1 year)
-        for config in risk_progression_config:
+
+        for config in (self.risk_progression_config or []):
             timeframe = config.get("timeframe")
             rate = config.get("progression_rate", 1.0)
-            
             if timeframe:
-                projected_score = final_score * rate
                 progression[f"projected_{timeframe}"] = round(
-                    min(100, max(0, projected_score)), 2
+                    min(100.0, max(0.0, final_score * rate)), 2
                 )
-        
+
         return progression
