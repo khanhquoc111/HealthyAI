@@ -1,5 +1,6 @@
 CREATE DATABASE IF NOT EXISTS HealthyAI;
 USE HealthyAI;
+-- drop database healthyai;
 CREATE TABLE nguoiDung (
     idNguoiDung BIGINT AUTO_INCREMENT PRIMARY KEY,
 
@@ -14,8 +15,8 @@ CREATE TABLE nguoiDung (
         ON UPDATE CURRENT_TIMESTAMP
 );
 
-CREATE TABLE csSucKhoe (
-    idChiSoSucKhoe BIGINT AUTO_INCREMENT PRIMARY KEY,
+CREATE TABLE hoSoSucKhoe (
+    idHoSoSucKhoe BIGINT AUTO_INCREMENT PRIMARY KEY,
 
     idNguoiDung BIGINT NOT NULL UNIQUE,
 
@@ -30,40 +31,71 @@ CREATE TABLE csSucKhoe (
     huyetApTamThu FLOAT,
     huyetApTamTruong FLOAT,
 
-    duongHuyet FLOAT,
-    hba1c FLOAT,
-
-    cholesterol FLOAT,
-    ldl FLOAT,
-    hdl FLOAT,
-    triglyceride FLOAT,
-
-    creatinine FLOAT,
-    acidUric FLOAT,
-
     hutThuoc VARCHAR(50),
     uongRuouBia VARCHAR(50),
+
     soPhutVanDongMoiTuan INT,
-    mucDoAnMan VARCHAR(50),
-
-    caoHuyetAp BOOLEAN DEFAULT FALSE,
-    tieuDuong BOOLEAN DEFAULT FALSE,
-    benhTimMach BOOLEAN DEFAULT FALSE,
-    gout BOOLEAN DEFAULT FALSE,
-
-    giaDinhCaoHuyetAp BOOLEAN DEFAULT FALSE,
-    giaDinhTieuDuong BOOLEAN DEFAULT FALSE,
-    giaDinhTimMach BOOLEAN DEFAULT FALSE,
-    giaDinhGout BOOLEAN DEFAULT FALSE,
 
     ngayTao DATETIME DEFAULT CURRENT_TIMESTAMP,
     ngayCapNhat DATETIME DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP,
 
-    CONSTRAINT fk_csSucKhoe_nguoiDung
+    CONSTRAINT fk_hoSoSucKhoe_nguoiDung
         FOREIGN KEY (idNguoiDung)
         REFERENCES nguoiDung(idNguoiDung)
         ON DELETE CASCADE
+);
+
+CREATE TABLE chiSoSucKhoe (
+    idChiSo BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    idNguoiDung BIGINT NOT NULL,
+
+    maChiSo VARCHAR(100) NOT NULL,
+    giaTri VARCHAR(255),
+
+    ngayTao DATETIME DEFAULT CURRENT_TIMESTAMP,
+    ngayCapNhat DATETIME DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_chiSoSucKhoe_nguoiDung
+        FOREIGN KEY (idNguoiDung)
+        REFERENCES nguoiDung(idNguoiDung)
+        ON DELETE CASCADE,
+
+    UNIQUE KEY uk_user_chiso (
+        idNguoiDung,
+        maChiSo
+    )
+);
+
+CREATE TABLE duLieuDanhGiaBenh (
+    idDuLieuDanhGia BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    idNguoiDung BIGINT NOT NULL,
+
+    maBenh VARCHAR(100) NOT NULL,
+
+    maTruong VARCHAR(100) NOT NULL,
+
+    giaTri VARCHAR(255),
+
+    ngayTao DATETIME DEFAULT CURRENT_TIMESTAMP,
+    ngayCapNhat DATETIME DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_duLieuDanhGiaBenh_nguoiDung
+        FOREIGN KEY (idNguoiDung)
+        REFERENCES nguoiDung(idNguoiDung)
+        ON DELETE CASCADE,
+
+    INDEX idx_benh (maBenh),
+
+    UNIQUE KEY uk_user_benh_truong (
+        idNguoiDung,
+        maBenh,
+        maTruong
+    )
 );
 
 CREATE TABLE lichSuDanhGia (
@@ -71,7 +103,7 @@ CREATE TABLE lichSuDanhGia (
 
     idNguoiDung BIGINT NOT NULL,
 
-    tenBenh VARCHAR(100) NOT NULL,
+    maBenh VARCHAR(100) NOT NULL,
 
     diemRule FLOAT,
     diemML FLOAT,

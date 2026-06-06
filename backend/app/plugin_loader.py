@@ -1,74 +1,49 @@
-from pathlib import Path
-from typing import Dict
+# backend/app/plugin_loader.py
 import json
-import time
-from .schema_validator import validate_disease_schema
+import logging
+from pathlib import Path
+from typing import Dict, List, Optional
 
+logger = logging.getLogger(__name__)
 
 class PluginLoader:
-    """
-    Load and cache disease plugin metadata with hot-reload support.
-    
-    Plugins are loaded from plugin_name/metadata.json and validated
-    against DiseaseSchema. Caching is used for performance with
-    file-based cache invalidation.
-    """
-    
-    def __init__(self, plugins_dir: Path = Path("plugins")):
-        self.plugins_dir = plugins_dir
+    def __init__(self):
+        self.plugins_dir = Path("plugins")
         self._cache = {}
-        self._last_modified = {}
 
-    def load_plugin(self, plugin_name: str, force_reload: bool = False) -> Dict:
-        """
-        Load plugin metadata from disk or cache.
-        
-        Args:
-            plugin_name: Name of the plugin directory
-            force_reload: Ignore cache and reload from disk
-            
-        Returns:
-            Validated plugin metadata as dictionary
-            
-        Raises:
-            FileNotFoundError: If plugin metadata.json not found
-            ValueError: If metadata fails schema validation
-        """
-        plugin_path = self.plugins_dir / plugin_name / "metadata.json"
-        
-        if not plugin_path.exists():
-            raise FileNotFoundError(f"Plugin {plugin_name} not found at {plugin_path}")
+    def load_plugin(self, plugin_id: str) -> Optional[Dict]:
+        if plugin_id in self._cache:
+            return self._cache[plugin_id]
 
-        # Hot Reload logic - check if file has been modified
-        current_mtime = plugin_path.stat().st_mtime
-        cache_key = plugin_name
+        path = self.plugins_dir / plugin_id / "metadata.json"
+        if not path.exists():
+            return None
 
-        if (force_reload or 
-            cache_key not in self._cache or 
-            self._last_modified.get(cache_key) != current_mtime):
-            
-            with open(plugin_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                metadata = json.load(f)
+            self._cache[plugin_id] = metadata
+            return metadata
+        except Exception as e:
+            logger.error(f"Load plugin error {plugin_id}: {e}")
+            return None
 
-            # Validate against DiseaseSchema
-            validated = validate_disease_schema(data)
-            
-            # Convert Pydantic model to dict, excluding None values
-            plugin_dict = validated.model_dump(exclude_none=True)
+    def list_diseases(self) -> List[str]:
+        if not self.plugins_dir.exists():
+            return []
+        return [d.name for d in self.plugins_dir.iterdir() if d.is_dir() and (d / "metadata.json").exists()]
 
-            # Cache the result
-            self._cache[cache_key] = plugin_dict
-            self._last_modified[cache_key] = current_mtime
-            
-            print(f"🔄 Plugin '{plugin_name}' loaded at {time.strftime('%H:%M:%S')}")
+# Global
+_plugin_loader = None
 
-        return self._cache[cache_key]
+def get_plugin_loader():
+    global _plugin_loader
+    if _plugin_loader is None:
+        _plugin_loader = PluginLoader()
+    return _plugin_loader
 
-    def list_plugins(self):
-        """List all available plugins in plugins directory"""
-        return [p.name for p in self.plugins_dir.iterdir() if p.is_dir()]
+def get_plugin(plugin_id: str):
+    return get_plugin_loader().load_plugin(plugin_id)
 
-    def clear_cache(self):
-        """Clear all cached plugins"""
-        self._cache.clear()
-        self._last_modified.clear()
+def get_all_plugins():
+    return get_plugin_loader().list_diseases()

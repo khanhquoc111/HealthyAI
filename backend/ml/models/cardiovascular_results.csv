@@ -1,6 +1,0 @@
-﻿Thí nghiệm,F1,Recall,Precision,Threshold
-RF | Balanced (depth=12),0.2727,0.375,0.2143,0.33
-XGB | scale=35.2 - Sensitive,0.1905,0.375,0.1277,0.0774
-XGB | scale=44.0 - Aggressive,0.1882,0.5,0.1159,0.0399
-XGB | scale=29.4 - Balanced,0.1791,0.375,0.1176,0.0503
-XGB | scale=23.5 - Conservative,0.1647,0.4375,0.1014,0.0342

@@ -1,229 +1,122 @@
 # backend/app/plugin_api.py
-import json
-import time
-from typing import Dict, Any
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
+from typing import Dict, Any, Optional
+from sqlalchemy.orm import Session
+import logging
 
-from fastapi import APIRouter, HTTPException, Query, Depends 
-from sqlalchemy.orm import Session 
+from database.database import get_db
+from database.nguoi_dung import NguoiDung
+from database.hs_suckhoe import HoSoSucKhoe
+from database.cs_suckhoe import ChiSoSucKhoe
 
-from app.plugin_loader import PluginLoader
+from app.plugin_loader import get_plugin
 from app.validation_engine import ValidationEngine
 from app.risk_stratification_engine import RiskStratificationEngine
 
-from database.database import SessionLocal
-from database.nguoi_dung import NguoiDung
-from database.lich_su_danh_gia import LichSuDanhGia
-from database.cs_suc_khoe import CsSucKhoe
+router = APIRouter(prefix="/api/plugins", tags=["Plugins"])
+logger = logging.getLogger(__name__)
 
-router = APIRouter()
+class FormSubmission(BaseModel):
+    ten_dang_nhap: Optional[str] = None
+    form_data: Dict[str, Any] = {}
 
-plugin_loader = PluginLoader()
+# Mapping DB (VN) → Plugin (EN) - CHÍNH XÁC
+DB_TO_FORM = {
+    "tuoi": "age",
+    "gioiTinh": "gender",
+    "bmi": "bmi",
+    "vongEo": "waist_circumference",
+    "huyetApTamThu": "systolic_bp",
+    "huyetApTamTruong": "diastolic_bp",
+    "duongHuyet": "fasting_blood_glucose",
+    "hba1c": "hba1c",
+    "cholesterol": "total_cholesterol",
+    "hdl": "hdl_cholesterol",
+    "ldl": "ldl_cholesterol",
+    "triglyceride": "triglycerides",
+    "creatinine": "serum_creatinine",
+    "soPhutVanDongMoiTuan": "physical_activity_minutes",
+    "giaDinhTieuDuong": "family_history_diabetes",
+    "giaDinhCaoHuyetAp": "family_history_hypertension",
+}
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+FORM_TO_DB = {v: k for k, v in DB_TO_FORM.items()}
 
-def get_plugin_metadata(plugin_name: str) -> Dict[str, Any]:
-    """plugin_name chính là plugin_id (diabetes, hypertension,...)"""
-    try:
-        return plugin_loader.load_plugin(plugin_name)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Plugin '{plugin_name}' not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error loading plugin '{plugin_name}': {str(e)}")
-
-def get_validation_engine(plugin_name: str):
-    metadata = get_plugin_metadata(plugin_name)
-    return ValidationEngine(metadata)
-
-def get_scoring_engine(plugin_name: str):
-    metadata = get_plugin_metadata(plugin_name)
-    return RiskStratificationEngine(metadata)
-
-@router.get("/plugins")
+@router.get("/")
 def list_plugins():
-    return {"plugins": plugin_loader.list_plugins()}
+    from app.plugin_loader import get_plugin_loader
+    plugins = get_plugin_loader().list_diseases()
+    return {"available_plugins": [{"id": p, "name": p.capitalize()} for p in plugins]}
 
-@router.get("/plugins/{plugin_name}")
-def get_plugin(plugin_name: str):
-    return get_plugin_metadata(plugin_name)
+@router.get("/{plugin_id}")
+def get_plugin_metadata(plugin_id: str):
+    """Lấy toàn bộ metadata (schema) của một plugin để frontend render form"""
+    plugin_metadata = get_plugin(plugin_id)
+    if not plugin_metadata:
+        raise HTTPException(status_code=404, detail=f"Plugin {plugin_id} not found")
+    return plugin_metadata
 
-@router.post("/plugins/{plugin_name}/validate")
-def validate_plugin_form(plugin_name: str, form_data: dict):
-    try:
-        engine = get_validation_engine(plugin_name)
-        result = engine.validate_form(form_data)
-        return result.to_dict()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Validation error: {str(e)}")
+@router.post("/{plugin_id}/validate-field/{field_key}")
+def validate_single_field(plugin_id: str, field_key: str, payload: Dict[str, Any]):
+    """Validate từng field realtime khi user nhập liệu (on blur/change)"""
+    plugin_metadata = get_plugin(plugin_id)
+    if not plugin_metadata:
+        raise HTTPException(status_code=404, detail=f"Plugin {plugin_id} not found")
+    
+    val_engine = ValidationEngine(plugin_metadata)
+    errors = val_engine.get_field_errors(payload, field_key)
+    
+    if errors:
+        return {"is_valid": False, "errors": [e.to_dict() for e in errors]}
+    return {"is_valid": True}
 
-@router.post("/plugins/{plugin_name}/validate-field/{field_key}")
-def validate_plugin_field(plugin_name: str, field_key: str, form_data: dict):
-    try:
-        engine = get_validation_engine(plugin_name)
-        field_errors = engine.get_field_errors(form_data, field_key)
-        return {
-            "field": field_key,
-            "errors": [err.to_dict() for err in field_errors],
-            "is_valid": len(field_errors) == 0,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Field validation error: {str(e)}")
+@router.post("/{plugin_id}/calculate")
+def calculate_disease_risk(plugin_id: str, payload: FormSubmission, db: Session = Depends(get_db)):
+    plugin_metadata = get_plugin(plugin_id)
+    if not plugin_metadata:
+        raise HTTPException(status_code=404, detail=f"Plugin {plugin_id} not found")
 
-@router.post("/plugins/{plugin_name}/normalize")
-def normalize_plugin_form(plugin_name: str, form_data: dict):
-    try:
-        engine = get_validation_engine(plugin_name)
-        return engine.normalize_form_data(form_data)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Normalization error: {str(e)}")
+    ten_dang_nhap = payload.ten_dang_nhap
+    form_data = payload.form_data or {}
 
-@router.get("/plugins/{plugin_name}/fields")
-def get_plugin_all_fields(plugin_name: str):
-    try:
-        engine = get_validation_engine(plugin_name)
-        return {
-            "fields": engine.get_all_field_keys(),
-            "total": len(engine.get_all_field_keys()),
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Field list error: {str(e)}")
+    # 1. Lấy dữ liệu từ DB
+    health_profile = {}
+    if ten_dang_nhap:
+        user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == ten_dang_nhap).first()
+        if user:
+            # HoSoSucKhoe (cột cứng)
+            hoso = db.query(HoSoSucKhoe).filter(HoSoSucKhoe.idNguoiDung == user.idNguoiDung).first()
+            if hoso:
+                for k, v in hoso.__dict__.items():
+                    if not k.startswith('_') and v is not None:
+                        form_key = DB_TO_FORM.get(k, k)
+                        health_profile[form_key] = v
 
-@router.post("/plugins/{plugin_name}/score")
-def score_plugin_form(
-    plugin_name: str,   # Đây chính là plugin_id (diabetes, hypertension, ...)
-    form_data: dict,
-    ten_dang_nhap: str = Query(None), 
-    db: Session = Depends(get_db)   
-):
-    try:
-        # plugin_name = plugin_id (định danh duy nhất)
-        metadata = get_plugin_metadata(plugin_name)
-        
-        # Chỉ dùng name để hiển thị, KHÔNG dùng để map logic
-        ten_benh = metadata.get("disease_info", {}).get("name", plugin_name)
+            # ChiSoSucKhoe (EAV)
+            chisos = db.query(ChiSoSucKhoe).filter(ChiSoSucKhoe.idNguoiDung == user.idNguoiDung).all()
+            for cs in chisos:
+                form_key = DB_TO_FORM.get(cs.maChiSo, cs.maChiSo)
+                try:
+                    health_profile[form_key] = float(cs.giaTri) if '.' in str(cs.giaTri) or str(cs.giaTri).isdigit() else cs.giaTri
+                except:
+                    health_profile[form_key] = cs.giaTri
 
-        # TỪ ĐIỂN MAPPING CỘT DB (Tiếng Việt) VÀ TRƯỜNG PLUGIN (Tiếng Anh)
-        db_to_form = {
-            "tuoi": "age", "bmi": "bmi", "vongEo": "waist",
-            "huyetApTamThu": "systolic", "huyetApTamTruong": "diastolic",
-            "duongHuyet": "fasting_glucose", "hba1c": "hba1c",
-            "cholesterol": "total_cholesterol", "ldl": "ldl", "hdl": "hdl",
-            "creatinine": "creatinine", "soPhutVanDongMoiTuan": "exercise_minutes_per_week",
-            "giaDinhTieuDuong": "family_history_diabetes",
-            "giaDinhCaoHuyetAp": "family_history_hypertension",
-            "giaDinhTimMach": "family_history_cardiovascular"
-        }
-        form_to_db = {v: k for k, v in db_to_form.items()}
+    # 2. Merge: form_data ưu tiên cao hơn DB
+    unified_data = {**health_profile, **form_data}
 
-        # 1. Trích xuất dữ liệu Hồ sơ sức khỏe từ Database để hợp nhất
-        health_profile_dict = {}
-        if ten_dang_nhap:
-            user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == ten_dang_nhap).first()
-            if user:
-                profile = db.query(CsSucKhoe).filter(CsSucKhoe.idNguoiDung == user.idNguoiDung).first()
-                if profile:
-                    for k, v in profile.__dict__.items():
-                        if not k.startswith('_') and v is not None:
-                            health_profile_dict[k] = v
-                            # Bơm thêm key tiếng Anh để Rule Engine có thể đọc được
-                            if k in db_to_form:
-                                health_profile_dict[db_to_form[k]] = v
-                            
-                            # Xử lý mapping đặc biệt cho trường Select/Option
-                            if k == "hutThuoc":
-                                if v == "Đang hút": health_profile_dict["smoking_status"] = "current"
-                                elif v == "Đã bỏ": health_profile_dict["smoking_status"] = "former"
-                                elif v == "Không": health_profile_dict["smoking_status"] = "never"
+    # 3. Validation & Normalize
+    val_engine = ValidationEngine(plugin_metadata)
+    val_result = val_engine.validate_form(unified_data)
+    if val_result.has_errors():
+        raise HTTPException(400, detail={"errors": [e.to_dict() for e in val_result.errors]})
 
-        # Tạo payload hợp nhất (Ưu tiên form hiện tại hơn DB)
-        unified_payload = {**health_profile_dict, **form_data}
+    normalized = val_engine.normalize_form_data(unified_data)
 
-        # 2. VALIDATION ĐỐI VỚI FORM GỐC
-        validation_engine = get_validation_engine(plugin_name)
-        validation_result = validation_engine.validate_form(form_data)
+    # 4. Tính risk (rule-based)
+    risk_engine = RiskStratificationEngine(plugin_metadata)
+    
+    # [FIX] Changed calculate_risk to evaluate to match the class method definition
+    result = risk_engine.evaluate(normalized)
 
-        if validation_result.has_errors():
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "message": "Dữ liệu không hợp lệ",
-                    "errors": [err.to_dict() for err in validation_result.errors]
-                }
-            )
-
-        normalized_data = validation_engine.normalize_form_data(unified_payload)
-
-        # 3. CALCULATE RISK KÉP DUAL-ENGINE 
-        scoring_engine = get_scoring_engine(plugin_name)
-        result = scoring_engine.calculate_risk(normalized_data)
-
-        result["validation"] = {
-            "is_valid": validation_result.is_valid,
-            "warnings": [w.to_dict() for w in validation_result.warnings]
-        }
-
-        # 4. TỰ ĐỘNG TÍCH LŨY DỮ LIỆU & LƯU LỊCH SỬ
-        if ten_dang_nhap:
-            user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == ten_dang_nhap).first()
-            if user:
-                # Tự động lưu form hiện tại vào Hồ sơ sức khỏe
-                profile_record = db.query(CsSucKhoe).filter(CsSucKhoe.idNguoiDung == user.idNguoiDung).first()
-                if not profile_record:
-                    profile_record = CsSucKhoe(idNguoiDung=user.idNguoiDung)
-                    db.add(profile_record)
-
-                for form_key, value in form_data.items():
-                    if value in [None, ""]: continue
-                    
-                    db_key = form_to_db.get(form_key, form_key)
-                    
-                    # Dịch ngược giá trị từ tiếng Anh của form về DB
-                    if form_key == "smoking_status":
-                        db_key = "hutThuoc"
-                        if value == "current": value = "Đang hút"
-                        elif value == "former": value = "Đã bỏ"
-                        elif value == "never": value = "Không"
-
-                    # Ghi nhận chỉ số vào DB
-                    if hasattr(profile_record, db_key):
-                        setattr(profile_record, db_key, value)
-                
-                # Lưu log phân tích
-                lich_su = LichSuDanhGia(
-                    idNguoiDung=user.idNguoiDung,
-                    tenBenh=ten_benh,
-                    diemRule=float(result.get("rule_based", {}).get("score", 0.0)),
-                    diemML=float(result.get("ai_based", {}).get("score", 0.0)),
-                    diemTong=float(result.get("rule_based", {}).get("score", 0.0)),
-                    mucNguyCo=str(result.get("rule_based", {}).get("risk_level", "low")),
-                    ketQuaJSON=result  
-                )
-                db.add(lich_su)
-                db.commit()
-
-        return result
-
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Scoring error: {str(e)}")
-
-@router.post("/plugins/{plugin_name}/reload")
-def reload_plugin(plugin_name: str):
-    try:
-        if plugin_name in plugin_loader._cache:
-            plugin_loader._cache.pop(plugin_name, None)
-        
-        metadata = plugin_loader.load_plugin(plugin_name, force_reload=True)
-        return {
-            "status": "success",
-            "message": f"Plugin '{plugin_name}' đã được reload thành công",
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return result

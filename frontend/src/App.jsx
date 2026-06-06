@@ -1,13 +1,14 @@
 // frontend/src/App.jsx
 import { useState, useEffect } from "react";
-import axios from "axios"; // THÊM IMPORT AXIOS
+import axios from "axios";
+
 import MainRiskPage from "./MainRiskPage";
 import DangNhap from "./dang_nhap";
 import DangKy from "./dang_ky";
-import ChiSoSucKhoe from "./cs_suckhoe";
+import ChiSoSucKhoe from "./hoso_suckhoe";   // ← ĐÃ SỬA
 import TrangChu from "./TrangChu";
 
-const API_BASE_URL = "http://127.0.0.1:8000"; // THÊM BASE URL
+const API_BASE_URL = "http://127.0.0.1:8000";
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -22,7 +23,7 @@ export default function App() {
     if (token && email) {
       setIsAuthenticated(true);
       setUserEmail(email);
-      checkInitialRoute(email); // Kiểm tra xem user này đã có hồ sơ chưa khi F5 trang
+      checkInitialRoute(email);
     } else {
       localStorage.removeItem("token");
       localStorage.removeItem("userName");
@@ -32,27 +33,24 @@ export default function App() {
     }
   }, []);
 
-  // HÀM MỚI: Kiểm tra hồ sơ và điều hướng thông minh
   const checkInitialRoute = async (email) => {
     try {
       const res = await axios.get(`${API_BASE_URL}/health-profile/${email}`);
-      // Nếu data là null (Chưa có hồ sơ), chuyển sang tab Nhập chỉ số sức khỏe
       if (!res.data.data) {
         setCurrentView("profile");
       } else {
-        // Đã có hồ sơ thì cho vào trang khám bệnh luôn
         setCurrentView("risk");
       }
     } catch (error) {
       console.error("Lỗi kiểm tra hồ sơ", error);
-      setCurrentView("risk"); // Fallback mặc định
+      setCurrentView("risk");
     }
   };
 
   const handleLoginSuccess = async (email) => {
     setIsAuthenticated(true);
     setUserEmail(email);
-    await checkInitialRoute(email); // Gọi kiểm tra ngay khi vừa đăng nhập xong
+    await checkInitialRoute(email);
   };
 
   const handleLogout = () => {
@@ -64,7 +62,6 @@ export default function App() {
     setCurrentView("risk"); 
   };
 
-  // ==================== ĐIỀU PHỐI LUỒNG CHƯA ĐĂNG NHẬP ====================
   if (!isAuthenticated) {
     if (authMode === "welcome") {
       return <TrangChu onGoToLogin={() => setAuthMode("login")} />;
@@ -86,10 +83,9 @@ export default function App() {
     );
   }
 
-  // ==================== DIỆN MẠO SAU KHI ĐĂNG NHẬP THÀNH CÔNG ====================
   return (
     <div>
-      {/* Navbar Menu điều hướng hệ thống */}
+      {/* Navbar */}
       <div style={{ backgroundColor: "#ffffff", padding: "12px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e2e8f0", boxShadow: "0 1px 2px 0 rgba(0, 0, 0, 0.05)" }}>
         
         <div style={{ display: "flex", alignItems: "center", gap: "30px" }}>
@@ -106,7 +102,7 @@ export default function App() {
             <button 
               onClick={() => setCurrentView("profile")}
               style={{ padding: "8px 16px", backgroundColor: currentView === "profile" ? "#eff6ff" : "transparent", color: currentView === "profile" ? "#2563eb" : "#64748b", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "600" }}>
-              Hồ Sơ Sức Khỏe Cá Nhân
+              Hồ Sơ Sức Khỏe
             </button>
           </div>
         </div>
@@ -117,13 +113,12 @@ export default function App() {
           </span>
           <button 
             onClick={handleLogout}
-            style={{ padding: "8px 16px", backgroundColor: "#ef4444", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "600", transition: "background-color 0.2s" }}>
+            style={{ padding: "8px 16px", backgroundColor: "#ef4444", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "600" }}>
             Đăng xuất
           </button>
         </div>
       </div>
 
-      {/* HIỂN THỊ PHÂN VÙNG CHỨC NĂNG */}
       <div style={{ padding: "20px" }}>
         {currentView === "risk" ? <MainRiskPage /> : <ChiSoSucKhoe />}
       </div>

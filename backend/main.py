@@ -1,29 +1,45 @@
 # backend/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import logging
 
-# Import router từ thư mục app, auth, và function nằm cùng cấp
-from app.plugin_api import router as plugin_router
-from auth.dang_ky import router as register_router
-from auth.dang_nhap import router as login_router
-from function.chiso_suckhoe_cn import router as health_router  # <-- [THÊM DÒNG NÀY] Import API Chỉ Số Sức Khỏe
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-app = FastAPI(title="LuanVanKTPM - Disease Risk Engine")
+app = FastAPI(
+    title="LuanVanKTPM - Healthy AI",
+    version="2.0"
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Cho phép frontend gọi API 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Đăng ký toàn bộ các tuyến đường API
-app.include_router(plugin_router)
-app.include_router(register_router)
-app.include_router(login_router)
-app.include_router(health_router)  # <-- [THÊM DÒNG NÀY] Khai báo để FastAPI nhận diện router mới
+# Import routers
+try:
+    from app.plugin_api import router as plugin_router
+    from function.cn_hs_suckhoe import router as health_router
+    from auth.dang_ky import router as register_router
+    from auth.dang_nhap import router as login_router
+
+    app.include_router(plugin_router)
+    app.include_router(health_router)
+    app.include_router(register_router)
+    app.include_router(login_router)
+
+    logger.info("✅ All routers loaded successfully")
+except Exception as e:
+    logger.error(f"❌ Error loading routers: {e}")
+    raise
 
 @app.get("/")
 def root():
-    return {"message": "LuanVanKTPM Backend Running - Thư mục gốc độc lập"}
+    return {"message": "Healthy AI Backend is running", "status": "ok"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

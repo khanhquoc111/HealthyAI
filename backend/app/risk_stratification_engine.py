@@ -1,249 +1,282 @@
 # backend/app/risk_stratification_engine.py
-from typing import Any, Dict
-import logging
-import os
-import pandas as pd
-import joblib
-from pathlib import Path
+"""
+RiskStratificationEngine - Đánh giá rủi ro dựa trên rule từ metadata plugin
+Hoạt động 100% generic, không hard-code logic bệnh cụ thể nào
+"""
 
-try:
-    from app.explanation_engine import ExplanationEngine
-    from app.condition_evaluator import ConditionEvaluator
-except ImportError:
-    from explanation_engine import ExplanationEngine
-    from condition_evaluator import ConditionEvaluator
+from typing import Any, Dict, List, Optional, Tuple
+import logging
+from app.condition_evaluator import ConditionEvaluator
 
 logger = logging.getLogger(__name__)
 
+
 class RiskStratificationEngine:
-    def __init__(self, plugin_metadata: Dict[str, Any]):
-        self.metadata = plugin_metadata
-        self.risk_config = plugin_metadata.get("risk_config", {})
+    """
+    Engine đánh giá rủi ro - hoàn toàn dựa vào metadata plugin
+    
+    Quy trình:
+    1. Lấy baseline score từ baseline_mapping (điều kiện nào match, lấy score đó)
+    2. Áp dụng risk_modifiers (nhân/cộng điểm)
+    3. Áp dụng protective_factors (giảm điểm)
+    4. Áp dụng interactions (nhân lên nếu có)
+    5. Chuẩn hóa thành 0-100
+    6. Map thành risk_level theo thresholds
+    """
+    
+    def __init__(self, risk_config: Dict[str, Any]):
+        """
+        Args:
+            risk_config: Config từ metadata.json -> risk_config
+        """
+        self.risk_config = risk_config
+        self.baseline_mapping = risk_config.get("baseline_mapping", [])
+        self.risk_modifiers = risk_config.get("risk_modifiers", [])
+        self.protective_factors = risk_config.get("protective_factors", [])
+        self.interactions = risk_config.get("interactions", [])
+        self.thresholds = risk_config.get("thresholds", [])
+        self.computed_fields = risk_config.get("computed_fields", [])
+    
+    def evaluate(self, form_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Đánh giá rủi ro cho người dùng dựa trên dữ liệu nhập + baseline + modifiers
         
-        # PLUGIN_ID LÀ ĐỊNH DANH DUY NHẤT
-        self.plugin_id = (
-            plugin_metadata.get("disease_info", {}).get("id") or 
-            plugin_metadata.get("id", "unknown")
-        ).lower().strip()
-        
-        print(f"🔍 RiskStratificationEngine initialized with plugin_id = '{self.plugin_id}'")
-
-        self.ml_model = None
-        self.ml_required_features = []
-        self.ml_threshold = 0.5
-
-        self.baseline_mapping = self.risk_config.get("baseline_mapping", [])
-        self.risk_modifiers = self.risk_config.get("risk_modifiers", [])
-        self.protective_factors = self.risk_config.get("protective_factors", [])
-        self.interactions = self.risk_config.get("interactions", [])
-        self.thresholds = self.risk_config.get("thresholds", [])
-
-        self._load_ml_model()
-
-    def _load_ml_model(self):
-        """Load ML model với nhiều fallback path"""
-        try:
-            # Tìm thư mục ml theo nhiều cách
-            base_dir = Path(__file__).parent.parent
-            possible_ml_dirs = [
-                base_dir / "ml" / "models",
-                base_dir / "ml",
-                base_dir.parent / "ml",
-                Path("ml"),
-                Path("backend/ml"),
-            ]
-
-            model_map = {
-                "diabetes": "screening_best_model.pkl",
-                "hypertension": "hypertension_model.pkl",
+        Returns:
+            {
+                "final_score": float (0-100),
+                "risk_level": str (low/medium/high),
+                "baseline_score": float,
+                "modifiers_effect": float,
+                "protective_effect": float,
+                "interaction_multiplier": float,
+                "breakdown": {
+                    "baseline": {...},
+                    "applied_modifiers": [...],
+                    "applied_protective": [...],
+                    "applied_interactions": [...]
+                }
             }
-
-            model_filename = model_map.get(self.plugin_id, f"{self.plugin_id}_model.pkl")
-            features_path = None
-            threshold_path = None
-
-            for ml_dir in possible_ml_dirs:
-                model_path = ml_dir / model_filename
-                if model_path.exists():
-                    self.ml_model = joblib.load(model_path)
-                    print(f"✅ Loaded ML model: {model_path}")
-
-                    # Load features
-                    for fpath in [ml_dir / "feature_cols.pkl", base_dir / "feature_cols.pkl"]:
-                        if fpath.exists():
-                            self.ml_required_features = list(joblib.load(fpath))
-                            features_path = fpath
-                            break
-                    
-                    # Load threshold
-                    thresh_file = ml_dir / f"{self.plugin_id}_threshold.pkl"
-                    if thresh_file.exists():
-                        self.ml_threshold = float(joblib.load(thresh_file))
-                    
-                    print(f"✅ ML Engine ready for '{self.plugin_id}' ({len(self.ml_required_features)} features)")
-                    return
-
-            # Nếu không tìm thấy model
-            self.ml_model = None
-            print(f"⚠️ No ML model found for plugin_id '{self.plugin_id}'. Running Rule-based only.")
-            print(f"   (Tìm kiếm tại: {[str(p) for p in possible_ml_dirs]})")
-
-        except Exception as e:
-            self.ml_model = None
-            print(f"⚠️ Failed to load ML model for {self.plugin_id}: {e}")
-
-    # Các hàm còn lại giữ nguyên (calculate_risk, _convert_to_ml_format, ...)
-    def _convert_to_ml_format(self, unified_data: Dict) -> Dict:
-        ml_data = {}
-        mapping = {
-            "age": "age", "tuoi": "age",
-            "bmi": "bmi",
-            "waist": "waist", "vongEo": "waist",
-            "systolic": "systolic", "huyetApTamThu": "systolic",
-            "diastolic": "diastolic", "huyetApTamTruong": "diastolic",
-            "fasting_glucose": "fasting_glucose", "duongHuyet": "fasting_glucose",
-            "hba1c": "hba1c",
-            "total_cholesterol": "total_cholesterol", "cholesterol": "total_cholesterol",
-            "ldl": "ldl", "hdl": "hdl",
-            "creatinine": "creatinine",
-            "gender_code": "gender_code", "gioiTinh": "gender_code",
-            "smoke": "smoke", "hutThuoc": "smoke",
-            "exercise": "exercise", "soPhutVanDongMoiTuan": "exercise",
-            "family_hypertension": "family_hypertension", "giaDinhCaoHuyetAp": "family_hypertension",
-        }
+        """
         
-        for src, tgt in mapping.items():
-            if src in unified_data and unified_data[src] not in (None, "", None):
-                ml_data[tgt] = unified_data[src]
-
-        # Ưu tiên exact match
-        for col in self.ml_required_features:
-            if col in unified_data and unified_data[col] not in (None, ""):
-                ml_data[col] = unified_data[col]
-
-        # Xử lý đặc biệt
-        if "hutThuoc" in unified_data:
-            val = str(unified_data["hutThuoc"]).strip().lower()
-            ml_data["smoke"] = 1.0 if val in ["đang hút", "current", "yes", "1"] else 0.0
-
-        # Convert to float
-        final = {}
-        for k, v in ml_data.items():
-            if isinstance(v, bool):
-                final[k] = 1.0 if v else 0.0
-            else:
-                try:
-                    final[k] = float(v)
-                except (ValueError, TypeError):
-                    final[k] = 0.0
-        return final
-
-    def calculate_risk(self, unified_data: Dict[str, Any]) -> Dict[str, Any]:
-        # RULE-BASED
-        baseline_score = self._calculate_baseline_risk(unified_data)
-        modified_score = self._apply_risk_modifiers(baseline_score, unified_data)
-        protected_score = self._apply_protective_factors(modified_score, unified_data)
-        rule_score = self._apply_interactions(protected_score, unified_data)
-        rule_score = float(min(round(rule_score, 2), 100))
-        rule_risk_level = self._stratify_risk_level(rule_score)
-
-        # ML-BASED
-        ai_status = "UNAVAILABLE"
-        ai_score = 0.0
-        ai_risk_level = "N/A"
-        ai_proba = 0.0
-        missing_fields = []
-
-        if self.ml_model and self.ml_required_features:
-            ml_ready = self._convert_to_ml_format(unified_data)
-            missing_fields = [f for f in self.ml_required_features if f not in ml_ready]
-
-            if not missing_fields:
-                try:
-                    df_input = pd.DataFrame([ml_ready])
-                    proba = self.ml_model.predict_proba(df_input)[0, 1]
-                    ai_score = round(proba * 100, 2)
-                    ai_proba = round(proba, 4)
-                    ai_status = "READY"
-                    ai_risk_level = "high" if proba >= 0.7 else "medium" if proba >= 0.4 else "low"
-                except Exception as e:
-                    ai_status = "PARTIAL"
-                    ai_risk_level = f"Lỗi AI: {str(e)}"
-            else:
-                ai_status = "PARTIAL"
-                ai_risk_level = "Thiếu dữ liệu"
-        else:
-            ai_risk_level = "Chưa có mô hình AI"
-
-        # Explanation
-        explanation_engine = ExplanationEngine(self.metadata)
-        explanation = explanation_engine.generate_explanation({
-            "risk_level": rule_risk_level,
-            "final_score": rule_score,
-            "form_data": unified_data
-        })
-
+        # [STEP 1] Tính toán computed fields
+        enriched_data = self._compute_fields(form_data)
+        
+        # [STEP 2] Xác định baseline score
+        baseline_result = self._get_baseline_score(enriched_data)
+        baseline_score = baseline_result["score"]
+        baseline_stage = baseline_result.get("stage_name", "unknown")
+        
+        # [STEP 3] Áp dụng risk modifiers
+        current_score = baseline_score
+        applied_modifiers = []
+        modifier_effect = 0.0
+        
+        for modifier in self.risk_modifiers:
+            if self._check_condition(modifier.get("condition"), enriched_data):
+                mod_result = self._apply_modifier(current_score, modifier)
+                applied_modifiers.append({
+                    "id": modifier.get("id", "unknown"),
+                    "description": modifier.get("description", ""),
+                    "value": modifier.get("value", 1.0),
+                    "effect_type": modifier.get("effect_type", "multiplicative"),
+                    "effect_on_score": mod_result["effect"]
+                })
+                current_score = mod_result["new_score"]
+                modifier_effect += mod_result["effect"]
+        
+        # [STEP 4] Áp dụng protective factors
+        applied_protective = []
+        protective_effect = 0.0
+        
+        for prot in self.protective_factors:
+            if self._check_condition(prot.get("condition"), enriched_data):
+                prot_result = self._apply_modifier(current_score, prot, is_protective=True)
+                applied_protective.append({
+                    "id": prot.get("id", "unknown"),
+                    "description": prot.get("description", ""),
+                    "value": prot.get("value", 1.0),
+                    "effect_type": prot.get("effect_type", "multiplicative"),
+                    "effect_on_score": prot_result["effect"]
+                })
+                current_score = prot_result["new_score"]
+                protective_effect += prot_result["effect"]
+        
+        # [STEP 5] Áp dụng interactions
+        interaction_multiplier = 1.0
+        applied_interactions = []
+        
+        for interaction in self.interactions:
+            if self._check_condition(interaction.get("condition"), enriched_data):
+                interaction_multiplier = interaction.get("interaction_multiplier", 1.0)
+                applied_interactions.append({
+                    "id": interaction.get("id", "unknown"),
+                    "description": interaction.get("description", ""),
+                    "multiplier": interaction_multiplier
+                })
+        
+        current_score = current_score * interaction_multiplier
+        
+        # [STEP 6] Chuẩn hóa điểm (0-100)
+        final_score = max(0, min(100, current_score))
+        
+        # [STEP 7] Ánh xạ thành risk level
+        risk_level = self._map_to_risk_level(final_score)
+        
         return {
-            "rule_based": {
-                "score": rule_score,
-                "risk_level": rule_risk_level,
-            },
-            "ai_based": {
-                "status": ai_status,
-                "score": ai_score,
-                "risk_level": ai_risk_level,
-                "probability": ai_proba,
-                "missing_features": missing_fields[:5]  # giới hạn
-            },
-            "final_score": rule_score,
-            **explanation
+            "final_score": round(final_score, 2),
+            "risk_level": risk_level,
+            "baseline_score": baseline_score,
+            "baseline_stage": baseline_stage,
+            "modifiers_effect": round(modifier_effect, 2),
+            "protective_effect": round(protective_effect, 2),
+            "interaction_multiplier": round(interaction_multiplier, 2),
+            "breakdown": {
+                "baseline": {
+                    "score": baseline_score,
+                    "stage": baseline_stage
+                },
+                "applied_modifiers": applied_modifiers,
+                "applied_protective": applied_protective,
+                "applied_interactions": applied_interactions
+            }
         }
-
-    # === Các helper rule-based giữ nguyên từ code cũ của bạn ===
-    def _calculate_baseline_risk(self, form_data):
-        matching = [s for s in self.baseline_mapping if ConditionEvaluator.evaluate(s.get("condition"), form_data)]
-        if not matching:
-            return 30.0
-        best = max(matching, key=lambda x: (x.get("priority", 0), x.get("score", 0)))
-        return float(best.get("score", 30))
-
-    def _apply_risk_modifiers(self, score, form_data):
-        result = score
-        for rule in self.risk_modifiers:
-            if ConditionEvaluator.evaluate(rule.get("condition"), form_data):
-                result = self._apply_effect(result, rule)
-        return result
-
-    def _apply_protective_factors(self, score, form_data):
-        result = score
-        for rule in self.protective_factors:
-            if ConditionEvaluator.evaluate(rule.get("condition"), form_data):
-                result = self._apply_effect(result, rule)
-        return result
-
-    def _apply_effect(self, score: float, rule: Dict) -> float:
-        effect = rule.get("effect_type", "multiplicative")
-        value = rule.get("value", 1.0)
-        if effect == "additive":
-            return score + value
-        if effect == "multiplicative":
-            return score * value
-        return score
-
-    def _apply_interactions(self, score, form_data):
-        result = score
-        for inter in self.interactions:
-            if self._evaluate_interaction(inter, form_data):
-                result *= inter.get("interaction_multiplier", 1.0)
-        return result
-
-    def _evaluate_interaction(self, interaction: Dict, form_data: Dict) -> bool:
-        cond = interaction.get("condition")
-        return ConditionEvaluator.evaluate(cond, form_data) if cond else False
-
-    def _stratify_risk_level(self, score):
-        for t in self.thresholds:
-            r = t.get("range", [0, 100])
-            if r[0] <= score < r[1]:
-                return t.get("level", "medium")
-        return "high" if score >= 70 else "medium"
+    
+    def _compute_fields(self, form_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Tính toán các field được định nghĩa trong computed_fields
+        
+        Ví dụ: 
+        {
+            "key": "bmi",
+            "formula": "weight / ((height / 100) ** 2)",
+            "dependencies": ["weight", "height"]
+        }
+        """
+        enriched = form_data.copy()
+        
+        for computed in self.computed_fields:
+            key = computed.get("key")
+            formula = computed.get("formula", "")
+            dependencies = computed.get("dependencies", [])
+            
+            try:
+                # Kiểm tra tất cả dependencies có giá trị không
+                all_available = all(dep in enriched and enriched[dep] is not None for dep in dependencies)
+                
+                if all_available:
+                    # Tính toán giá trị
+                    result = eval(formula, {"__builtins__": {}}, enriched)
+                    enriched[key] = float(result)
+                    logger.debug(f"Computed {key} = {enriched[key]}")
+            except Exception as e:
+                logger.warning(f"Cannot compute field {key}: {e}")
+        
+        return enriched
+    
+    def _get_baseline_score(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Tìm baseline stage nào match với dữ liệu
+        Trả về score của stage đó
+        
+        Nếu nhiều stage match, lấy cái có priority cao nhất
+        Nếu không có stage nào match, trả về 50 (điểm mặc định)
+        """
+        matching_stages = []
+        
+        for stage in self.baseline_mapping:
+            if self._check_condition(stage.get("condition"), data):
+                matching_stages.append({
+                    "name": stage.get("name", "unknown"),
+                    "score": stage.get("score", 50),
+                    "priority": stage.get("priority", 0)
+                })
+        
+        if not matching_stages:
+            return {
+                "score": 50,
+                "stage_name": "default",
+                "note": "No baseline stage matched, using default score"
+            }
+        
+        # Sắp xếp theo priority (cao nhất trước)
+        matching_stages.sort(key=lambda x: x["priority"], reverse=True)
+        selected = matching_stages[0]
+        
+        return {
+            "score": selected["score"],
+            "stage_name": selected["name"],
+            "matching_count": len(matching_stages)
+        }
+    
+    def _apply_modifier(
+        self, 
+        current_score: float, 
+        modifier: Dict[str, Any],
+        is_protective: bool = False
+    ) -> Dict[str, float]:
+        """
+        Áp dụng một modifier (risk hoặc protective) lên điểm hiện tại
+        
+        effect_type:
+        - additive: score = score + value
+        - multiplicative: score = score * value
+        - divisive: score = score / value
+        """
+        effect_type = modifier.get("effect_type", "multiplicative")
+        value = modifier.get("value", 1.0)
+        
+        new_score = current_score
+        effect = 0.0
+        
+        if effect_type == "additive":
+            effect = -value if is_protective else value
+            new_score = current_score + effect
+        elif effect_type == "multiplicative":
+            multiplier = 1.0 / value if is_protective else value
+            effect = current_score * (multiplier - 1)
+            new_score = current_score * multiplier
+        elif effect_type == "divisive":
+            effect = current_score * (1 - 1/value) if is_protective else current_score * (value - 1)
+            new_score = current_score / value if is_protective else current_score * value
+        
+        return {
+            "new_score": max(0, new_score),
+            "effect": effect
+        }
+    
+    def _check_condition(self, condition: Any, data: Dict[str, Any]) -> bool:
+        """
+        Kiểm tra điều kiện sử dụng ConditionEvaluator
+        """
+        if condition is None:
+            return True
+        
+        try:
+            return ConditionEvaluator.evaluate(condition, data)
+        except Exception as e:
+            logger.error(f"Error checking condition: {e}")
+            return False
+    
+    def _map_to_risk_level(self, score: float) -> str:
+        """
+        Ánh xạ điểm thành risk level dựa trên thresholds
+        
+        thresholds format:
+        [
+            {"threshold": 30, "level": "low"},
+            {"threshold": 70, "level": "medium"},
+            {"threshold": 100, "level": "high"}
+        ]
+        
+        Logic: score < 30 -> low, 30-70 -> medium, >= 70 -> high
+        """
+        # Sắp xếp thresholds theo giá trị tăng dần
+        sorted_thresholds = sorted(self.thresholds, key=lambda x: x.get("threshold", 0))
+        
+        for threshold_config in sorted_thresholds:
+            threshold_value = threshold_config.get("threshold", 0)
+            if score < threshold_value:
+                return threshold_config.get("level", "low")
+        
+        # Nếu vượt qua tất cả thresholds, lấy level cao nhất
+        return sorted_thresholds[-1].get("level", "high") if sorted_thresholds else "medium"

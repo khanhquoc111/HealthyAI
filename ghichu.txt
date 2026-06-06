@@ -1,2 +1,162 @@
 .\venv\Scripts\activate
 uvicorn main:app --reload      
+
+Hệ thống sẽ hoạt động theo nguyên tắc Rule Engine và ML Engine hoàn toàn độc lập, nhưng cùng sử dụng dữ liệu từ cơ sở dữ liệu.
+
+Rule Engine phục vụ việc đánh giá dựa trên kiến thức chuyên môn của bác sĩ được cấu hình trong Metadata JSON. 
+Khi người dùng chọn một bệnh, hệ thống sẽ đọc metadata tương ứng, sinh form câu hỏi và lưu các câu trả lời vào 
+bảng duLieuDanhGiaBenh. Sau đó Rule Engine lấy dữ liệu từ hoSoSucKhoe và duLieuDanhGiaBenh, đối chiếu với các luật đã 
+khai báo để tính điểm nguy cơ. Vì chỉ dựa trên dữ liệu người dùng nhập nên Rule Engine luôn 
+có thể hoạt động ngay cả khi không có kết quả xét nghiệm hay dữ liệu ML.
+
+ML Engine hoạt động theo một luồng khác. Trong metadata của mỗi bệnh sẽ khai báo danh sách các đặc trưng cần thiết để dự đoán. 
+Khi người dùng yêu cầu đánh giá, hệ thống sẽ kiểm tra các đặc trưng này trong hoSoSucKhoe và chiSoSucKhoe. 
+Nếu tất cả dữ liệu cần thiết đều tồn tại thì hệ thống sẽ tạo vector đầu vào theo đúng thứ tự đặc trưng đã dùng khi huấn luyện, 
+nạp mô hình ML của bệnh đó và thực hiện dự đoán. Nếu thiếu bất kỳ đặc trưng nào thì ML Engine sẽ không chạy và trả về 
+danh sách các chỉ số còn thiếu.
+
+Rule Engine
+
+Nguồn dữ liệu:
+
+hoSoSucKhoe
+duLieuDanhGiaBenh
+Metadata JSON
+
+Ví dụ:
+
+{
+  "rules": [
+    {
+      "field": "bmi",
+      "operator": ">",
+      "value": 25,
+      "score": 20
+    },
+    {
+      "field": "hut_thuoc",
+      "operator": "=",
+      "value": "co",
+      "score": 15
+    }
+  ]
+}
+
+Người dùng:
+
+BMI = 28
+Hút thuốc = Có
+
+Kết quả:
+
+20 + 15 = 35 điểm
+
+↓
+
+Xác định mức nguy cơ theo cấu hình metadata.
+
+ML Engine
+
+Nguồn dữ liệu:
+
+hoSoSucKhoe
+chiSoSucKhoe
+Model ML đã huấn luyện
+
+Ví dụ metadata:
+
+{
+  "ml_features": [
+    "tuoi",
+    "gioi_tinh",
+    "bmi",
+    "creatinine",
+    "egfr"
+  ]
+}
+
+Dữ liệu hiện có:
+
+tuoi = 55
+gioi_tinh = Nam
+bmi = 27
+
+creatinine = 1.3
+egfr = 78
+
+↓
+
+Tạo vector:
+
+[55, 1, 27, 1.3, 78]
+
+↓
+
+Đưa vào model:
+
+prediction = model.predict(...)
+
+↓
+
+Trả về:
+
+Nguy cơ mắc bệnh thận: 82%
+Trường hợp thiếu dữ liệu
+
+Metadata yêu cầu:
+
+tuoi
+gioi_tinh
+bmi
+creatinine
+egfr
+
+Nhưng cơ sở dữ liệu chỉ có:
+
+tuoi
+gioi_tinh
+bmi
+
+Hệ thống phát hiện thiếu:
+
+creatinine
+egfr
+
+Kết quả:
+
+Rule Engine: Có thể chạy
+
+ML Engine: Không khả dụng
+
+Thiếu dữ liệu:
+- Creatinine
+- eGFR
+Kết quả cuối cùng
+
+Hệ thống tổng hợp:
+
+Điểm Rule.
+Kết quả ML (nếu có).
+Giải thích từ metadata.
+Danh sách dữ liệu còn thiếu (nếu có).
+
+Ví dụ:
+
+Bệnh: Thận
+
+Điểm Rule: 72/100
+Mức nguy cơ: Cao
+
+ML:
+- Xác suất mắc bệnh: 81%
+
+Giải thích:
+- BMI cao
+- Huyết áp cao
+- Creatinine tăng
+
+Khuyến nghị:
+- Khám chuyên khoa thận
+- Bổ sung xét nghiệm eGFR định kỳ
+
+Điểm quan trọng là Rule Engine phụ thuộc vào Metadata của bác sĩ, còn ML Engine phụ thuộc vào dataset đã huấn luyện. Hai thành phần này có thể hoạt động độc lập, giúp hệ thống vẫn sử dụng được ngay cả khi người dùng không có đủ dữ liệu xét nghiệm.

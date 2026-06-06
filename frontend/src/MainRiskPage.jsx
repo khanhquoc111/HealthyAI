@@ -18,7 +18,7 @@ export default function MainRiskPage() {
   const tenDangNhap = localStorage.getItem("userName");
 
   useEffect(() => { loadPluginsList(); }, []);
-  
+
   useEffect(() => { 
     if (tenDangNhap) {
       fetchHealthProfile(); 
@@ -26,7 +26,7 @@ export default function MainRiskPage() {
       setProfileLoaded(true);
     }
   }, [tenDangNhap]);
-  
+
   useEffect(() => { 
     if (profileLoaded) {
       loadPlugin(selectedPlugin); 
@@ -48,8 +48,12 @@ export default function MainRiskPage() {
 
   const loadPluginsList = async () => {
     try {
-      const res = await axios.get(`${API_BASE_URL}/plugins`);
-      setPlugins(res.data.plugins || []);
+      // [FIX] Updated endpoint to match backend router prefix
+      const res = await axios.get(`${API_BASE_URL}/api/plugins`);
+      
+      // [FIX] Parse the correct structure returned by backend { available_plugins: [...] }
+      const pluginIds = res.data.available_plugins ? res.data.available_plugins.map(p => p.id) : [];
+      setPlugins(pluginIds);
     } catch (e) {
       console.error("Load plugins error", e);
     }
@@ -58,7 +62,8 @@ export default function MainRiskPage() {
   const loadPlugin = async (pluginName) => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API_BASE_URL}/plugins/${pluginName}`);
+      // [FIX] Updated endpoint to match backend router prefix
+      const response = await axios.get(`${API_BASE_URL}/api/plugins/${pluginName}`);
       const pluginData = response.data;
       setPlugin(pluginData);
       const mergedForm = mergeWithHealthProfile(pluginData.fields);
@@ -109,7 +114,6 @@ export default function MainRiskPage() {
         }
       });
 
-      // Xử lý hút thuốc
       if (healthProfile["hutThuoc"] && fields.some(f => f.key === "smoking_status")) {
         let val = healthProfile["hutThuoc"];
         if (val === "Đang hút") initialData["smoking_status"] = "current";
@@ -147,8 +151,9 @@ export default function MainRiskPage() {
 
   const validateField = async (fieldKey, currentData) => {
     try {
+      // [FIX] Updated endpoint to match backend router prefix
       const res = await axios.post(
-        `${API_BASE_URL}/plugins/${selectedPlugin}/validate-field/${fieldKey}`,
+        `${API_BASE_URL}/api/plugins/${selectedPlugin}/validate-field/${fieldKey}`,
         currentData
       );
       setErrors(prev => ({
@@ -181,7 +186,6 @@ export default function MainRiskPage() {
   const calculateRisk = async (currentData) => {
     try {
       setIsCalculating(true);
-      
       const fullPayload = { ...(healthProfile || {}), ...currentData };
 
       const cleanData = {};
@@ -190,12 +194,16 @@ export default function MainRiskPage() {
           cleanData[key] = fullPayload[key];
         }
       });
-      
+
+      // [FIX] Updated endpoint and payload structure to match FormSubmission schema
       const response = await axios.post(
-        `${API_BASE_URL}/plugins/${selectedPlugin}/score?ten_dang_nhap=${tenDangNhap || ''}`,
-        cleanData
+        `${API_BASE_URL}/api/plugins/${selectedPlugin}/calculate`,
+        {
+          ten_dang_nhap: tenDangNhap || null,
+          form_data: cleanData
+        }
       );
-      
+
       setRiskResult(response.data);
       setErrors({}); 
       
@@ -277,7 +285,7 @@ export default function MainRiskPage() {
           if (field.key === "bmi") {
             return (
               <div key="bmi_group" style={{ width: "100%", background: "#f8fafc", padding: "16px", 
-                                           borderRadius: "8px", border: "1px dashed #cbd5e1", display: "flex", flexDirection: "column", gap: "10px" }}>
+                                            borderRadius: "8px", border: "1px dashed #cbd5e1", display: "flex", flexDirection: "column", gap: "10px" }}>
                 <p style={{ margin: 0, fontSize: "13px", color: "#64748b", fontStyle: "italic" }}>
                   * Chỉ số BMI được hệ thống tự động tính toán.
                 </p>
@@ -356,8 +364,22 @@ export default function MainRiskPage() {
       {riskResult && (
         <div style={{ marginTop: "40px", background: "#f8fafc", padding: "24px", borderRadius: "12px", border: "1px solid #e2e8f0" }}>
           <h2 style={{ textAlign: "center" }}>📊 Kết quả Đánh giá Nguy cơ</h2>
-          {/* Phần hiển thị kết quả giữ nguyên như cũ của bạn */}
-          {/* ... */}
+          
+          <div style={{ display: "flex", justifyContent: "center", gap: "40px", marginTop: "20px", flexWrap: "wrap" }}>
+            <div style={{ textAlign: "center", padding: "20px", background: "white", borderRadius: "10px", boxShadow: "0 2px 4px rgba(0,0,0,0.05)", minWidth: "200px" }}>
+              <div style={{ fontSize: "16px", color: "#64748b", fontWeight: "600" }}>Mức độ Nguy cơ</div>
+              <div style={{ fontSize: "28px", fontWeight: "900", color: getRiskColor(riskResult.risk_level), marginTop: "10px" }}>
+                {getRiskLabel(riskResult.risk_level)}
+              </div>
+            </div>
+
+            <div style={{ textAlign: "center", padding: "20px", background: "white", borderRadius: "10px", boxShadow: "0 2px 4px rgba(0,0,0,0.05)", minWidth: "200px" }}>
+              <div style={{ fontSize: "16px", color: "#64748b", fontWeight: "600" }}>Điểm số (0-100)</div>
+              <div style={{ fontSize: "36px", fontWeight: "900", color: "#1e293b", marginTop: "4px" }}>
+                {riskResult.final_score}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
