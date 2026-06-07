@@ -1,0 +1,114 @@
+[
+  {
+    "disease": "diabetes",
+    "n_samples": 9415,
+    "n_positive": 722,
+    "positive_rate": 0.07668613913967073,
+    "n_features": 12,
+    "feature_names": [
+      "age",
+      "gender_code",
+      "bmi",
+      "waist",
+      "systolic",
+      "diastolic",
+      "hba1c",
+      "total_cholesterol",
+      "hdl",
+      "insulin",
+      "family_history_diabetes",
+      "smoke"
+    ],
+    "cv_roc_auc_mean": 0.953320216256138,
+    "cv_roc_auc_std": 0.004213716914451713,
+    "cv_ap_mean": 0.7236100718972619,
+    "train_roc_auc": 0.9696430853238492,
+    "threshold": 0.07980542469250537
+  },
+  {
+    "disease": "cardiovascular",
+    "n_samples": 9415,
+    "n_positive": 4677,
+    "positive_rate": 0.4967604885820499,
+    "n_features": 10,
+    "feature_names": [
+      "age",
+      "gender_code",
+      "bmi",
+      "systolic",
+      "diastolic",
+      "smoke",
+      "cholesterol_level",
+      "glucose_level",
+      "alcohol_use",
+      "physical_activity"
+    ],
+    "cv_roc_auc_mean": 0.8062102119557689,
+    "cv_roc_auc_std": 0.006910490700867238,
+    "cv_ap_mean": 0.7906260411704208,
+    "train_roc_auc": 0.8230594911665026,
+    "threshold": 0.49687123754429563
+  },
+  {
+    "disease": "hypertension",
+    "n_samples": 9415,
+    "n_positive": 3314,
+    "positive_rate": 0.35199150292087095,
+    "n_features": 7,
+    "feature_names": [
+      "age",
+      "gender_code",
+      "bmi",
+      "smoke",
+      "alcohol_use",
+      "physical_activity",
+      "salt_intake"
+    ],
+    "cv_roc_auc_mean": 0.8232699865503793,
+    "cv_roc_auc_std": 0.010792688331610572,
+    "cv_ap_mean": 0.7150041017558231,
+    "train_roc_auc": 0.8383631866992134,
+    "threshold": 0.3782718565556404
+  },
+  {
+    "disease": "ckd",
+    "n_samples": 10000,
+    "n_positive": 5000,
+    "positive_rate": 0.5,
+    "n_features": 7,
+    "feature_names": [
+      "age",
+      "gender_code",
+      "bmi",
+      "smoke",
+      "diabetes_status",
+      "htn_status",
+      "systolic"
+    ],
+    "cv_roc_auc_mean": 1.0,
+    "cv_roc_auc_std": 0.0,
+    "cv_ap_mean": 1.0,
+    "train_roc_auc": 0.9999999999999999,
+    "threshold": 0.9998262153538889
+  },
+  {
+    "disease": "liver",
+    "n_samples": 8000,
+    "n_positive": 5780,
+    "positive_rate": 0.7225,
+    "n_features": 6,
+    "feature_names": [
+      "age",
+      "gender_code",
+      "bmi",
+      "alt",
+      "total_proteins",
+      "albumin_globulin_ratio"
+    ],
+    "cv_roc_auc_mean": 0.8734943420929581,
+    "cv_roc_auc_std": 0.007921463096606903,
+    "cv_ap_mean": 0.9496584582016261,
+    "train_roc_auc": 0.9072925044421585,
+    "threshold": 0.6617502801576292
+  }
+]

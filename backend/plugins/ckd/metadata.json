@@ -1,0 +1,92 @@
+{
+  "disease_info": {
+    "id": "ckd",
+    "name": "Suy thận mãn tính",
+    "version": "1.0",
+    "description": "Đánh giá nguy cơ suy thận dựa trên các chỉ số sinh hóa và huyết áp.",
+    "author": "HealthyAI Team"
+  },
+  "fields": [
+    {
+      "key": "age",
+      "label": "Tuổi",
+      "type": "number",
+      "required": true,
+      "min": 18,
+      "max": 100,
+      "health_profile_key": "tuoi"
+    },
+    {
+      "key": "creatinine",
+      "label": "Creatinine máu",
+      "type": "number",
+      "unit": "mg/dL",
+      "required": true,
+      "step": 0.01,
+      "health_profile_key": "creatinine"
+    },
+    {
+      "key": "systolic",
+      "label": "Huyết áp tâm thu",
+      "type": "number",
+      "unit": "mmHg",
+      "required": true,
+      "health_profile_key": "huyetApTamThu"
+    },
+    {
+      "key": "diabetes_status",
+      "label": "Đã có chẩn đoán tiểu đường",
+      "type": "select",
+      "options": [
+        {"label": "Có", "value": "yes"},
+        {"label": "Không", "value": "no"}
+      ],
+      "required": true,
+      "health_profile_key": "tieuDuong"
+    }
+  ],
+  "risk_config": {
+    "baseline_mapping": [
+      {
+        "name": "Mức nền tảng",
+        "condition": null,
+        "score": 30,
+        "priority": 1
+      }
+    ],
+    "risk_modifiers": [
+      {
+        "id": "high_creatinine",
+        "description": "Creatinine cao cảnh báo chức năng thận giảm",
+        "condition": {"field": "creatinine", "op": "gte", "value": 1.2},
+        "effect_type": "additive",
+        "value": 20,
+        "note": "Creatinine > 1.2 mg/dL là dấu hiệu cần quan tâm."
+      },
+      {
+        "id": "hypertension_risk",
+        "description": "Huyết áp tâm thu cao",
+        "condition": {"field": "systolic", "op": "gte", "value": 140},
+        "effect_type": "multiplicative",
+        "value": 1.5,
+        "note": "Huyết áp cao tạo áp lực lớn lên thận."
+      }
+    ],
+    "protective_factors": [],
+    "thresholds": [
+      {"range": [0, 40], "level": "low"},
+      {"range": [40, 70], "level": "medium"},
+      {"range": [70, 100], "level": "high"}
+    ]
+  },
+  "explanations": {
+    "risk_levels": {
+      "low": "Nguy cơ suy thận thấp, hãy duy trì chế độ ăn ít muối.",
+      "medium": "Nguy cơ trung bình, nên kiểm tra định kỳ chỉ số Creatinine.",
+      "high": "Nguy cơ cao, bạn nên sớm gặp bác sĩ chuyên khoa thận."
+    },
+    "factor_explanations": {
+      "high_creatinine": "Creatinine là sản phẩm chuyển hóa của cơ, thận khỏe mạnh sẽ lọc bỏ chất này. Chỉ số cao cho thấy thận đang lọc kém."
+    }
+  }
+}
