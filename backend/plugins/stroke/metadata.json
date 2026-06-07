@@ -1,0 +1,165 @@
+{
+  "disease_info": {
+    "id": "stroke",
+    "name": "Đánh giá Nguy cơ Đột Quỵ",
+    "version": "1.0",
+    "description": "Đánh giá nguy cơ đột quỵ dựa trên hồ sơ sức khỏe, tiền sử bệnh lý và các yếu tố nguy cơ tim mạch.",
+    "author": "LuanVanKTPM",
+    "last_updated": "2026-06-07"
+  },
+  "fields": [
+    {
+      "key": "family_history_stroke",
+      "label": "Gia đình có người từng bị đột quỵ không?",
+      "type": "boolean",
+      "required": true
+    },
+    {
+      "key": "heart_disease_history",
+      "label": "Bạn đã từng được chẩn đoán bệnh tim mạch chưa?",
+      "type": "boolean",
+      "required": true
+    },
+    {
+      "key": "diabetes_history",
+      "label": "Bạn đã từng được chẩn đoán đái tháo đường chưa?",
+      "type": "boolean",
+      "required": true
+    },
+    {
+      "key": "previous_stroke",
+      "label": "Bạn đã từng bị đột quỵ hoặc cơn thiếu máu não thoáng qua chưa?",
+      "type": "boolean",
+      "required": true
+    }
+  ],
+  "risk_config": {
+    "baseline_mapping": [
+      {
+        "name": "Low Risk",
+        "condition": { "field": "systolic", "op": "lt", "value": 140 },
+        "score": 10
+      },
+      {
+        "name": "High Risk",
+        "condition": { "field": "systolic", "op": "gte", "value": 140 },
+        "score": 25
+      }
+    ],
+    "risk_modifiers": [
+      {
+        "id": "diastolic_high",
+        "description": "Huyết áp tâm trương cao",
+        "condition": { "field": "diastolic", "op": "gte", "value": 90 },
+        "effect_type": "additive",
+        "value": 15,
+        "category": "modifier",
+        "priority": 10
+      },
+      {
+        "id": "bmi_overweight",
+        "description": "Thừa cân hoặc béo phì",
+        "condition": { "field": "bmi", "op": "gte", "value": 25 },
+        "effect_type": "additive",
+        "value": 10,
+        "category": "modifier",
+        "priority": 10
+      },
+      {
+        "id": "smoking",
+        "description": "Hút thuốc lá làm tăng nguy cơ đột quỵ",
+        "condition": { "field": "smoking_status", "op": "eq", "value": "current" },
+        "effect_type": "additive",
+        "value": 15,
+        "category": "modifier",
+        "priority": 20
+      },
+      {
+        "id": "alcohol",
+        "description": "Lạm dụng rượu bia",
+        "condition": { "field": "alcohol", "op": "eq", "value": "1" },
+        "effect_type": "additive",
+        "value": 10,
+        "category": "modifier",
+        "priority": 15
+      },
+      {
+        "id": "low_exercise",
+        "description": "Vận động thể chất chưa đạt khuyến nghị",
+        "condition": { "field": "exercise", "op": "lt", "value": 0.5 },
+        "effect_type": "additive",
+        "value": 10,
+        "category": "modifier",
+        "priority": 10
+      },
+      {
+        "id": "heart_disease_history",
+        "description": "Có tiền sử bệnh tim mạch",
+        "condition": { "field": "heart_disease_history", "op": "eq", "value": true },
+        "effect_type": "additive",
+        "value": 20,
+        "category": "modifier",
+        "priority": 30
+      },
+      {
+        "id": "diabetes_history",
+        "description": "Có tiền sử đái tháo đường",
+        "condition": { "field": "diabetes_history", "op": "eq", "value": true },
+        "effect_type": "additive",
+        "value": 15,
+        "category": "modifier",
+        "priority": 25
+      },
+      {
+        "id": "family_history_stroke",
+        "description": "Có tiền sử gia đình bị đột quỵ",
+        "condition": { "field": "family_history_stroke", "op": "eq", "value": true },
+        "effect_type": "additive",
+        "value": 10,
+        "category": "modifier",
+        "priority": 10
+      },
+      {
+        "id": "previous_stroke",
+        "description": "Đã từng bị đột quỵ hoặc cơn thiếu máu não thoáng qua",
+        "condition": { "field": "previous_stroke", "op": "eq", "value": true },
+        "effect_type": "additive",
+        "value": 30,
+        "category": "modifier",
+        "priority": 50
+      }
+    ],
+    "protective_factors": [],
+    "interactions": [],
+    "thresholds": [
+      { "range": [0, 29], "level": "low" },
+      { "range": [29, 59], "level": "medium" },
+      { "range": [59, 100], "level": "high" }
+    ]
+  },
+  "recommendations": [
+    {
+      "id": "stroke_low",
+      "condition": { "field": "final_score", "op": "lt", "value": 30 },
+      "text": "Duy trì chế độ ăn uống lành mạnh, tập thể dục thường xuyên và khám sức khỏe định kỳ.",
+      "priority": 1,
+      "action_type": "lifestyle"
+    },
+    {
+      "id": "stroke_medium",
+      "condition": { "field": "final_score", "op": "gte", "value": 30 },
+      "text": "Theo dõi huyết áp thường xuyên, hạn chế thuốc lá và rượu bia, tăng cường hoạt động thể chất.",
+      "priority": 2,
+      "action_type": "monitoring"
+    },
+    {
+      "id": "stroke_high",
+      "condition": { "field": "final_score", "op": "gte", "value": 60 },
+      "text": "Khám chuyên khoa tim mạch hoặc thần kinh, kiểm soát huyết áp theo hướng dẫn bác sĩ và theo dõi các dấu hiệu cảnh báo đột quỵ.",
+      "priority": 3,
+      "action_type": "referral"
+    }
+  ],
+  "cross_validations": [],
+  "ml_required_features": []
+}
