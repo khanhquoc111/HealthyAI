@@ -73,7 +73,9 @@ HealthyAI/
 │   │   │   └── metadata.json
 │   │   ├── hypertension/
 │   │   │   └── metadata.json
-│   │   └── kidney/
+│   │   ├── kidney/
+│   │   │   └── metadata.json
+│   │   └── stroke/
 │   │       └── metadata.json
 │   ├── main.py
 │   ├── requirements.txt
@@ -750,13 +752,16 @@ class ExplanationEngine:
 ### backend\app\plugin_api.py
 ```py
 # backend/app/plugin_api.py
-import json
 import time
-from pathlib import Path
+import warnings
+import numpy as np
+import joblib
+import os
+import pandas as pd
 from typing import Dict, Any
 
-from fastapi import APIRouter, Body, HTTPException, Query, Depends 
-from sqlalchemy.orm import Session 
+from fastapi import APIRouter, Body, HTTPException, Query, Depends
+from sqlalchemy.orm import Session
 
 from app.plugin_loader import PluginLoader
 from app.validation_engine import ValidationEngine
@@ -765,11 +770,70 @@ from app.risk_stratification_engine import RiskStratificationEngine
 from database.database import SessionLocal
 from database.nguoi_dung import NguoiDung
 from database.lich_su_danh_gia import LichSuDanhGia
-from database.cs_suc_khoe import CsSucKhoe
+from database.hs_suckhoe import HoSoSucKhoe
+from database.cs_suckhoe import ChiSoSucKhoe
 
 router = APIRouter()
 
 plugin_loader = PluginLoader()
+
+# ── Hằng số phân loại field DB ───────────────────────────────────────────────
+
+# Cột cứng thuộc bảng hoSoSucKhoe
+HO_SO_COLS = {
+    "tuoi", "gioiTinh", "chieuCao", "canNang", "bmi", "vongEo",
+    "huyetApTamThu", "huyetApTamTruong", "hutThuoc", "uongRuouBia",
+    "soPhutVanDongMoiTuan",
+}
+
+# EAV fields cần ép kiểu khi đọc
+BOOLEAN_FIELDS = {
+    "caoHuyetAp", "tieuDuong", "benhTimMach", "gout",
+    "giaDinhCaoHuyetAp", "giaDinhTieuDuong", "giaDinhTimMach", "giaDinhGout",
+}
+NUMBER_FIELDS = {
+    "duongHuyet", "hba1c", "cholesterol", "ldl", "hdl",
+    "triglyceride", "creatinine", "acidUric",
+}
+
+# Mapping cột DB (tiếng Việt) → key plugin (tiếng Anh)
+DB_TO_FORM = {
+    "tuoi":              "age",
+    "bmi":               "bmi",
+    "vongEo":            "waist",
+    "huyetApTamThu":     "systolic",
+    "huyetApTamTruong":  "diastolic",
+    "duongHuyet":        "fasting_glucose",
+    "hba1c":             "hba1c",
+    "cholesterol":       "total_cholesterol",
+    "ldl":               "ldl",
+    "hdl":               "hdl",
+    "creatinine":        "creatinine",
+    "soPhutVanDongMoiTuan": "exercise",
+    "giaDinhTieuDuong":  "family_diabetes",
+    "giaDinhCaoHuyetAp": "family_hypertension",
+    "giaDinhTimMach":    "family_cardiovascular",
+    "gioiTinh":          "gender_code",
+}
+FORM_TO_DB = {v: k for k, v in DB_TO_FORM.items()}
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def convert_to_serializable(obj):
+    """Chuyển numpy types về Python native types để JSON serialize được."""
+    if isinstance(obj, dict):
+        return {k: convert_to_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_serializable(i) for i in obj]
+    elif isinstance(obj, (np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, (np.int32, np.int64)):
+        return int(obj)
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    return obj
+
 
 def get_db():
     db = SessionLocal()
@@ -777,6 +841,7 @@ def get_db():
         yield db
     finally:
         db.close()
+
 
 def get_plugin_metadata(plugin_name: str) -> Dict[str, Any]:
     try:
@@ -786,21 +851,147 @@ def get_plugin_metadata(plugin_name: str) -> Dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading plugin '{plugin_name}': {str(e)}")
 
+
 def get_validation_engine(plugin_name: str):
     metadata = get_plugin_metadata(plugin_name)
     return ValidationEngine(metadata)
+
 
 def get_scoring_engine(plugin_name: str):
     metadata = get_plugin_metadata(plugin_name)
     return RiskStratificationEngine(metadata)
 
+
+def _load_health_profile(user_id: int, db: Session) -> dict:
+    """Đọc hồ sơ sức khỏe từ hoSoSucKhoe + chiSoSucKhoe, trả về dict phẳng."""
+    profile = {}
+
+    # Cột cứng
+    hoso = db.query(HoSoSucKhoe).filter(HoSoSucKhoe.idNguoiDung == user_id).first()
+    if hoso:
+        for k, v in hoso.__dict__.items():
+            if not k.startswith("_") and v is not None:
+                profile[k] = v
+
+    # EAV — ép kiểu khi đọc
+    chisos = db.query(ChiSoSucKhoe).filter(ChiSoSucKhoe.idNguoiDung == user_id).all()
+    for cs in chisos:
+        if cs.giaTri is None:
+            continue
+        if cs.maChiSo in BOOLEAN_FIELDS:
+            profile[cs.maChiSo] = cs.giaTri.lower() in ("true", "1", "yes", "có")
+        elif cs.maChiSo in NUMBER_FIELDS:
+            try:
+                profile[cs.maChiSo] = float(cs.giaTri)
+            except ValueError:
+                profile[cs.maChiSo] = cs.giaTri
+        else:
+            profile[cs.maChiSo] = cs.giaTri
+
+    return profile
+
+
+def _enrich_profile(profile: dict) -> dict:
+    """Bơm thêm các key tiếng Anh và convert các giá trị đặc biệt để engine đọc được."""
+    enriched = dict(profile)
+
+    # Bơm key tiếng Anh song song với tiếng Việt
+    for db_key, form_key in DB_TO_FORM.items():
+        if db_key in enriched and form_key not in enriched:
+            enriched[form_key] = enriched[db_key]
+
+    # hutThuoc → smoking_status
+    if "hutThuoc" in enriched:
+        mapping = {"Đang hút": "current", "Đã bỏ": "former", "Không": "never",
+                   "Chưa bao giờ": "never"}
+        enriched["smoking_status"] = mapping.get(enriched["hutThuoc"], "never")
+
+    # gioiTinh → gender_code (float)
+    if "gioiTinh" in enriched:
+        gt = enriched["gioiTinh"]
+        enriched["gender_code"] = 1.0 if gt in ("Nam", "1", 1) else 2.0
+
+    # soPhutVanDongMoiTuan → exercise (boolean float)
+    if "soPhutVanDongMoiTuan" in enriched:
+        try:
+            enriched["exercise"] = 1.0 if float(enriched["soPhutVanDongMoiTuan"]) >= 150 else 0.0
+        except (ValueError, TypeError):
+            enriched["exercise"] = 0.0
+
+    # uongRuouBia → alcohol (0/1 float)
+    if "uongRuouBia" in enriched and "alcohol" not in enriched:
+        mapping = {"Không": 0, "Thỉnh thoảng": 0, "Thường xuyên": 1, "Nhiều": 1}
+        enriched["alcohol"] = float(mapping.get(enriched["uongRuouBia"], 0))
+
+    # mucDoAnMan → sodium_intake (mg/ngày)
+    if "mucDoAnMan" in enriched and "sodium_intake" not in enriched:
+        mapping = {"Nhạt": 1200, "Vừa": 2000, "Mặn": 3500}
+        enriched["sodium_intake"] = mapping.get(enriched["mucDoAnMan"], 2000)
+
+    # tieuDuong (bool) → diabetes_status ("yes"/"no")
+    if "tieuDuong" in enriched and "diabetes_status" not in enriched:
+        enriched["diabetes_status"] = "yes" if enriched["tieuDuong"] else "no"
+
+    return enriched
+
+
+def _save_form_to_profile(user_id: int, form_data: dict, db: Session):
+    """Ghi ngược form_data vào hoSoSucKhoe + chiSoSucKhoe."""
+    hoso_updates: dict = {}
+    chiso_updates: dict = {}
+
+    for form_key, value in form_data.items():
+        if value in [None, ""]:
+            continue
+
+        # Dịch ngược giá trị đặc biệt
+        if form_key == "smoking_status":
+            db_key = "hutThuoc"
+            value = {"current": "Đang hút", "former": "Đã bỏ", "never": "Không"}.get(value, value)
+        elif form_key == "alcohol":
+            # Lưu giá trị gốc vào EAV
+            db_key = "alcohol"
+        else:
+            db_key = FORM_TO_DB.get(form_key, form_key)
+
+        if db_key in HO_SO_COLS:
+            hoso_updates[db_key] = value
+        else:
+            chiso_updates[db_key] = value
+
+    # Lưu hoSoSucKhoe
+    if hoso_updates:
+        existing = db.query(HoSoSucKhoe).filter(HoSoSucKhoe.idNguoiDung == user_id).first()
+        if existing:
+            for k, v in hoso_updates.items():
+                setattr(existing, k, v)
+        else:
+            db.add(HoSoSucKhoe(idNguoiDung=user_id, **hoso_updates))
+
+    # Lưu chiSoSucKhoe (EAV)
+    for key, value in chiso_updates.items():
+        str_value = ("true" if value else "false") if isinstance(value, bool) else str(value)
+        existing = db.query(ChiSoSucKhoe).filter(
+            ChiSoSucKhoe.idNguoiDung == user_id,
+            ChiSoSucKhoe.maChiSo == key,
+        ).first()
+        if existing:
+            existing.giaTri = str_value
+        else:
+            db.add(ChiSoSucKhoe(idNguoiDung=user_id, maChiSo=key, giaTri=str_value))
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
 @router.get("/plugins")
 def list_plugins():
     return {"plugins": plugin_loader.list_plugins()}
 
+
 @router.get("/plugins/{plugin_name}")
 def get_plugin(plugin_name: str):
     return get_plugin_metadata(plugin_name)
+
 
 @router.post("/plugins/{plugin_name}/validate")
 def validate_plugin_form(plugin_name: str, form_data: dict):
@@ -810,6 +1001,7 @@ def validate_plugin_form(plugin_name: str, form_data: dict):
         return result.to_dict()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Validation error: {str(e)}")
+
 
 @router.post("/plugins/{plugin_name}/validate-field/{field_key}")
 def validate_plugin_field(plugin_name: str, field_key: str, form_data: dict):
@@ -824,6 +1016,7 @@ def validate_plugin_field(plugin_name: str, field_key: str, form_data: dict):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Field validation error: {str(e)}")
 
+
 @router.post("/plugins/{plugin_name}/normalize")
 def normalize_plugin_form(plugin_name: str, form_data: dict):
     try:
@@ -831,6 +1024,7 @@ def normalize_plugin_form(plugin_name: str, form_data: dict):
         return engine.normalize_form_data(form_data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Normalization error: {str(e)}")
+
 
 @router.get("/plugins/{plugin_name}/fields")
 def get_plugin_all_fields(plugin_name: str):
@@ -843,72 +1037,29 @@ def get_plugin_all_fields(plugin_name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Field list error: {str(e)}")
 
+
 @router.post("/plugins/{plugin_name}/score")
 def score_plugin_form(
-    plugin_name: str, 
+    plugin_name: str,
     form_data: dict = Body(...),
-    ten_dang_nhap: str = Query(None), 
-    db: Session = Depends(get_db)   
+    ten_dang_nhap: str = Query(None),
+    db: Session = Depends(get_db),
 ):
     try:
-        # TỪ ĐIỂN MAPPING CỘT DB (Tiếng Việt) VÀ TRƯỜNG PLUGIN (Tiếng Anh)
-        db_to_form = {
-            "tuoi": "age", "bmi": "bmi", "vongEo": "waist",
-            "huyetApTamThu": "systolic", "huyetApTamTruong": "diastolic",
-            "duongHuyet": "fasting_glucose", "hba1c": "hba1c",
-            "cholesterol": "total_cholesterol", "ldl": "ldl", "hdl": "hdl",
-            "creatinine": "creatinine", "soPhutVanDongMoiTuan": "exercise",
-            "giaDinhTieuDuong": "family_diabetes",
-            "giaDinhCaoHuyetAp": "family_hypertension",
-            "giaDinhTimMach": "family_cardiovascular",
-            "gioiTinh": "gender_code",
-        }
-        form_to_db = {v: k for k, v in db_to_form.items()} # Map ngược lại
-
-        # 1. Trích xuất dữ liệu Hồ sơ sức khỏe từ Database để hợp nhất
+        # ── 1. Đọc hồ sơ sức khỏe từ DB ─────────────────────────────────────
         health_profile_dict = {}
+        user = None
+
         if ten_dang_nhap:
             user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == ten_dang_nhap).first()
             if user:
-                profile = db.query(CsSucKhoe).filter(CsSucKhoe.idNguoiDung == user.idNguoiDung).first()
-                if profile:
-                    for k, v in profile.__dict__.items():
-                        if not k.startswith('_') and v is not None:
-                            health_profile_dict[k] = v
-                            # Bơm thêm key tiếng Anh để Rule Engine có thể đọc được
-                            if k in db_to_form:
-                                health_profile_dict[db_to_form[k]] = v
-                            
-                            # Xử lý mapping đặc biệt cho trường Select/Option
-                            if k == "hutThuoc":
-                                if v == "Đang hút": health_profile_dict["smoking_status"] = "current"
-                                elif v == "Đã bỏ": health_profile_dict["smoking_status"] = "former"
-                                elif v == "Không": health_profile_dict["smoking_status"] = "never"
-                    if "gioiTinh" in health_profile_dict:
-                        gt = health_profile_dict["gioiTinh"]
-                        health_profile_dict["gender_code"] = 1.0 if gt in ("Nam", "1", 1) else 2.0
-                    # Thêm mới — chuyển soPhutVanDong → exercise boolean
-                    if "soPhutVanDongMoiTuan" in health_profile_dict:
-                        try:
-                            health_profile_dict["exercise"] = 1.0 if float(health_profile_dict["soPhutVanDongMoiTuan"]) >= 150 else 0.0
-                        except:
-                            health_profile_dict["exercise"] = 0.0
+                raw_profile = _load_health_profile(user.idNguoiDung, db)
+                health_profile_dict = _enrich_profile(raw_profile)
 
-                    # Thêm mới — chuyển uongRuouBia → alcohol số
-                    # Thêm mới — chuyển uongRuouBia → alcohol số
-                    if "uongRuouBia" in health_profile_dict and "alcohol" not in health_profile_dict:
-                        mapping_ruou = {"Không": 0, "Thỉnh thoảng": 0, "Thường xuyên": 1, "Nhiều": 1}
-                        health_profile_dict["alcohol"] = mapping_ruou.get(health_profile_dict["uongRuouBia"], 0)
-
-                    # Thêm mới — chuyển mucDoAnMan → sodium_intake số
-                    if "mucDoAnMan" in health_profile_dict and "sodium_intake" not in health_profile_dict:
-                        mapping_muoi = {"Nhạt": 1200, "Vừa": 2000, "Mặn": 3500}
-                        health_profile_dict["sodium_intake"] = mapping_muoi.get(health_profile_dict["mucDoAnMan"], 2000)
-
-        # Tạo payload hợp nhất (Ưu tiên form hiện tại hơn DB)
+        # ── 2. Hợp nhất: profile DB + form người dùng (form ưu tiên) ─────────
         unified_payload = {**health_profile_dict, **form_data}
 
-        # 2. VALIDATION ĐỐI VỚI FORM GỐC (Chỉ validate các trường mà plugin hiện tại quản lý)
+        # ── 3. Validation chỉ trên form gốc (không validate data từ DB) ──────
         validation_engine = get_validation_engine(plugin_name)
         validation_result = validation_engine.validate_form(form_data)
 
@@ -917,88 +1068,121 @@ def score_plugin_form(
                 status_code=400,
                 detail={
                     "message": "Dữ liệu không hợp lệ",
-                    "errors": [err.to_dict() for err in validation_result.errors]
-                }
+                    "errors": [err.to_dict() for err in validation_result.errors],
+                },
             )
 
         normalized_plugin = validation_engine.normalize_form_data(unified_payload)
         normalized_data = {**unified_payload, **normalized_plugin}
 
-        # 3. CALCULATE RISK KÉP DUAL-ENGINE 
+        # ── 4. Dual-engine scoring ────────────────────────────────────────────
         scoring_engine = get_scoring_engine(plugin_name)
         result = scoring_engine.calculate_risk(normalized_data)
 
         result["validation"] = {
             "is_valid": validation_result.is_valid,
-            "warnings": [w.to_dict() for w in validation_result.warnings]
+            "warnings": [w.to_dict() for w in validation_result.warnings],
         }
 
-        # 4. TỰ ĐỘNG TÍCH LŨY DỮ LIỆU & LƯU LỊCH SỬ (Ánh xạ ngược Anh -> Việt)
-        if ten_dang_nhap:
-            user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == ten_dang_nhap).first()
-            if user:
-                # Tự động lưu form hiện tại vào Hồ sơ sức khỏe để làm giàu dữ liệu
-                profile_record = db.query(CsSucKhoe).filter(CsSucKhoe.idNguoiDung == user.idNguoiDung).first()
-                if not profile_record:
-                    profile_record = CsSucKhoe(idNguoiDung=user.idNguoiDung)
-                    db.add(profile_record)
+        # ── 5. Lưu DB ─────────────────────────────────────────────────────────
+        if user:
+            # Ghi ngược form_data vào hồ sơ sức khỏe
+            _save_form_to_profile(user.idNguoiDung, form_data, db)
 
-                for form_key, value in form_data.items():
-                    if value in [None, ""]: continue
-                    
-                    db_key = form_key # Mặc định
-                    if form_key in form_to_db:
-                        db_key = form_to_db[form_key]
-                        
-                    # Dịch ngược giá trị từ tiếng Anh của form về DB
-                    if form_key == "smoking_status":
-                        db_key = "hutThuoc"
-                        if value == "current": value = "Đang hút"
-                        elif value == "former": value = "Đã bỏ"
-                        elif value == "never": value = "Không"
+            # Lưu lịch sử đánh giá
+            lich_su = LichSuDanhGia(
+                idNguoiDung=user.idNguoiDung,
+                maBenh=plugin_name,
+                diemRule=float(result.get("rule_based", {}).get("score", 0.0)),
+                diemML=float(result.get("ai_based", {}).get("score", 0.0)),
+                diemTong=float(result.get("rule_based", {}).get("score", 0.0)),
+                mucNguyCo=str(result.get("rule_based", {}).get("risk_level", "low")),
+                ketQuaJSON=convert_to_serializable(result),
+            )
+            db.add(lich_su)
+            db.commit()
 
-                    # Ghi nhận chỉ số vào DB
-                    if hasattr(profile_record, db_key):
-                        setattr(profile_record, db_key, value)
-                
-                # Lưu log phân tích
-                metadata = get_plugin_metadata(plugin_name)
-                ten_benh = metadata.get("disease_info", {}).get("name", plugin_name)
+        return convert_to_serializable(result)
 
-                lich_su = LichSuDanhGia(
-                    idNguoiDung=user.idNguoiDung,
-                    tenBenh=ten_benh,
-                    diemRule=float(result.get("rule_based", {}).get("score", 0.0)),
-                    diemML=float(result.get("ai_based", {}).get("score", 0.0)),
-                    diemTong=float(result.get("rule_based", {}).get("score", 0.0)),
-                    mucNguyCo=str(result.get("rule_based", {}).get("risk_level", "low")),
-                    ketQuaJSON=result  
-                )
-                db.add(lich_su)
-                db.commit()
-
-        return result
-
-    except HTTPException as he:
-        raise he
+    except HTTPException:
+        raise
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Scoring error: {str(e)}")
+
 
 @router.post("/plugins/{plugin_name}/reload")
 def reload_plugin(plugin_name: str):
     try:
-        if plugin_name in plugin_loader._cache:
-            plugin_loader._cache.pop(plugin_name, None)
-        
-        metadata = plugin_loader.load_plugin(plugin_name, force_reload=True)
+        plugin_loader._cache.pop(plugin_name, None)
+        plugin_loader.load_plugin(plugin_name, force_reload=True)
         return {
             "status": "success",
             "message": f"Plugin '{plugin_name}' đã được reload thành công",
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/plugins/{plugin_name}/compare-risk")
+def compare_risk(
+    plugin_name: str,
+    scenarios: Dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+):
+    """
+    So sánh nhiều kịch bản nguy cơ cho cùng 1 plugin.
+
+    Body:
+    {
+        "current":   { ...form_data kịch bản hiện tại... },
+        "improved":  { ...form_data kịch bản cải thiện... }
+    }
+
+    Response:
+    {
+        "current":  { "score": 45.0, "risk_level": "medium" },
+        "improved": { "score": 22.0, "risk_level": "low", "score_difference": 23.0, "improvement_percentage": 51.1 }
+    }
+    """
+    try:
+        metadata = get_plugin_metadata(plugin_name)
+        validation_engine = ValidationEngine(metadata)
+        scoring_engine = get_scoring_engine(plugin_name)
+
+        results = {}
+        for scenario_name, scenario_data in scenarios.items():
+            try:
+                normalized = validation_engine.normalize_form_data(scenario_data)
+                unified = {**scenario_data, **normalized}
+                risk = scoring_engine.calculate_risk(unified)
+                results[scenario_name] = {
+                    "score":      float(risk.get("rule_based", {}).get("score", 0.0)),
+                    "risk_level": risk.get("rule_based", {}).get("risk_level", "unknown"),
+                }
+            except Exception as e:
+                results[scenario_name] = {"error": str(e)}
+
+        # Tính chênh lệch so với kịch bản "current" nếu có
+        if "current" in results and not results["current"].get("error"):
+            current_score = results["current"]["score"]
+            for name, sc in results.items():
+                if name != "current" and not sc.get("error"):
+                    diff = round(current_score - sc["score"], 2)
+                    sc["score_difference"] = diff
+                    sc["improvement_percentage"] = round(
+                        (diff / current_score * 100) if current_score > 0 else 0.0, 1
+                    )
+
+        return {"plugin": plugin_name, "scenarios": results}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Compare risk error: {str(e)}")
 ```
 
 ### backend\app\plugin_loader.py
@@ -1156,6 +1340,12 @@ class RiskStratificationEngine:
         # Chuẩn hóa các trường thói quen & phân loại
         if "gioiTinh" in unified_data:
             ml_data["gender_code"] = 1.0 if unified_data["gioiTinh"] == "Nam" else 2.0
+        
+        if "gender_code" in unified_data and "gender_code" not in ml_data:
+            try:
+                ml_data["gender_code"] = float(unified_data["gender_code"])
+            except (ValueError, TypeError):
+                ml_data["gender_code"] = 1.0
             
         if "hutThuoc" in unified_data:
             ml_data["smoke"] = 1.0 if str(unified_data["hutThuoc"]).strip().lower() in ["đang hút", "yes", "1"] else 0.0
@@ -1243,8 +1433,33 @@ class RiskStratificationEngine:
             if len(missing_fields) == 0:
                 ai_status = "READY"
                 try:
-                    df_input = pd.DataFrame([{col: ml_ready_features[col] for col in self.ml_required_features}])
-                    proba = self.ml_model.predict_proba(df_input)[0, 1]
+                    import warnings, traceback
+        
+                    # DEBUG 1: kiểm tra feature_cols load được không
+                    plugin_id = self.metadata.get('disease_info', {}).get('id', '')
+                    feature_cols_path = os.path.join(
+                        os.path.dirname(__file__), "..", "ml", "models",
+                        f"{plugin_id}_feature_cols.pkl"
+                    )
+                    print(f"🔍 feature_cols_path exists: {os.path.exists(feature_cols_path)}")
+                    
+                    all_feature_cols = joblib.load(feature_cols_path)
+                    print(f"🔍 all_feature_cols ({len(all_feature_cols)}): {all_feature_cols}")
+                    
+                    # DEBUG 2: kiểm tra row trước khi tạo DataFrame
+                    row = {col: ml_ready_features.get(col, float("nan")) for col in all_feature_cols}
+                    print(f"🔍 row: {row}")
+                    
+                    df_input = pd.DataFrame([row])
+                    print(f"🔍 df_input shape: {df_input.shape}, columns: {list(df_input.columns)}")
+                    print(f"🔍 df_input NaN count: {df_input.isna().sum().to_dict()}")
+                    
+                    # DEBUG 3: thử predict với warnings tắt
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        proba = self.ml_model.predict_proba(df_input)[0, 1]
+                    
+                    print(f"✅ proba = {proba}")
                     ai_score = round(proba * 100, 2)
                     ai_proba = round(proba, 4)
                     ai_confidence = 85
@@ -1252,6 +1467,9 @@ class RiskStratificationEngine:
                 except Exception as e:
                     ai_status = "PARTIAL"
                     ai_risk_level = f"Lỗi thực thi mô hình AI: {str(e)}"
+                    print(f"❌ EXCEPTION type: {type(e).__name__}")
+                    print(f"❌ EXCEPTION message: {e}")
+                    traceback.print_exc()
             else:
                 ai_status = "PARTIAL"
                 ai_risk_level = "Thiếu dữ liệu để thực hiện đánh giá bằng AI"
@@ -1270,19 +1488,19 @@ class RiskStratificationEngine:
 
         return {
             "rule_based": {
-                "score": rule_score,
+                "score": float(rule_score),
                 "risk_level": rule_risk_level,
                 "matched_rules": all_matched_rules
             },
             "ai_based": {
                 "status": ai_status,
-                "score": ai_score,
+                "score": float(ai_score),
                 "risk_level": ai_risk_level,
-                "probability": ai_proba,
-                "confidence": ai_confidence,
+                "probability": float(ai_proba),
+                "confidence": int(ai_confidence),
                 "missing_features": missing_fields
             },
-            "final_score": rule_score,
+            "final_score": float(rule_score),
             "matched_rules": all_matched_rules,
             **explanation
         }
@@ -2499,7 +2717,8 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from database.database import SessionLocal
 from database.nguoi_dung import NguoiDung
-from database.cs_suc_khoe import CsSucKhoe
+from database.hs_suckhoe import HoSoSucKhoe
+from database.cs_suckhoe import ChiSoSucKhoe
 
 router = APIRouter(prefix="/health-profile", tags=["Health Profile"])
 
@@ -2510,18 +2729,41 @@ def get_db():
     finally:
         db.close()
 
+# Tập hợp cột cứng thuộc bảng hoSoSucKhoe
+HO_SO_COLS = {
+    "tuoi", "gioiTinh", "chieuCao", "canNang", "bmi", "vongEo",
+    "huyetApTamThu", "huyetApTamTruong", "hutThuoc", "uongRuouBia",
+    "soPhutVanDongMoiTuan",
+}
+
+# Các field EAV cần ép kiểu khi đọc về
+BOOLEAN_FIELDS = {
+    "caoHuyetAp", "tieuDuong", "benhTimMach", "gout",
+    "giaDinhCaoHuyetAp", "giaDinhTieuDuong", "giaDinhTimMach", "giaDinhGout",
+}
+NUMBER_FIELDS = {
+    "duongHuyet", "hba1c", "cholesterol", "ldl", "hdl",
+    "triglyceride", "creatinine", "acidUric", "mucDoAnMan",
+}
+
+
 class HealthProfileSchema(BaseModel):
     tenDangNhap: str
+
+    # Cột cứng — hoSoSucKhoe
     tuoi: Optional[int] = None
-    gioiTinh: Optional[str] = "Nam"
+    gioiTinh: Optional[str] = None
     chieuCao: Optional[float] = None
     canNang: Optional[float] = None
     bmi: Optional[float] = None
     vongEo: Optional[float] = None
     huyetApTamThu: Optional[float] = None
     huyetApTamTruong: Optional[float] = None
-    
-    # Sinh hóa đồng bộ mở rộng
+    hutThuoc: Optional[str] = None
+    uongRuouBia: Optional[str] = None
+    soPhutVanDongMoiTuan: Optional[int] = None
+
+    # EAV — chiSoSucKhoe
     duongHuyet: Optional[float] = None
     hba1c: Optional[float] = None
     cholesterol: Optional[float] = None
@@ -2530,21 +2772,16 @@ class HealthProfileSchema(BaseModel):
     triglyceride: Optional[float] = None
     creatinine: Optional[float] = None
     acidUric: Optional[float] = None
-    
-    hutThuoc: Optional[str] = "Không"
-    uongRuouBia: Optional[str] = "Không"
-    soPhutVanDongMoiTuan: Optional[int] = None
-    mucDoAnMan: Optional[str] = "Vừa"
-    
-    caoHuyetAp: Optional[bool] = False
-    tieuDuong: Optional[bool] = False
-    benhTimMach: Optional[bool] = False
-    gout: Optional[bool] = False
-    
-    giaDinhCaoHuyetAp: Optional[bool] = False
-    giaDinhTieuDuong: Optional[bool] = False
-    giaDinhTimMach: Optional[bool] = False
-    giaDinhGout: Optional[bool] = False
+    mucDoAnMan: Optional[str] = None
+    caoHuyetAp: Optional[bool] = None
+    tieuDuong: Optional[bool] = None
+    benhTimMach: Optional[bool] = None
+    gout: Optional[bool] = None
+    giaDinhCaoHuyetAp: Optional[bool] = None
+    giaDinhTieuDuong: Optional[bool] = None
+    giaDinhTimMach: Optional[bool] = None
+    giaDinhGout: Optional[bool] = None
+
 
 @router.get("/{ten_dang_nhap}")
 def get_health_profile(ten_dang_nhap: str, db: Session = Depends(get_db)):
@@ -2552,13 +2789,42 @@ def get_health_profile(ten_dang_nhap: str, db: Session = Depends(get_db)):
         user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == ten_dang_nhap).first()
         if not user:
             raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
-        profile = db.query(CsSucKhoe).filter(CsSucKhoe.idNguoiDung == user.idNguoiDung).first()
-        if not profile:
+
+        hoso = db.query(HoSoSucKhoe).filter(HoSoSucKhoe.idNguoiDung == user.idNguoiDung).first()
+        chisos = db.query(ChiSoSucKhoe).filter(ChiSoSucKhoe.idNguoiDung == user.idNguoiDung).all()
+
+        if not hoso and not chisos:
             return {"message": "Chưa có hồ sơ", "data": None}
-        profile_dict = {k: v for k, v in profile.__dict__.items() if not k.startswith('_') and v is not None}
+
+        profile_dict = {}
+
+        # Đọc cột cứng từ hoSoSucKhoe
+        if hoso:
+            for k, v in hoso.__dict__.items():
+                if not k.startswith("_") and v is not None:
+                    profile_dict[k] = v
+
+        # Đọc EAV từ chiSoSucKhoe, ép kiểu
+        for cs in chisos:
+            if cs.giaTri is None:
+                continue
+            if cs.maChiSo in BOOLEAN_FIELDS:
+                profile_dict[cs.maChiSo] = cs.giaTri.lower() in ("true", "1", "yes", "có")
+            elif cs.maChiSo in NUMBER_FIELDS:
+                try:
+                    profile_dict[cs.maChiSo] = float(cs.giaTri)
+                except ValueError:
+                    profile_dict[cs.maChiSo] = cs.giaTri
+            else:
+                profile_dict[cs.maChiSo] = cs.giaTri
+
         return {"message": "Thành công", "data": profile_dict}
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi lấy hồ sơ: {str(e)}")
+
 
 @router.post("/")
 def upsert_health_profile(profile_data: HealthProfileSchema, db: Session = Depends(get_db)):
@@ -2566,19 +2832,51 @@ def upsert_health_profile(profile_data: HealthProfileSchema, db: Session = Depen
         user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == profile_data.tenDangNhap).first()
         if not user:
             raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
-        existing_profile = db.query(CsSucKhoe).filter(CsSucKhoe.idNguoiDung == user.idNguoiDung).first()
-        
-        # Chuyển đổi dữ liệu, loại bỏ key định danh
-        update_data = profile_data.dict(exclude={"tenDangNhap"})
-        if existing_profile:
-            for key, value in update_data.items():
-                if value is not None:
-                    setattr(existing_profile, key, value)
-        else:
-            new_profile = CsSucKhoe(idNguoiDung=user.idNguoiDung, **update_data)
-            db.add(new_profile)
+
+        # Chỉ lấy các field được gửi lên (exclude_unset tránh ghi đè bằng None)
+        update_data = profile_data.dict(exclude={"tenDangNhap"}, exclude_unset=True)
+
+        hoso_updates = {}
+        chiso_updates = {}
+
+        for key, value in update_data.items():
+            if key in HO_SO_COLS:
+                hoso_updates[key] = value
+            else:
+                chiso_updates[key] = value
+
+        # === Lưu hoSoSucKhoe ===
+        if hoso_updates:
+            existing = db.query(HoSoSucKhoe).filter(HoSoSucKhoe.idNguoiDung == user.idNguoiDung).first()
+            if existing:
+                for k, v in hoso_updates.items():
+                    setattr(existing, k, v)
+            else:
+                db.add(HoSoSucKhoe(idNguoiDung=user.idNguoiDung, **hoso_updates))
+
+        # === Lưu chiSoSucKhoe (EAV) ===
+        for key, value in chiso_updates.items():
+            existing = db.query(ChiSoSucKhoe).filter(
+                ChiSoSucKhoe.idNguoiDung == user.idNguoiDung,
+                ChiSoSucKhoe.maChiSo == key,
+            ).first()
+
+            if value is None or value == "":
+                # Xóa hàng nếu người dùng xóa dữ liệu
+                if existing:
+                    db.delete(existing)
+            else:
+                str_value = ("true" if value else "false") if isinstance(value, bool) else str(value)
+                if existing:
+                    existing.giaTri = str_value
+                else:
+                    db.add(ChiSoSucKhoe(idNguoiDung=user.idNguoiDung, maChiSo=key, giaTri=str_value))
+
         db.commit()
         return {"message": "Đã lưu chỉ số sức khỏe cá nhân thành công!", "status": "success"}
+
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Lỗi lưu hồ sơ: {str(e)}")
@@ -4054,9 +4352,34 @@ import axios from "axios";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 
+// Keys phụ trợ tính BMI — không phải field plugin
+const AUX_KEYS = new Set(["chieuCao", "canNang"]);
+
+// Fallback mapping: key plugin → key hồ sơ sức khỏe
+// Chỉ dùng khi field trong metadata KHÔNG khai báo health_profile_key
+const EAV_FALLBACK = {
+  age: "tuoi",
+  systolic: "huyetApTamThu",
+  diastolic: "huyetApTamTruong",
+  fasting_glucose: "duongHuyet",
+  hba1c: "hba1c",
+  total_cholesterol: "cholesterol",
+  ldl: "ldl",
+  hdl: "hdl",
+  creatinine: "creatinine",
+  waist: "vongEo",
+  smoking_status: "hutThuoc",
+  exercise_minutes_per_week: "soPhutVanDongMoiTuan",
+  alcohol: "uongRuouBia",
+  diabetes_status: "tieuDuong",
+  family_history_diabetes: "giaDinhTieuDuong",
+  family_history_hypertension: "giaDinhCaoHuyetAp",
+  family_history_cardiovascular: "giaDinhTimMach",
+};
+
 export default function MainRiskPage() {
-  const [selectedPlugin, setSelectedPlugin] = useState("diabetes");
-  const [plugins, setPlugins] = useState([]);
+  const [selectedPlugin, setSelectedPlugin] = useState(null);
+  const [plugins, setPlugins] = useState([]);   // [{id, name, icon}, ...]
   const [plugin, setPlugin] = useState(null);
   const [formData, setFormData] = useState({});
   const [errors, setErrors] = useState({});
@@ -4068,223 +4391,546 @@ export default function MainRiskPage() {
 
   const tenDangNhap = localStorage.getItem("userName");
 
-  const pluginLabels = {
-    diabetes: "🍬 Tiểu đường",
-    hypertension: "🩸 Tăng huyết áp",
-    cardiovascular: "❤️ Tim mạch",
-    kidney: "🫘 Thận mãn tính",
-  };
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   useEffect(() => { loadPluginsList(); }, []);
-  useEffect(() => { tenDangNhap ? fetchHealthProfile() : setProfileLoaded(true); }, [tenDangNhap]);
-  useEffect(() => { if (profileLoaded) loadPlugin(selectedPlugin); }, [selectedPlugin, profileLoaded, healthProfile]);
+
+  useEffect(() => {
+    if (tenDangNhap) fetchHealthProfile();
+    else setProfileLoaded(true);
+  }, [tenDangNhap]);
+
+  useEffect(() => {
+    if (profileLoaded && selectedPlugin) loadPlugin(selectedPlugin);
+  }, [selectedPlugin, profileLoaded]);
+
+  // ── Data loading ───────────────────────────────────────────────────────────
 
   const fetchHealthProfile = async () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/health-profile/${tenDangNhap}`);
       if (res.data.data) setHealthProfile(res.data.data);
-    } catch (error) { console.error(error); }
-    finally { setProfileLoaded(true); }
+    } catch (e) {
+      console.error("Fetch health profile error:", e);
+    } finally {
+      setProfileLoaded(true);
+    }
   };
 
   const loadPluginsList = async () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/plugins`);
-      setPlugins(res.data.plugins || []);
-    } catch (e) { console.error(e); }
+      // Backend trả về mảng string ["diabetes", "cardiovascular", ...]
+      // hoặc mảng object [{id, name, icon}, ...] tuỳ phiên bản
+      const raw = res.data.plugins || [];
+      const normalized = raw.map(p =>
+        typeof p === "string" ? { id: p, name: p, icon: "" } : p
+      );
+      setPlugins(normalized);
+      if (normalized.length > 0 && !selectedPlugin) {
+        setSelectedPlugin(normalized[0].id);
+      }
+    } catch (e) {
+      console.error("Load plugins list error:", e);
+    }
   };
 
-  const loadPlugin = async (pluginName) => {
+  const loadPlugin = async (pluginId) => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API_BASE_URL}/plugins/${pluginName}`);
-      setPlugin(response.data);
-      setFormData(mergeWithHealthProfile(response.data.fields));
+      const res = await axios.get(`${API_BASE_URL}/plugins/${pluginId}`);
+      const pluginData = res.data;
+      setPlugin(pluginData);
+      setFormData(buildFormFromMetadata(pluginData.fields));
       setRiskResult(null);
       setErrors({});
-    } catch (error) { console.error(error); }
-    finally { setLoading(false); }
+    } catch (e) {
+      console.error("Load plugin error:", e);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const mergeWithHealthProfile = (fields) => {
-    const initialData = {};
-    fields.forEach((field) => initialData[field.key] = field.default !== undefined ? field.default : "");
-    if (!healthProfile) return initialData;
+  // ── Metadata-driven form init ──────────────────────────────────────────────
+  //
+  // Ưu tiên: field.health_profile_key (khai báo trong metadata)
+  // Fallback: EAV_FALLBACK[field.key]
+  // Không có hardcode tên bệnh nào ở đây.
 
-    const dbToFormMapping = {
-      "tuoi": "age", "bmi": "bmi", "vongEo": "waist",
-      "huyetApTamThu": "systolic", "huyetApTamTruong": "diastolic",
-      "duongHuyet": "fasting_glucose", "hba1c": "hba1c",
-      "cholesterol": "total_cholesterol", "ldl": "ldl", "hdl": "hdl",
-      "creatinine": "creatinine", "soPhutVanDongMoiTuan": "exercise_minutes_per_week",
-      "giaDinhTieuDuong": "family_history_diabetes",
-      "giaDinhCaoHuyetAp": "family_history_hypertension",
-      "giaDinhTimMach": "family_history_cardiovascular",
-    };
+  const buildFormFromMetadata = (fields) => {
+    const data = {};
 
-    Object.keys(dbToFormMapping).forEach(dbKey => {
-      if (healthProfile[dbKey] !== undefined && healthProfile[dbKey] !== null) {
-        if (fields.some(f => f.key === dbToFormMapping[dbKey]))
-          initialData[dbToFormMapping[dbKey]] = healthProfile[dbKey];
-      }
+    // Giá trị mặc định
+    fields.forEach((field) => {
+      const key = field.key || field.code;
+      data[key] = field.default !== undefined
+        ? field.default
+        : (field.type === "boolean" ? false : "");
     });
 
-    if (healthProfile["hutThuoc"] && fields.some(f => f.key === "smoking_status")) {
-      const val = healthProfile["hutThuoc"];
-      initialData["smoking_status"] = val === "Đang hút" ? "current" : val === "Đã bỏ" ? "former" : "never";
-    }
+    // Thêm field phụ trợ tính BMI
+    data.chieuCao = "";
+    data.canNang = "";
 
-    if (healthProfile["uongRuouBia"] && fields.some(f => f.key === "alcohol")) {
-      const mapping = { "Không": "0", "Thỉnh thoảng": "0", "Thường xuyên": "1", "Nhiều": "1" };
-      initialData["alcohol"] = mapping[healthProfile["uongRuouBia"]] ?? "0";
-    }
+    if (!healthProfile) return data;
 
-    if (healthProfile["tieuDuong"] !== undefined && fields.some(f => f.key === "diabetes_status")) {
-      initialData["diabetes_status"] = healthProfile["tieuDuong"] ? "yes" : "no";
-    }
+    // Bơm dữ liệu từ hồ sơ sức khỏe
+    // Cột cứng: luôn load nếu healthProfile có
+    const hardCols = ["tuoi", "gioiTinh", "chieuCao", "canNang", "bmi", "vongEo",
+      "huyetApTamThu", "huyetApTamTruong", "hutThuoc", "uongRuouBia",
+      "soPhutVanDongMoiTuan"];
+    hardCols.forEach(k => {
+      if (healthProfile[k] !== undefined) data[k] = healthProfile[k];
+    });
 
-    return initialData;
+    // Bơm theo từng field trong metadata
+    fields.forEach((field) => {
+      const key = field.key || field.code;
+      const hpKey = field.health_profile_key || EAV_FALLBACK[key] || key;
+      let value = healthProfile[hpKey];
+
+      if (value === undefined || value === null) return;
+
+      // Convert giá trị đặc biệt
+      if (key === "smoking_status") {
+        const map = { "Chưa bao giờ": "never", "Đã bỏ": "former", "Đang hút": "current", "Không": "never" };
+        value = map[value] ?? value;
+      }
+
+      if (key === "alcohol") {
+        const map = { "Không": "0", "Thỉnh thoảng": "0", "Thường xuyên": "1", "Nhiều": "1" };
+        value = map[value] ?? "0";
+      }
+
+      if (key === "diabetes_status" || key === "htn_status") {
+        if (typeof value === "boolean") value = value ? "yes" : "no";
+      }
+
+      // Ép kiểu theo type của field
+      if (field.type === "boolean") data[key] = Boolean(value);
+      else if (field.type === "number") data[key] = Number(value);
+      else data[key] = value;
+    });
+
+    // Tính BMI từ chiều cao + cân nặng nếu có
+    const h = parseFloat(data.chieuCao);
+    const w = parseFloat(data.canNang);
+    if (h > 0 && w > 0) data.bmi = Number((w / (h / 100) ** 2).toFixed(1));
+
+    return data;
   };
 
-  const handleChange = async (field, value) => {
-    const updated = { ...formData, [field.key]: value };
+  // ── Input handling ─────────────────────────────────────────────────────────
+
+  const handleChange = async (fieldOrKey, value) => {
+    const key = typeof fieldOrKey === "object"
+      ? (fieldOrKey.key || fieldOrKey.code)
+      : fieldOrKey;
+    const updated = { ...formData, [key]: value };
+
+    // Tự tính BMI
+    if (key === "chieuCao" || key === "canNang") {
+      const h = parseFloat(updated.chieuCao);
+      const w = parseFloat(updated.canNang);
+      updated.bmi = h > 0 && w > 0
+        ? Number((w / (h / 100) ** 2).toFixed(1))
+        : "";
+    }
+
     setFormData(updated);
-    try {
-      const res = await axios.post(`${API_BASE_URL}/plugins/${selectedPlugin}/validate-field/${field.key}`, updated);
-      setErrors(prev => ({ ...prev, [field.key]: res.data.is_valid ? "" : res.data.errors[0]?.message }));
-    } catch (e) { console.error(e); }
+
+    // Real-time validate field nếu là field của plugin
+    const isPluginField = plugin?.fields?.some(f => (f.key || f.code) === key);
+    if (isPluginField) {
+      try {
+        const res = await axios.post(
+          `${API_BASE_URL}/plugins/${selectedPlugin}/validate-field/${key}`,
+          updated
+        );
+        setErrors(prev => ({
+          ...prev,
+          [key]: res.data.is_valid ? "" : (res.data.errors?.[0]?.message || ""),
+        }));
+      } catch (e) {
+        console.error("Validate field error:", e);
+      }
+    }
   };
+
+  // ── Risk analysis ──────────────────────────────────────────────────────────
 
   const handleAnalyzeClick = () => {
-    let missingFields = plugin.fields.filter(f => f.required && (formData[f.key] === undefined || formData[f.key] === "")).map(f => f.label);
-    if (missingFields.length > 0) return alert(`⚠️ Thiếu thông tin bắt buộc:\n- ${missingFields.join('\n- ')}`);
+    if (!plugin) return;
+
+    const missing = plugin.fields
+      .filter(f => {
+        const key = f.key || f.code;
+        const val = formData[key];
+        return f.required && (val === undefined || val === null || (f.type !== "boolean" && val === ""));
+      })
+      .map(f => f.label);
+
+    if (missing.length > 0) {
+      alert(`⚠️ Thiếu thông tin bắt buộc:\n- ${missing.join("\n- ")}`);
+      return;
+    }
+
     calculateRisk(formData);
   };
 
   const calculateRisk = async (currentData) => {
     try {
       setIsCalculating(true);
+
+      // Chỉ gửi các key thuộc plugin (bỏ aux keys và giá trị rỗng)
+      const pluginKeys = new Set(plugin?.fields?.map(f => f.key || f.code) || []);
       const cleanData = {};
-      Object.keys(currentData).forEach(k => { if (currentData[k] !== "" && currentData[k] !== null) cleanData[k] = currentData[k]; });
-      const response = await axios.post(`${API_BASE_URL}/plugins/${selectedPlugin}/score?ten_dang_nhap=${tenDangNhap || ''}`, cleanData);
+      for (const [k, v] of Object.entries(currentData)) {
+        if (pluginKeys.has(k) && !AUX_KEYS.has(k) && v !== "" && v !== null && v !== undefined) {
+          cleanData[k] = v;
+        }
+      }
+
+      const response = await axios.post(
+        `${API_BASE_URL}/plugins/${selectedPlugin}/score?ten_dang_nhap=${tenDangNhap || ""}`,
+        cleanData
+      );
+
       setRiskResult(response.data);
       setErrors({});
+
+      // Refresh cache hồ sơ sau khi backend auto-save
+      if (tenDangNhap) {
+        try {
+          const pr = await axios.get(`${API_BASE_URL}/health-profile/${tenDangNhap}`);
+          if (pr.data.data) setHealthProfile(pr.data.data);
+        } catch (_) { /* non-blocking */ }
+      }
     } catch (error) {
       setRiskResult(null);
-      alert("❌ LỖI VALIDATION:\n" + (error.response?.data?.detail?.message || "Không thể phân tích dữ liệu."));
-    } finally { setIsCalculating(false); }
+      let msg = "Không thể phân tích dữ liệu.";
+      if (error.response?.data?.detail?.errors) {
+        msg = error.response.data.detail.errors.map(e => `- ${e.field}: ${e.message}`).join("\n");
+        msg = `Hệ thống từ chối phân tích:\n\n${msg}`;
+      } else if (error.response?.data?.detail) {
+        msg = typeof error.response.data.detail === "string"
+          ? error.response.data.detail
+          : JSON.stringify(error.response.data.detail);
+      }
+      alert("❌ LỖI:\n" + msg);
+    } finally {
+      setIsCalculating(false);
+    }
   };
 
-  if (loading || !plugin) return <div style={{ color: "#64748B" }}>Đang tải cấu hình dữ liệu y tế...</div>;
+  // ── UI helpers ─────────────────────────────────────────────────────────────
+
+  const riskColor = (score) =>
+    score > 60 ? "#EF4444" : score > 30 ? "#F59E0B" : "#22C55E";
+
+  const riskColorByLevel = (level) => {
+    const l = String(level).toLowerCase();
+    return l.includes("high") || l.includes("cao") ? "#EF4444"
+      : l.includes("medium") || l.includes("trung") ? "#F59E0B"
+        : "#22C55E";
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  if (!profileLoaded || (loading && !plugin)) {
+    return <div style={{ padding: "40px", textAlign: "center", color: "#64748B" }}>Đang tải cấu hình dữ liệu y tế...</div>;
+  }
+
+  const disease = plugin?.disease_info || {};
+  if (riskResult) {
+    console.log("🔍 riskResult structure:", JSON.stringify(riskResult, null, 2));
+  }
 
   return (
     <div style={{ width: "100%", maxWidth: "1200px", margin: "0 auto" }}>
-      {/* KHAI BÁO CSS ĐẢM BẢO MÀU CHỮ HIỂN THỊ ĐẬM RÕ RÀNG TRÊN NỀN TRẮNG */}
       <style>{`
-        .custom-input { 
-          background-color: #FFFFFF !important; 
-          color: #1E293B !important; 
-          border: 1px solid #D1D5DB; 
-          border-radius: 8px; 
-          padding: 12px; 
-          width: 100%; 
-          box-sizing: border-box; 
-          font-size: 15px; 
-          transition: all 0.2s ease-in-out; 
-        }
-        .custom-input:focus { 
-          outline: none; 
-          border-color: #2563EB; 
-          box-shadow: 0 0 0 3px rgba(37,99,235,.15); 
-        }
-        select.custom-input option {
-          color: #1E293B !important;
+        .custom-input {
           background-color: #FFFFFF !important;
+          color: #1E293B !important;
+          border: 1px solid #D1D5DB;
+          border-radius: 8px;
+          padding: 12px;
+          width: 100%;
+          box-sizing: border-box;
+          font-size: 15px;
+          transition: all 0.2s;
         }
-        .btn-analyze { height: 56px; font-size: 18px; font-weight: 700; border-radius: 12px; background: #2563EB; color: white; border: none; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 6px -1px rgba(37,99,235,.2); }
-        .btn-analyze:hover { transform: translateY(-2px); background: #1D4ED8; }
+        .custom-input:focus {
+          outline: none;
+          border-color: #2563EB;
+          box-shadow: 0 0 0 3px rgba(37,99,235,.15);
+        }
+        select.custom-input option { color: #1E293B !important; background: #FFF !important; }
+        .btn-analyze {
+          height: 56px; font-size: 18px; font-weight: 700; border-radius: 12px;
+          background: #2563EB; color: white; border: none; cursor: pointer;
+          transition: all 0.2s; box-shadow: 0 4px 6px -1px rgba(37,99,235,.2);
+        }
+        .btn-analyze:hover  { transform: translateY(-2px); background: #1D4ED8; }
         .btn-analyze:disabled { background: #94A3B8; cursor: not-allowed; transform: none; }
       `}</style>
 
-      {/* HEADER NGANG THU GỌN */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#FFFFFF", padding: "20px 24px", borderRadius: "12px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", marginBottom: "32px" }}>
+      {/* HEADER */}
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        background: "#FFF", padding: "20px 24px", borderRadius: "12px",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.05)", marginBottom: "32px"
+      }}>
         <div>
-          <h2 style={{ margin: 0, color: "#1E293B", fontSize: "20px", fontWeight: "700" }}>🫁 {plugin.disease_info?.name || "Đánh giá nguy cơ"}</h2>
-          <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "#64748B" }}>{plugin.disease_info?.description}</p>
+          <h2 style={{ margin: 0, color: "#1E293B", fontSize: "20px", fontWeight: 700 }}>
+            {disease.icon ? `${disease.icon} ` : "🫁 "}{disease.name || "Đánh giá nguy cơ"}
+          </h2>
+          <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "#64748B" }}>
+            {disease.description}
+          </p>
         </div>
+
+        {/* Dropdown — label và icon lấy từ metadata, không hardcode */}
         <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-          <span style={{ fontSize: "14px", fontWeight: "600", color: "#475569" }}>Mô hình đích:</span>
-          <select value={selectedPlugin} onChange={(e) => setSelectedPlugin(e.target.value)} className="custom-input" style={{ width: "220px", padding: "8px 12px" }}>
-            {plugins.map(p => <option key={p} value={p}>{pluginLabels[p] || p}</option>)}
+          <span style={{ fontSize: "14px", fontWeight: 600, color: "#475569" }}>Mô hình đích:</span>
+          <select
+            value={selectedPlugin || ""}
+            onChange={(e) => setSelectedPlugin(e.target.value)}
+            className="custom-input"
+            style={{ width: "240px", padding: "8px 12px" }}
+          >
+            {plugins.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.icon ? `${p.icon} ` : ""}{p.name || p.id}
+              </option>
+            ))}
           </select>
         </div>
       </div>
 
-      {/* FORM NHẬP LIỆU */}
-      <div style={{ background: "white", padding: "32px", borderRadius: "16px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", border: "1px solid #E2E8F0" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-          {plugin.fields.map((field) => (
-            <div key={field.key} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <label style={{ fontWeight: "600", color: "#475569", fontSize: "14px" }}>
-                {field.label}{field.required && <span style={{ color: "#EF4444" }}> *</span>}
-              </label>
+      {/* FORM */}
+      {!loading && plugin && (
+        <div style={{
+          background: "white", padding: "32px", borderRadius: "16px",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.05)", border: "1px solid #E2E8F0"
+        }}>
 
-              {field.type === "number" && (
-                <input type="number" className="custom-input" value={formData[field.key] ?? ""} onChange={(e) => handleChange(field, e.target.value === "" ? "" : Number(e.target.value))} />
-              )}
-              {field.type === "select" && (
-                <select className="custom-input" value={formData[field.key] ?? ""} onChange={(e) => handleChange(field, e.target.value)}>
-                  <option value="">-- Chọn --</option>
-                  {field.options?.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                </select>
-              )}
-              {field.type === "boolean" && (
-                <label style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px", border: "1px solid #D1D5DB", borderRadius: "8px", cursor: "pointer", backgroundColor: formData[field.key] ? "#EFF6FF" : "#FFFFFF", borderColor: formData[field.key] ? "#2563EB" : "#D1D5DB", transition: "all 0.2s" }}>
-                  <input type="checkbox" checked={!!formData[field.key]} onChange={(e) => handleChange(field, e.target.checked)} style={{ width: "18px", height: "18px" }} />
-                  <span style={{ color: formData[field.key] ? "#1E40AF" : "#475569", fontSize: "15px", fontWeight: formData[field.key] ? "600" : "500" }}>Kích hoạt yếu tố chỉ định này</span>
-                </label>
-              )}
-              {errors[field.key] && <div style={{ color: "#EF4444", fontSize: "13px", fontWeight: "500" }}>{errors[field.key]}</div>}
-            </div>
-          ))}
-        </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
+            {plugin.fields.map((field) => {
+              const key = field.key || field.code;
 
-        <button className="btn-analyze" onClick={handleAnalyzeClick} disabled={isCalculating} style={{ width: "100%", marginTop: "32px" }}>
-          {isCalculating ? "⏳ Đang phân tích chỉ số liên tầng..." : "🩺 Phân tích nguy cơ"}
-        </button>
-      </div>
+              // BMI field: render block chiều cao + cân nặng + BMI readonly
+              if (key === "bmi") return (
+                <div key="bmi_group" style={{
+                  gridColumn: "1 / -1", background: "#F8FAFC",
+                  padding: "16px", borderRadius: "8px", border: "1px dashed #CBD5E1"
+                }}>
+                  <p style={{ margin: "0 0 10px 0", fontSize: "13px", color: "#64748B", fontStyle: "italic" }}>
+                    Chỉ số BMI được tự động tính từ chiều cao và cân nặng.
+                  </p>
+                  <div style={{ display: "flex", gap: "12px", marginBottom: "10px" }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontWeight: 600, color: "#475569", fontSize: "14px", display: "block", marginBottom: 6 }}>
+                        Chiều cao (cm)
+                      </label>
+                      <input type="number" className="custom-input"
+                        value={formData.chieuCao || ""}
+                        onChange={e => handleChange("chieuCao", e.target.value === "" ? "" : Number(e.target.value))} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontWeight: 600, color: "#475569", fontSize: "14px", display: "block", marginBottom: 6 }}>
+                        Cân nặng (kg)
+                      </label>
+                      <input type="number" className="custom-input"
+                        value={formData.canNang || ""}
+                        onChange={e => handleChange("canNang", e.target.value === "" ? "" : Number(e.target.value))} />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontWeight: 600, color: "#0F766E", fontSize: "14px", display: "block", marginBottom: 6 }}>
+                      BMI (tự động)
+                    </label>
+                    <input type="number" readOnly className="custom-input"
+                      value={formData.bmi || ""}
+                      style={{ background: "#F0FDF4 !important", color: "#0F766E", fontWeight: 700 }} />
+                  </div>
+                </div>
+              );
 
-      {/* DUAL ENGINE DASHBOARD */}
-      {riskResult && (
-        <div style={{ marginTop: "32px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-          <div style={{ background: "white", padding: "24px", borderRadius: "16px", border: "1px solid #E2E8F0", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
-            <h3 style={{ margin: "0 0 16px 0", color: "#334155", display: "flex", justifyContent: "space-between" }}>
-              <span>📋 Rule-based Engine</span>
-              <span style={{ color: "#2563EB", fontWeight: "700" }}>{riskResult.rule_based?.score ?? 0} Điểm</span>
-            </h3>
-            <div style={{ width: "100%", height: "12px", background: "#F1F5F9", borderRadius: "6px", overflow: "hidden", marginBottom: "16px" }}>
-              <div style={{ width: `${Math.min(riskResult.rule_based?.score ?? 0, 100)}%`, height: "100%", background: riskResult.rule_based?.score > 60 ? "#EF4444" : riskResult.rule_based?.score > 30 ? "#F59E0B" : "#22C55E", transition: "width 1s" }} />
-            </div>
-            <p style={{ margin: 0, color: "#64748B" }}>Phân tầng nguy cơ: <strong style={{ color: riskResult.rule_based?.score > 60 ? "#EF4444" : riskResult.rule_based?.score > 30 ? "#F59E0B" : "#22C55E" }}>{String(riskResult.rule_based?.risk_level).toUpperCase()}</strong></p>
+              return (
+                <div key={key} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <label style={{ fontWeight: 600, color: "#475569", fontSize: "14px" }}>
+                    {field.label}
+                    {field.unit && <span style={{ color: "#94A3B8", fontWeight: 400 }}> ({field.unit})</span>}
+                    {field.required && <span style={{ color: "#EF4444" }}> *</span>}
+                  </label>
+
+                  {field.type === "number" && (
+                    <input type="number" className="custom-input"
+                      value={formData[key] ?? ""}
+                      min={field.min} max={field.max} step={field.step ?? 1}
+                      onChange={e => handleChange(field, e.target.value === "" ? "" : Number(e.target.value))} />
+                  )}
+
+                  {field.type === "select" && (
+                    <select className="custom-input"
+                      value={formData[key] ?? ""}
+                      onChange={e => handleChange(field, e.target.value)}>
+                      <option value="">-- Chọn --</option>
+                      {field.options?.map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  )}
+
+                  {field.type === "boolean" && (
+                    <label style={{
+                      display: "flex", alignItems: "center", gap: "10px", padding: "12px",
+                      border: `1px solid ${formData[key] ? "#2563EB" : "#D1D5DB"}`,
+                      borderRadius: "8px", cursor: "pointer",
+                      background: formData[key] ? "#EFF6FF" : "#FFF", transition: "all 0.2s"
+                    }}>
+                      <input type="checkbox" checked={!!formData[key]}
+                        onChange={e => handleChange(field, e.target.checked)}
+                        style={{ width: 18, height: 18 }} />
+                      <span style={{
+                        color: formData[key] ? "#1E40AF" : "#475569", fontSize: 15,
+                        fontWeight: formData[key] ? 600 : 500
+                      }}>
+                        Kích hoạt yếu tố này
+                      </span>
+                    </label>
+                  )}
+
+                  {field.type === "text" && (
+                    <input type="text" className="custom-input"
+                      value={formData[key] ?? ""}
+                      onChange={e => handleChange(field, e.target.value)} />
+                  )}
+
+                  {errors[key] && (
+                    <div style={{ color: "#EF4444", fontSize: "13px", fontWeight: 500 }}>{errors[key]}</div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
-          <div style={{ background: "white", padding: "24px", borderRadius: "16px", border: "1px solid #E2E8F0", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)" }}>
+          <button className="btn-analyze" onClick={handleAnalyzeClick}
+            disabled={isCalculating} style={{ width: "100%", marginTop: "32px" }}>
+            {isCalculating ? "⏳ Đang phân tích chỉ số liên tầng..." : "🩺 Phân tích nguy cơ"}
+          </button>
+        </div>
+      )}
+
+      {/* KẾT QUẢ DUAL-ENGINE */}
+      {riskResult && (
+        <div style={{ marginTop: "32px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
+
+          {/* Rule-based */}
+          <div style={{
+            background: "white", padding: "24px", borderRadius: "16px",
+            border: "1px solid #E2E8F0", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)"
+          }}>
             <h3 style={{ margin: "0 0 16px 0", color: "#334155", display: "flex", justifyContent: "space-between" }}>
-              <span>🧠 Học máy AI Model</span>
-              {riskResult.ai_based?.status === "READY" ? <span style={{ color: "#10B981", fontWeight: "700" }}>{(riskResult.ai_based?.probability * 100).toFixed(1)}%</span> : <span style={{ color: "#F59E0B", fontSize: "14px" }}>PARTIAL MODE</span>}
+              <span>📋 Rule-based Engine</span>
+              <span style={{ color: "#2563EB", fontWeight: 700 }}>
+                {(riskResult.rule_based?.score ?? 0).toFixed(1)} Điểm
+              </span>
+            </h3>
+            <div style={{ width: "100%", height: 12, background: "#F1F5F9", borderRadius: 6, overflow: "hidden", marginBottom: 16 }}>
+              <div style={{
+                width: `${Math.min(riskResult.rule_based?.score ?? 0, 100)}%`, height: "100%",
+                background: riskColor(riskResult.rule_based?.score ?? 0), transition: "width 1s"
+              }} />
+            </div>
+            <p style={{ margin: "0 0 12px 0", color: "#64748B" }}>
+              Phân tầng nguy cơ:{" "}
+              <strong style={{ color: riskColorByLevel(riskResult.rule_based?.risk_level) }}>
+                {String(riskResult.rule_based?.risk_level ?? "").toUpperCase()}
+              </strong>
+            </p>
+
+            {/* Các rule đã kích hoạt */}
+            {riskResult.rule_based?.matched_rules?.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <p style={{ margin: "0 0 8px 0", fontSize: 13, fontWeight: 600, color: "#475569" }}>
+                  Yếu tố kích hoạt:
+                </p>
+                {riskResult.rule_based.matched_rules.map((r, i) => (
+                  <div key={i} style={{
+                    fontSize: 13, color: "#64748B", padding: "4px 0",
+                    borderBottom: "1px solid #F1F5F9"
+                  }}>
+                    • {r.description || r.id}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* AI Model */}
+          <div style={{
+            background: "white", padding: "24px", borderRadius: "16px",
+            border: "1px solid #E2E8F0", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)"
+          }}>
+            <h3 style={{ margin: "0 0 16px 0", color: "#334155", display: "flex", justifyContent: "space-between" }}>
+              <span>🧠 AI Model</span>
+              {riskResult.ai_based?.status === "READY"
+                ? <span style={{ color: "#10B981", fontWeight: 700 }}>
+                  {((riskResult.ai_based?.probability ?? 0) * 100).toFixed(1)}%
+                </span>
+                : <span style={{ color: "#F59E0B", fontSize: 14 }}>PARTIAL</span>
+              }
             </h3>
 
             {riskResult.ai_based?.status === "READY" ? (
               <>
-                <div style={{ width: "100%", height: "12px", background: "#F1F5F9", borderRadius: "6px", overflow: "hidden", marginBottom: "16px" }}>
-                  <div style={{ width: `${riskResult.ai_based?.probability * 100}%`, height: "100%", background: riskResult.ai_based?.probability > 0.6 ? "#EF4444" : riskResult.ai_based?.probability > 0.3 ? "#F59E0B" : "#22C55E", transition: "width 1s" }} />
+                <div style={{ width: "100%", height: 12, background: "#F1F5F9", borderRadius: 6, overflow: "hidden", marginBottom: 16 }}>
+                  <div style={{
+                    width: `${(riskResult.ai_based?.probability ?? 0) * 100}%`, height: "100%",
+                    background: riskColor((riskResult.ai_based?.probability ?? 0) * 100),
+                    transition: "width 1s"
+                  }} />
                 </div>
-                <p style={{ margin: 0, color: "#64748B" }}>Độ đồng thuận thuật toán: <strong style={{ color: "#2563EB" }}>{riskResult.ai_based?.confidence}%</strong></p>
+                <p style={{ margin: "0 0 8px 0", color: "#64748B" }}>
+                  Phân tầng:{" "}
+                  <strong style={{ color: riskColorByLevel(riskResult.ai_based?.risk_level) }}>
+                    {String(riskResult.ai_based?.risk_level ?? "").toUpperCase()}
+                  </strong>
+                </p>
+                <p style={{ margin: 0, color: "#64748B" }}>
+                  Độ tin cậy: <strong style={{ color: "#2563EB" }}>{riskResult.ai_based?.confidence ?? 0}%</strong>
+                </p>
               </>
             ) : (
-              <p style={{ margin: 0, fontSize: "14px", color: "#64748B", lineHeight: "1.5" }}>Cần điền đầy đủ các chỉ số sinh hóa nâng cao trong mục <strong>Hồ sơ sức khỏe</strong> để đồng bộ kích hoạt phân tích mạng nơ-ron.</p>
+              <p style={{ margin: 0, fontSize: 14, color: "#64748B", lineHeight: 1.6 }}>
+                Cần điền đầy đủ các chỉ số sinh hóa nâng cao trong mục{" "}
+                <strong>Hồ sơ sức khỏe</strong> để kích hoạt phân tích AI.
+              </p>
             )}
           </div>
+
+          {/* Khuyến nghị */}
+          {riskResult.recommendations?.length > 0 && (
+            <div style={{
+              gridColumn: "1 / -1", background: "#FFFBEB", padding: "24px",
+              borderRadius: "16px", border: "1px solid #FDE68A"
+            }}>
+              <h3 style={{ margin: "0 0 12px 0", color: "#92400E" }}>💡 Khuyến nghị</h3>
+              {riskResult.recommendations.map((rec, i) => {
+                const text = typeof rec === "string" ? rec : rec.text;
+                return (
+                  <div key={i} style={{
+                    padding: "8px 0", borderBottom: i < riskResult.recommendations.length - 1 ? "1px solid #FEF3C7" : "none",
+                    color: "#78350F", fontSize: 14
+                  }}>
+                    {i + 1}. {text}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>

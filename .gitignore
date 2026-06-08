@@ -3,3 +3,5 @@ backend/venv/
 __pycache__/
 *.pyc
 .env
+
+source_dump.txt

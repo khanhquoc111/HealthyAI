@@ -1,31 +1,32 @@
 // frontend/src/App.jsx
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import MainRiskPage from "./MainRiskPage";
 import DangNhap from "./dang_nhap";
 import DangKy from "./dang_ky";
 import ChiSoSucKhoe from "./cs_suckhoe";
 import TrangChu from "./TrangChu";
 
+// Đọc trạng thái auth từ localStorage ngay lúc khởi tạo state
+// → không cần useEffect, tránh hoàn toàn set-state-in-effect
+function getInitialAuth() {
+  const token = localStorage.getItem("token");
+  const email = localStorage.getItem("userName");
+  if (token && email) {
+    return { isAuthenticated: true, userEmail: email };
+  }
+  // Dọn sạch nếu thiếu một trong hai
+  localStorage.removeItem("token");
+  localStorage.removeItem("userName");
+  return { isAuthenticated: false, userEmail: "" };
+}
+
+const initialAuth = getInitialAuth();
+
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userEmail, setUserEmail] = useState("");
+  const [isAuthenticated, setIsAuthenticated] = useState(initialAuth.isAuthenticated);
+  const [userEmail, setUserEmail] = useState(initialAuth.userEmail);
   const [authMode, setAuthMode] = useState("welcome");
   const [currentView, setCurrentView] = useState("risk");
-
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-    const email = localStorage.getItem("userName");
-    if (token && email) {
-      setIsAuthenticated(true);
-      setUserEmail(email);
-    } else {
-      localStorage.removeItem("token");
-      localStorage.removeItem("userName");
-      setIsAuthenticated(false);
-      setUserEmail("");
-      setAuthMode("welcome");
-    }
-  }, []);
 
   const handleLoginSuccess = (email) => {
     setIsAuthenticated(true);
@@ -38,7 +39,7 @@ export default function App() {
     setIsAuthenticated(false);
     setUserEmail("");
     setAuthMode("welcome");
-    setCurrentView("risk"); 
+    setCurrentView("risk");
   };
 
   if (!isAuthenticated) {
@@ -56,7 +57,6 @@ export default function App() {
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", width: "100vw", backgroundColor: "#F8FAFC", fontFamily: "Segoe UI, sans-serif", margin: 0, padding: 0, boxSizing: "border-box" }}>
-      {/* CSS RESET TOÀN CỤC ĐỂ TRÀN VIỀN TOÀN MÀN HÌNH */}
       <style>{`
         body, html, #root {
           margin: 0 !important;
@@ -69,14 +69,13 @@ export default function App() {
         * { box-sizing: border-box; }
       `}</style>
 
-      {/* SIDEBAR BÊN TRÁI VỚI CHIỀU CAO CỐ ĐỊNH FULL SCREEN */}
+      {/* SIDEBAR */}
       <div style={{ width: "260px", backgroundColor: "#FFFFFF", borderRight: "1px solid #E2E8F0", display: "flex", flexDirection: "column", height: "100vh", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ padding: "24px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
           <span style={{ fontSize: "24px" }}>🩺</span>
           <span style={{ fontWeight: "800", color: "#2563EB", fontSize: "20px", letterSpacing: "-0.5px" }}>HealthyAI</span>
         </div>
-        
-        {/* DANH SÁCH MENU */}
+
         <div style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "0 16px" }}>
           <button onClick={() => setCurrentView("dashboard")} style={sidebarBtnStyle(currentView === "dashboard")}>
             📊 Dashboard
@@ -92,7 +91,6 @@ export default function App() {
           </button>
         </div>
 
-        {/* PHẦN ĐÁY SIDEBAR: TẬN DỤNG KHOẢNG TRỐNG ĐỂ THÔNG TIN USER & ĐĂNG XUẤT */}
         <div style={{ marginTop: "auto", padding: "20px", borderTop: "1px solid #E2E8F0", backgroundColor: "#F8FAFC" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
             <div style={{ width: "36px", height: "36px", borderRadius: "50%", backgroundColor: "#DBEAFE", color: "#2563EB", display: "flex", justifyContent: "center", alignItems: "center", fontWeight: "bold", fontSize: "14px" }}>
@@ -103,15 +101,19 @@ export default function App() {
               <span style={{ fontWeight: "600", color: "#334155", fontSize: "14px", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>{userEmail}</span>
             </div>
           </div>
-          <button onClick={handleLogout} style={{ width: "100%", padding: "10px", backgroundColor: "#FEF2F2", color: "#EF4444", border: "1px solid #FECACA", borderRadius: "8px", cursor: "pointer", fontWeight: "600", fontSize: "14px", transition: "all 0.2s" }} onMouseOver={(e) => e.target.style.backgroundColor = "#FEE2E2"} onMouseOut={(e) => e.target.style.backgroundColor = "#FEF2F2"}>
+          <button
+            onClick={handleLogout}
+            style={{ width: "100%", padding: "10px", backgroundColor: "#FEF2F2", color: "#EF4444", border: "1px solid #FECACA", borderRadius: "8px", cursor: "pointer", fontWeight: "600", fontSize: "14px", transition: "all 0.2s" }}
+            onMouseOver={(e) => e.target.style.backgroundColor = "#FEE2E2"}
+            onMouseOut={(e) => e.target.style.backgroundColor = "#FEF2F2"}
+          >
             Đăng xuất
           </button>
         </div>
       </div>
 
-      {/* NỘI DUNG BÊN PHẢI TOÀN MÀN HÌNH */}
+      {/* NỘI DUNG BÊN PHẢI */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        {/* HEADER ĐƠN GIẢN */}
         <div style={{ backgroundColor: "#FFFFFF", height: "64px", padding: "0 32px", display: "flex", justifyContent: "flex-end", alignItems: "center", borderBottom: "1px solid #E2E8F0" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "24px" }}>
             <span style={{ cursor: "pointer", fontSize: "20px", color: "#64748B" }}>🔔</span>
@@ -120,7 +122,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* KHU VỰC NỘI DUNG KHÔNG BỊ GIỚI HẠN CHIỀU RỘNG CHẶT CHẼ */}
         <div style={{ padding: "32px", overflowY: "auto", height: "calc(100vh - 64px)", width: "100%" }}>
           {currentView === "risk" && <MainRiskPage />}
           {currentView === "profile" && <ChiSoSucKhoe />}
