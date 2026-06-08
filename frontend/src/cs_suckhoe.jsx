@@ -8,7 +8,7 @@ export default function ChiSoSucKhoe() {
   const [formData, setFormData] = useState({
     tuoi: "", gioiTinh: "Nam", chieuCao: "", canNang: "", bmi: "", vongEo: "", huyetApTamThu: "", huyetApTamTruong: "",
     duongHuyet: "", hba1c: "", cholesterol: "", ldl: "", hdl: "", triglyceride: "", creatinine: "", acidUric: "",
-    hutThuoc: "Không", uongRuouBia: "Không", soPhutVanDongMoiTuan: "", mucDoAnMan: "Vừa",
+    hutThuoc: "Không", uongRuouBia: "Không", soPhutVanDongMoiTuan: "", anMan: "Vừa", // <--- Đã sửa thành anMan
     caoHuyetAp: false, tieuDuong: false, benhTimMach: false, gout: false,
     giaDinhCaoHuyetAp: false, giaDinhTieuDuong: false, giaDinhTimMach: false, giaDinhGout: false
   });
@@ -185,7 +185,10 @@ export default function ChiSoSucKhoe() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
             <div><label style={lblStyle}>Tần suất hút thuốc</label><select name="hutThuoc" value={formData.hutThuoc} onChange={handleChange} className="custom-input"><option value="Không">Không</option><option value="Đã bỏ">Đã bỏ</option><option value="Đang hút">Đang hút</option></select></div>
             <div><label style={lblStyle}>Sử dụng rượu bia</label><select name="uongRuouBia" value={formData.uongRuouBia} onChange={handleChange} className="custom-input"><option value="Không">Không</option><option value="Thỉnh thoảng">Thỉnh thoảng</option><option value="Thường xuyên">Thường xuyên</option></select></div>
-            <div><label style={lblStyle}>Khẩu vị ăn mặn</label><select name="mucDoAnMan" value={formData.mucDoAnMan} onChange={handleChange} className="custom-input"><option value="Nhạt">Nhạt</option><option value="Vừa">Vừa</option><option value="Mặn">Mặn</option></select></div>
+            
+            {/* ĐÃ SỬA name="mucDoAnMan" -> name="anMan" và value={formData.anMan} */}
+            <div><label style={lblStyle}>Khẩu vị ăn mặn</label><select name="anMan" value={formData.anMan} onChange={handleChange} className="custom-input"><option value="Nhạt">Nhạt</option><option value="Vừa">Vừa</option><option value="Mặn">Mặn</option></select></div>
+            
             <div><label style={lblStyle}>Vận động thể chất (phút/tuần)</label><input type="number" name="soPhutVanDongMoiTuan" value={formData.soPhutVanDongMoiTuan} onChange={handleChange} className="custom-input"/></div>
           </div>
           <div style={{textAlign: "right", marginTop: "20px"}}><button type="button" onClick={()=>setActiveAccordion(4)} style={nextBtnStyle}>Tiếp theo ▶</button></div>

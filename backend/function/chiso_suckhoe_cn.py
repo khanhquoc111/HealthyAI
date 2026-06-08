@@ -21,7 +21,7 @@ def get_db():
 HO_SO_COLS = {
     "tuoi", "gioiTinh", "chieuCao", "canNang", "bmi", "vongEo",
     "huyetApTamThu", "huyetApTamTruong", "hutThuoc", "uongRuouBia",
-    "soPhutVanDongMoiTuan",
+    "soPhutVanDongMoiTuan", "anMan"
 }
 
 # Các field EAV cần ép kiểu khi đọc về
@@ -31,7 +31,7 @@ BOOLEAN_FIELDS = {
 }
 NUMBER_FIELDS = {
     "duongHuyet", "hba1c", "cholesterol", "ldl", "hdl",
-    "triglyceride", "creatinine", "acidUric", "mucDoAnMan",
+    "triglyceride", "creatinine", "acidUric"
 }
 
 
@@ -50,6 +50,7 @@ class HealthProfileSchema(BaseModel):
     hutThuoc: Optional[str] = None
     uongRuouBia: Optional[str] = None
     soPhutVanDongMoiTuan: Optional[int] = None
+    anMan: Optional[str] = None
 
     # EAV — chiSoSucKhoe
     duongHuyet: Optional[float] = None
@@ -60,7 +61,6 @@ class HealthProfileSchema(BaseModel):
     triglyceride: Optional[float] = None
     creatinine: Optional[float] = None
     acidUric: Optional[float] = None
-    mucDoAnMan: Optional[str] = None
     caoHuyetAp: Optional[bool] = None
     tieuDuong: Optional[bool] = None
     benhTimMach: Optional[bool] = None

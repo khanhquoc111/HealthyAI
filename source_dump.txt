@@ -1,14 +1,12 @@
 # ==================================================
-# Path: C:\Users\trann\CODE\ProjectMachineLearning\HealthyAI
+# Path: D:\CodeProject\LuanVanKTPM
 # Detected tech: c, cpp, javascript, python, react, typescript
 # ==================================================
 
 ## DIRECTORY STRUCTURE
 ```
-HealthyAI/
+LuanVanKTPM/
 ├── .git/
-├── .venv/
-├── __pycache__/
 ├── backend/
 │   ├── __pycache__/
 │   ├── app/
@@ -44,6 +42,7 @@ HealthyAI/
 │   │   ├── __pycache__/
 │   │   └── chiso_suckhoe_cn.py
 │   ├── ml/
+│   │   ├── __pycache__/
 │   │   ├── models/
 │   │   │   ├── cardiovascular_feature_cols.pkl
 │   │   │   ├── cardiovascular_model.pkl
@@ -64,8 +63,7 @@ HealthyAI/
 │   │   ├── train_cardiovascular_final.py
 │   │   ├── train_diabetes_final.py
 │   │   ├── train_hypertension_final.py
-│   │   ├── train_kidney_final.py
-│   │   └── train_model.py
+│   │   └── train_kidney_final.py
 │   ├── plugins/
 │   │   ├── cardiovascular/
 │   │   │   └── metadata.json
@@ -77,24 +75,11 @@ HealthyAI/
 │   │   │   └── metadata.json
 │   │   └── stroke/
 │   │       └── metadata.json
+│   ├── venv/
 │   ├── main.py
 │   ├── requirements.txt
 │   └── test_db.py
-├── core/
-│   └── __pycache__/
-├── data/
-│   ├── cardio_final.csv
-│   ├── ckd_final.csv
-│   ├── demographic.csv
-│   ├── diabetes_final.csv
-│   ├── diet.csv
-│   ├── examination.csv
-│   ├── hypertension_final.csv
-│   ├── labs.csv
-│   ├── medications.csv
-│   └── questionnaire.csv
 ├── frontend/
-│   ├── dist/
 │   ├── node_modules/
 │   ├── public/
 │   │   ├── favicon.svg
@@ -120,29 +105,6 @@ HealthyAI/
 │   ├── package-lock.json
 │   ├── package.json
 │   └── vite.config.js
-├── models/
-│   ├── feature_cols.pkl
-│   ├── screening_best_model.pkl
-│   └── screening_best_threshold.pkl
-├── models_v1/
-│   ├── feature_cols.pkl
-│   ├── screening_best_model.pkl
-│   ├── screening_best_threshold.pkl
-│   ├── screening_extra_trees.pkl
-│   ├── screening_extra_trees_threshold.pkl
-│   ├── screening_logistic_regression.pkl
-│   ├── screening_logistic_regression_threshold.pkl
-│   ├── screening_random_forest.pkl
-│   ├── screening_random_forest_threshold.pkl
-│   ├── screening_xgboost.pkl
-│   └── screening_xgboost_threshold.pkl
-├── modules/
-│   └── __pycache__/
-├── plugins/
-│   └── kidney/
-│       └── __pycache__/
-├── venv/
-├── .env
 ├── .gitignore
 ├── README.md
 ├── api_server_8001.err.log
@@ -783,7 +745,7 @@ plugin_loader = PluginLoader()
 HO_SO_COLS = {
     "tuoi", "gioiTinh", "chieuCao", "canNang", "bmi", "vongEo",
     "huyetApTamThu", "huyetApTamTruong", "hutThuoc", "uongRuouBia",
-    "soPhutVanDongMoiTuan",
+    "soPhutVanDongMoiTuan", "anMan"
 }
 
 # EAV fields cần ép kiểu khi đọc
@@ -924,9 +886,10 @@ def _enrich_profile(profile: dict) -> dict:
         enriched["alcohol"] = float(mapping.get(enriched["uongRuouBia"], 0))
 
     # mucDoAnMan → sodium_intake (mg/ngày)
-    if "mucDoAnMan" in enriched and "sodium_intake" not in enriched:
+    # anMan → sodium_intake (mg/ngày) để model AI đọc được
+    if "anMan" in enriched and "sodium_intake" not in enriched:
         mapping = {"Nhạt": 1200, "Vừa": 2000, "Mặn": 3500}
-        enriched["sodium_intake"] = mapping.get(enriched["mucDoAnMan"], 2000)
+        enriched["sodium_intake"] = mapping.get(enriched["anMan"], 2000)
 
     # tieuDuong (bool) → diabetes_status ("yes"/"no")
     if "tieuDuong" in enriched and "diabetes_status" not in enriched:
@@ -2733,7 +2696,7 @@ def get_db():
 HO_SO_COLS = {
     "tuoi", "gioiTinh", "chieuCao", "canNang", "bmi", "vongEo",
     "huyetApTamThu", "huyetApTamTruong", "hutThuoc", "uongRuouBia",
-    "soPhutVanDongMoiTuan",
+    "soPhutVanDongMoiTuan", "anMan"
 }
 
 # Các field EAV cần ép kiểu khi đọc về
@@ -2743,7 +2706,7 @@ BOOLEAN_FIELDS = {
 }
 NUMBER_FIELDS = {
     "duongHuyet", "hba1c", "cholesterol", "ldl", "hdl",
-    "triglyceride", "creatinine", "acidUric", "mucDoAnMan",
+    "triglyceride", "creatinine", "acidUric"
 }
 
 
@@ -2762,6 +2725,7 @@ class HealthProfileSchema(BaseModel):
     hutThuoc: Optional[str] = None
     uongRuouBia: Optional[str] = None
     soPhutVanDongMoiTuan: Optional[int] = None
+    anMan: Optional[str] = None
 
     # EAV — chiSoSucKhoe
     duongHuyet: Optional[float] = None
@@ -2772,7 +2736,6 @@ class HealthProfileSchema(BaseModel):
     triglyceride: Optional[float] = None
     creatinine: Optional[float] = None
     acidUric: Optional[float] = None
-    mucDoAnMan: Optional[str] = None
     caoHuyetAp: Optional[bool] = None
     tieuDuong: Optional[bool] = None
     benhTimMach: Optional[bool] = None
@@ -3473,237 +3436,6 @@ if __name__ == "__main__":
     main()
 ```
 
-### backend\ml\train_model.py
-```py
-import os
-import warnings
-warnings.filterwarnings("ignore")
-
-import numpy as np
-import pandas as pd
-import joblib
-
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.impute import SimpleImputer
-from sklearn.pipeline import Pipeline
-from sklearn.metrics import f1_score, recall_score, precision_score, precision_recall_curve
-from sklearn.ensemble import RandomForestClassifier
-
-try:
-    from xgboost import XGBClassifier
-    HAS_XGB = True
-    print("✅ XGBoost đã sẵn sàng")
-except ImportError:
-    HAS_XGB = False
-    print("⚠️ Cài XGBoost: pip install xgboost")
-
-
-FEATURE_COLS = [
-    "age", "gender_code", "bmi", "waist", "systolic", "diastolic", "hypertension",
-    "fasting_glucose", "hba1c", "total_cholesterol", "ldl", "creatinine",
-    "smoke", "exercise", "alcohol", "sodium_intake",
-    "family_hypertension", "family_cardiovascular",
-]
-
-# ══════════════════════════════════════════════════════════════════════════════
-# EXPERIMENTS SIÊU MẠNH - TẬP TRUNG CAO CHO Y TẾ
-# ══════════════════════════════════════════════════════════════════════════════
-
-EXPERIMENTS = [
-    # Random Forest mạnh
-    {"name": "RF | Ultra Strong",
-     "model": RandomForestClassifier(n_estimators=1200, max_depth=None, min_samples_leaf=1,
-                                     class_weight="balanced", random_state=42, n_jobs=-1)},
-
-    # XGBoost Heavy Tuning (ưu tiên Recall + F1 cao)
-    *([
-        {"name": "XGB | scale=15 - depth7",
-         "model": XGBClassifier(n_estimators=1000, max_depth=7, learning_rate=0.04,
-                                subsample=0.82, colsample_bytree=0.78, scale_pos_weight=15,
-                                gamma=0.4, min_child_weight=2, reg_lambda=1.2,
-                                eval_metric="aucpr", random_state=42, n_jobs=-1)},
-
-        {"name": "XGB | scale=18 - depth6",
-         "model": XGBClassifier(n_estimators=800, max_depth=6, learning_rate=0.05,
-                                subsample=0.85, colsample_bytree=0.8, scale_pos_weight=18,
-                                gamma=0.3, min_child_weight=3,
-                                eval_metric="aucpr", random_state=42, n_jobs=-1)},
-
-        {"name": "XGB | scale=12 - depth8",
-         "model": XGBClassifier(n_estimators=900, max_depth=8, learning_rate=0.03,
-                                subsample=0.8, colsample_bytree=0.75, scale_pos_weight=12,
-                                gamma=0.5, min_child_weight=2,
-                                eval_metric="aucpr", random_state=42, n_jobs=-1)},
-
-        {"name": "XGB | High Recall",
-         "model": XGBClassifier(n_estimators=700, max_depth=5, learning_rate=0.06,
-                                subsample=0.78, colsample_bytree=0.82, scale_pos_weight=20,
-                                eval_metric="aucpr", random_state=42, n_jobs=-1)},
-
-        {"name": "XGB | Balanced Best",
-         "model": XGBClassifier(n_estimators=850, max_depth=7, learning_rate=0.045,
-                                subsample=0.83, colsample_bytree=0.79, scale_pos_weight=14,
-                                gamma=0.4, min_child_weight=2.5,
-                                eval_metric="aucpr", random_state=42, n_jobs=-1)},
-    ] if HAS_XGB else []),
-]
-
-
-# (Phần code bên dưới giữ nguyên như phiên bản trước - find_data_dir, load_and_merge_data, build_features, run_experiments, main)
-
-def find_data_dir():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)
-    possible_dirs = [os.path.join(project_root, "data"), os.path.join(script_dir, "data"), project_root]
-    required = ["demographic.csv", "diet.csv", "examination.csv", "questionnaire.csv", "labs.csv", "medications.csv"]
-    for d in possible_dirs:
-        if all(os.path.exists(os.path.join(d, f)) for f in required):
-            print(f"✅ Tìm thấy dữ liệu tại: {d}")
-            return d
-    raise FileNotFoundError("❌ Không tìm thấy thư mục data!")
-
-
-def read_csv_safe(path):
-    for enc in ["utf-8", "utf-8-sig", "latin1", "cp1252"]:
-        try:
-            return pd.read_csv(path, encoding=enc, low_memory=False)
-        except Exception:
-            continue
-    raise Exception(f"Không đọc được file: {path}")
-
-
-def load_and_merge_data():
-    data_dir = find_data_dir()
-    print(f"Đọc dữ liệu từ: {data_dir}")
-    demo = read_csv_safe(os.path.join(data_dir, "demographic.csv"))
-    diet = read_csv_safe(os.path.join(data_dir, "diet.csv"))
-    exam = read_csv_safe(os.path.join(data_dir, "examination.csv"))
-    quest = read_csv_safe(os.path.join(data_dir, "questionnaire.csv"))
-    labs = read_csv_safe(os.path.join(data_dir, "labs.csv"))
-    
-    df = demo[["SEQN", "RIDAGEYR", "RIAGENDR"]].copy()
-    for src, cols in [
-        (diet, ["SEQN", "DR1TSODI"]),
-        (exam, ["SEQN", "BMXBMI", "BMXWAIST", "BPXSY1", "BPXSY2", "BPXDI1", "BPXDI2"]),
-        (quest, ["SEQN", "DIQ010", "SMQ020", "ALQ130", "BPQ020", "MCQ160A", "PAQ650"]),
-        (labs, ["SEQN", "LBXSGL", "LBXGH", "LBXTC", "LBDLDL", "LBXSCR"]),
-    ]:
-        df = df.merge(src[cols], on="SEQN", how="left")
-    print(f"✅ Đã gộp: {df.shape[0]} mẫu, {df.shape[1]} cột")
-    return df
-
-
-def build_features(df):
-    df = df[df["DIQ010"].isin([1, 2, 3])].copy()
-    df["Target"] = (df["DIQ010"] == 1).astype(int)
-    df["age"] = pd.to_numeric(df["RIDAGEYR"], errors="coerce")
-    df["gender_code"] = pd.to_numeric(df["RIAGENDR"], errors="coerce")
-    df["bmi"] = pd.to_numeric(df["BMXBMI"], errors="coerce")
-    df["waist"] = pd.to_numeric(df["BMXWAIST"], errors="coerce")
-    for c in ["BPXSY1", "BPXSY2", "BPXDI1", "BPXDI2"]:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-    df["systolic"] = df[["BPXSY1", "BPXSY2"]].mean(axis=1)
-    df["diastolic"] = df[["BPXDI1", "BPXDI2"]].mean(axis=1)
-    df["hypertension"] = ((df["systolic"] >= 130) | (df["diastolic"] >= 80)).astype(float)
-    df["fasting_glucose"] = pd.to_numeric(df.get("LBXSGL"), errors="coerce")
-    df["hba1c"] = pd.to_numeric(df.get("LBXGH"), errors="coerce")
-    df["total_cholesterol"] = pd.to_numeric(df.get("LBXTC"), errors="coerce")
-    df["ldl"] = pd.to_numeric(df.get("LBDLDL"), errors="coerce")
-    df["creatinine"] = pd.to_numeric(df.get("LBXSCR"), errors="coerce")
-    df["smoke"] = (pd.to_numeric(df.get("SMQ020"), errors="coerce") == 1).astype(float)
-    df["exercise"] = (pd.to_numeric(df.get("PAQ650"), errors="coerce") == 1).astype(float)
-    df["alcohol"] = pd.to_numeric(df.get("ALQ130"), errors="coerce").fillna(0)
-    df["sodium_intake"] = pd.to_numeric(df.get("DR1TSODI"), errors="coerce")
-    df["family_hypertension"] = (pd.to_numeric(df.get("BPQ020"), errors="coerce") == 1).astype(float)
-    df["family_cardiovascular"] = (pd.to_numeric(df.get("MCQ160A"), errors="coerce") == 1).astype(float)
-
-    X = df[FEATURE_COLS].copy()
-    y = df["Target"].copy()
-    print(f"📊 Số mẫu: {len(df)} | Positive rate: {y.mean():.4f}\n")
-    return X, y
-
-
-def find_optimal_threshold(y_true, y_proba, beta=0.75):
-    prec, rec, thresh = precision_recall_curve(y_true, y_proba)
-    fbeta = (1 + beta**2) * (prec * rec) / (beta**2 * prec + rec + 1e-8)
-    best_idx = np.argmax(fbeta)
-    return float(thresh[best_idx]) if best_idx < len(thresh) else 0.5
-
-
-def run_experiments(X, y):
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    models_dir = os.path.join(script_dir, "models")
-    os.makedirs(models_dir, exist_ok=True)
-
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-    print(f"Train: {len(X_train)} | Test: {len(X_test)}\n")
-
-    W = 45
-    print(f"{'Thí nghiệm':<{W}} {'F1':>6} {'Recall':>8} {'Precision':>10} {'Thresh':>8}")
-    print("-" * (W + 40))
-
-    best_f1 = -1
-    best_pipe = None
-    best_thresh = 0.5
-    best_name = ""
-    results = []
-
-    for exp in EXPERIMENTS:
-        name = exp["name"]
-        clf = exp["model"]
-
-        pipe = Pipeline([("imputer", SimpleImputer(strategy="median")),
-                         ("scaler", StandardScaler()),
-                         ("clf", clf)])
-        pipe.fit(X_train, y_train)
-
-        y_proba = pipe.predict_proba(X_test)[:, 1]
-        opt_th = find_optimal_threshold(y_test, y_proba)
-        y_pred = (y_proba >= opt_th).astype(int)
-
-        f1 = f1_score(y_test, y_pred, zero_division=0)
-        rec = recall_score(y_test, y_pred, zero_division=0)
-        pre = precision_score(y_test, y_pred, zero_division=0)
-
-        tag = " ★" if f1 > best_f1 else ""
-        print(f" {name:<{W}} {f1:>6.4f} {rec:>8.4f} {pre:>10.4f} {opt_th:>8.4f}{tag}")
-
-        results.append({"Thí nghiệm": name, "F1": round(f1,4), "Recall": round(rec,4), 
-                       "Precision": round(pre,4), "Threshold": round(opt_th,4)})
-
-        if f1 > best_f1:
-            best_f1 = f1
-            best_pipe = pipe
-            best_thresh = opt_th
-            best_name = name
-
-    joblib.dump(best_pipe, os.path.join(models_dir, "screening_best_model.pkl"))
-    joblib.dump(best_thresh, os.path.join(models_dir, "screening_best_threshold.pkl"))
-    joblib.dump(FEATURE_COLS, os.path.join(models_dir, "feature_cols.pkl"))
-
-    df_res = pd.DataFrame(results).sort_values("F1", ascending=False)
-    df_res.to_csv(os.path.join(models_dir, "experiment_results.csv"), index=False, encoding="utf-8-sig")
-
-    print("\n" + "="*90)
-    print(f"🏆 BEST MODEL: {best_name}")
-    print(f"    F1 = {best_f1:.4f} | Recall = {rec:.4f} | Threshold = {best_thresh:.4f}")
-    print(f"✅ Model đã lưu tại: {models_dir}")
-
-
-def main():
-    print("🚀 Training mô hình sàng lọc tiểu đường - Phiên bản SIÊU MẠNH\n")
-    df = load_and_merge_data()
-    X, y = build_features(df)
-    print(f"Tổng số thí nghiệm: {len(EXPERIMENTS)}")
-    print("="*90)
-    run_experiments(X, y)
-
-
-if __name__ == "__main__":
-    main()
-```
-
 ### frontend\eslint.config.js
 ```js
 import js from '@eslint/js'
@@ -3745,33 +3477,34 @@ export default defineConfig({
 ### frontend\src\App.jsx
 ```jsx
 // frontend/src/App.jsx
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import MainRiskPage from "./MainRiskPage";
 import DangNhap from "./dang_nhap";
 import DangKy from "./dang_ky";
 import ChiSoSucKhoe from "./cs_suckhoe";
 import TrangChu from "./TrangChu";
 
+// Đọc trạng thái auth từ localStorage ngay lúc khởi tạo state
+// → không cần useEffect, tránh hoàn toàn set-state-in-effect
+function getInitialAuth() {
+  const token = localStorage.getItem("token");
+  const email = localStorage.getItem("userName");
+  if (token && email) {
+    return { isAuthenticated: true, userEmail: email };
+  }
+  // Dọn sạch nếu thiếu một trong hai
+  localStorage.removeItem("token");
+  localStorage.removeItem("userName");
+  return { isAuthenticated: false, userEmail: "" };
+}
+
+const initialAuth = getInitialAuth();
+
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userEmail, setUserEmail] = useState("");
+  const [isAuthenticated, setIsAuthenticated] = useState(initialAuth.isAuthenticated);
+  const [userEmail, setUserEmail] = useState(initialAuth.userEmail);
   const [authMode, setAuthMode] = useState("welcome");
   const [currentView, setCurrentView] = useState("risk");
-
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-    const email = localStorage.getItem("userName");
-    if (token && email) {
-      setIsAuthenticated(true);
-      setUserEmail(email);
-    } else {
-      localStorage.removeItem("token");
-      localStorage.removeItem("userName");
-      setIsAuthenticated(false);
-      setUserEmail("");
-      setAuthMode("welcome");
-    }
-  }, []);
 
   const handleLoginSuccess = (email) => {
     setIsAuthenticated(true);
@@ -3784,7 +3517,7 @@ export default function App() {
     setIsAuthenticated(false);
     setUserEmail("");
     setAuthMode("welcome");
-    setCurrentView("risk"); 
+    setCurrentView("risk");
   };
 
   if (!isAuthenticated) {
@@ -3802,7 +3535,6 @@ export default function App() {
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", width: "100vw", backgroundColor: "#F8FAFC", fontFamily: "Segoe UI, sans-serif", margin: 0, padding: 0, boxSizing: "border-box" }}>
-      {/* CSS RESET TOÀN CỤC ĐỂ TRÀN VIỀN TOÀN MÀN HÌNH */}
       <style>{`
         body, html, #root {
           margin: 0 !important;
@@ -3815,14 +3547,13 @@ export default function App() {
         * { box-sizing: border-box; }
       `}</style>
 
-      {/* SIDEBAR BÊN TRÁI VỚI CHIỀU CAO CỐ ĐỊNH FULL SCREEN */}
+      {/* SIDEBAR */}
       <div style={{ width: "260px", backgroundColor: "#FFFFFF", borderRight: "1px solid #E2E8F0", display: "flex", flexDirection: "column", height: "100vh", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ padding: "24px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
           <span style={{ fontSize: "24px" }}>🩺</span>
           <span style={{ fontWeight: "800", color: "#2563EB", fontSize: "20px", letterSpacing: "-0.5px" }}>HealthyAI</span>
         </div>
-        
-        {/* DANH SÁCH MENU */}
+
         <div style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "0 16px" }}>
           <button onClick={() => setCurrentView("dashboard")} style={sidebarBtnStyle(currentView === "dashboard")}>
             📊 Dashboard
@@ -3838,7 +3569,6 @@ export default function App() {
           </button>
         </div>
 
-        {/* PHẦN ĐÁY SIDEBAR: TẬN DỤNG KHOẢNG TRỐNG ĐỂ THÔNG TIN USER & ĐĂNG XUẤT */}
         <div style={{ marginTop: "auto", padding: "20px", borderTop: "1px solid #E2E8F0", backgroundColor: "#F8FAFC" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
             <div style={{ width: "36px", height: "36px", borderRadius: "50%", backgroundColor: "#DBEAFE", color: "#2563EB", display: "flex", justifyContent: "center", alignItems: "center", fontWeight: "bold", fontSize: "14px" }}>
@@ -3849,15 +3579,19 @@ export default function App() {
               <span style={{ fontWeight: "600", color: "#334155", fontSize: "14px", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>{userEmail}</span>
             </div>
           </div>
-          <button onClick={handleLogout} style={{ width: "100%", padding: "10px", backgroundColor: "#FEF2F2", color: "#EF4444", border: "1px solid #FECACA", borderRadius: "8px", cursor: "pointer", fontWeight: "600", fontSize: "14px", transition: "all 0.2s" }} onMouseOver={(e) => e.target.style.backgroundColor = "#FEE2E2"} onMouseOut={(e) => e.target.style.backgroundColor = "#FEF2F2"}>
+          <button
+            onClick={handleLogout}
+            style={{ width: "100%", padding: "10px", backgroundColor: "#FEF2F2", color: "#EF4444", border: "1px solid #FECACA", borderRadius: "8px", cursor: "pointer", fontWeight: "600", fontSize: "14px", transition: "all 0.2s" }}
+            onMouseOver={(e) => e.target.style.backgroundColor = "#FEE2E2"}
+            onMouseOut={(e) => e.target.style.backgroundColor = "#FEF2F2"}
+          >
             Đăng xuất
           </button>
         </div>
       </div>
 
-      {/* NỘI DUNG BÊN PHẢI TOÀN MÀN HÌNH */}
+      {/* NỘI DUNG BÊN PHẢI */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        {/* HEADER ĐƠN GIẢN */}
         <div style={{ backgroundColor: "#FFFFFF", height: "64px", padding: "0 32px", display: "flex", justifyContent: "flex-end", alignItems: "center", borderBottom: "1px solid #E2E8F0" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "24px" }}>
             <span style={{ cursor: "pointer", fontSize: "20px", color: "#64748B" }}>🔔</span>
@@ -3866,7 +3600,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* KHU VỰC NỘI DUNG KHÔNG BỊ GIỚI HẠN CHIỀU RỘNG CHẶT CHẼ */}
         <div style={{ padding: "32px", overflowY: "auto", height: "calc(100vh - 64px)", width: "100%" }}>
           {currentView === "risk" && <MainRiskPage />}
           {currentView === "profile" && <ChiSoSucKhoe />}
@@ -3909,7 +3642,7 @@ export default function ChiSoSucKhoe() {
   const [formData, setFormData] = useState({
     tuoi: "", gioiTinh: "Nam", chieuCao: "", canNang: "", bmi: "", vongEo: "", huyetApTamThu: "", huyetApTamTruong: "",
     duongHuyet: "", hba1c: "", cholesterol: "", ldl: "", hdl: "", triglyceride: "", creatinine: "", acidUric: "",
-    hutThuoc: "Không", uongRuouBia: "Không", soPhutVanDongMoiTuan: "", mucDoAnMan: "Vừa",
+    hutThuoc: "Không", uongRuouBia: "Không", soPhutVanDongMoiTuan: "", anMan: "Vừa", // <--- Đã sửa thành anMan
     caoHuyetAp: false, tieuDuong: false, benhTimMach: false, gout: false,
     giaDinhCaoHuyetAp: false, giaDinhTieuDuong: false, giaDinhTimMach: false, giaDinhGout: false
   });
@@ -4086,7 +3819,10 @@ export default function ChiSoSucKhoe() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
             <div><label style={lblStyle}>Tần suất hút thuốc</label><select name="hutThuoc" value={formData.hutThuoc} onChange={handleChange} className="custom-input"><option value="Không">Không</option><option value="Đã bỏ">Đã bỏ</option><option value="Đang hút">Đang hút</option></select></div>
             <div><label style={lblStyle}>Sử dụng rượu bia</label><select name="uongRuouBia" value={formData.uongRuouBia} onChange={handleChange} className="custom-input"><option value="Không">Không</option><option value="Thỉnh thoảng">Thỉnh thoảng</option><option value="Thường xuyên">Thường xuyên</option></select></div>
-            <div><label style={lblStyle}>Khẩu vị ăn mặn</label><select name="mucDoAnMan" value={formData.mucDoAnMan} onChange={handleChange} className="custom-input"><option value="Nhạt">Nhạt</option><option value="Vừa">Vừa</option><option value="Mặn">Mặn</option></select></div>
+            
+            {/* ĐÃ SỬA name="mucDoAnMan" -> name="anMan" và value={formData.anMan} */}
+            <div><label style={lblStyle}>Khẩu vị ăn mặn</label><select name="anMan" value={formData.anMan} onChange={handleChange} className="custom-input"><option value="Nhạt">Nhạt</option><option value="Vừa">Vừa</option><option value="Mặn">Mặn</option></select></div>
+            
             <div><label style={lblStyle}>Vận động thể chất (phút/tuần)</label><input type="number" name="soPhutVanDongMoiTuan" value={formData.soPhutVanDongMoiTuan} onChange={handleChange} className="custom-input"/></div>
           </div>
           <div style={{textAlign: "right", marginTop: "20px"}}><button type="button" onClick={()=>setActiveAccordion(4)} style={nextBtnStyle}>Tiếp theo ▶</button></div>
@@ -4347,16 +4083,13 @@ createRoot(document.getElementById('root')).render(
 ### frontend\src\MainRiskPage.jsx
 ```jsx
 // frontend/src/MainRiskPage.jsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 
-// Keys phụ trợ tính BMI — không phải field plugin
 const AUX_KEYS = new Set(["chieuCao", "canNang"]);
 
-// Fallback mapping: key plugin → key hồ sơ sức khỏe
-// Chỉ dùng khi field trong metadata KHÔNG khai báo health_profile_key
 const EAV_FALLBACK = {
   age: "tuoi",
   systolic: "huyetApTamThu",
@@ -4379,7 +4112,7 @@ const EAV_FALLBACK = {
 
 export default function MainRiskPage() {
   const [selectedPlugin, setSelectedPlugin] = useState(null);
-  const [plugins, setPlugins] = useState([]);   // [{id, name, icon}, ...]
+  const [plugins, setPlugins] = useState([]);
   const [plugin, setPlugin] = useState(null);
   const [formData, setFormData] = useState({});
   const [errors, setErrors] = useState({});
@@ -4391,22 +4124,72 @@ export default function MainRiskPage() {
 
   const tenDangNhap = localStorage.getItem("userName");
 
-  // ── Lifecycle ──────────────────────────────────────────────────────────────
-
-  useEffect(() => { loadPluginsList(); }, []);
-
+  // ── Dùng ref để giữ healthProfile luôn mới nhất mà không tạo re-render loop ──
+  // buildFormFromMetadata đọc từ ref thay vì closure → loadPlugin không cần
+  // thêm buildFormFromMetadata vào dep → tránh vòng lặp effect vô tận
+  const healthProfileRef = useRef(healthProfile);
   useEffect(() => {
-    if (tenDangNhap) fetchHealthProfile();
-    else setProfileLoaded(true);
-  }, [tenDangNhap]);
+    healthProfileRef.current = healthProfile;
+  }, [healthProfile]);
 
-  useEffect(() => {
-    if (profileLoaded && selectedPlugin) loadPlugin(selectedPlugin);
-  }, [selectedPlugin, profileLoaded]);
+  // ── Metadata-driven form init ──────────────────────────────────────────────
+  const buildFormFromMetadata = useCallback((fields) => {
+    const data = {};
+    const hp = healthProfileRef.current;
+
+    fields.forEach((field) => {
+      const key = field.key || field.code;
+      data[key] = field.default !== undefined
+        ? field.default
+        : (field.type === "boolean" ? false : "");
+    });
+
+    data.chieuCao = "";
+    data.canNang = "";
+
+    if (!hp) return data;
+
+    const hardCols = ["tuoi", "gioiTinh", "chieuCao", "canNang", "bmi", "vongEo",
+      "huyetApTamThu", "huyetApTamTruong", "hutThuoc", "uongRuouBia",
+      "soPhutVanDongMoiTuan", "anMan"]; // <-- THÊM "anMan" VÀO ĐÂY
+    hardCols.forEach(k => {
+      if (hp[k] !== undefined) data[k] = hp[k];
+    });
+
+    fields.forEach((field) => {
+      const key = field.key || field.code;
+      const hpKey = field.health_profile_key || EAV_FALLBACK[key] || key;
+      let value = hp[hpKey];
+
+      if (value === undefined || value === null) return;
+
+      if (key === "smoking_status") {
+        const map = { "Chưa bao giờ": "never", "Đã bỏ": "former", "Đang hút": "current", "Không": "never" };
+        value = map[value] ?? value;
+      }
+      if (key === "alcohol") {
+        const map = { "Không": "0", "Thỉnh thoảng": "0", "Thường xuyên": "1", "Nhiều": "1" };
+        value = map[value] ?? "0";
+      }
+      if (key === "diabetes_status" || key === "htn_status") {
+        if (typeof value === "boolean") value = value ? "yes" : "no";
+      }
+
+      if (field.type === "boolean") data[key] = Boolean(value);
+      else if (field.type === "number") data[key] = Number(value);
+      else data[key] = value;
+    });
+
+    const h = parseFloat(data.chieuCao);
+    const w = parseFloat(data.canNang);
+    if (h > 0 && w > 0) data.bmi = Number((w / (h / 100) ** 2).toFixed(1));
+
+    return data;
+  }, []); // ← dep rỗng vì đọc healthProfile qua ref, không qua closure
 
   // ── Data loading ───────────────────────────────────────────────────────────
 
-  const fetchHealthProfile = async () => {
+  const fetchHealthProfile = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/health-profile/${tenDangNhap}`);
       if (res.data.data) setHealthProfile(res.data.data);
@@ -4415,27 +4198,24 @@ export default function MainRiskPage() {
     } finally {
       setProfileLoaded(true);
     }
-  };
+  }, [tenDangNhap]);
 
-  const loadPluginsList = async () => {
+  const loadPluginsList = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/plugins`);
-      // Backend trả về mảng string ["diabetes", "cardiovascular", ...]
-      // hoặc mảng object [{id, name, icon}, ...] tuỳ phiên bản
       const raw = res.data.plugins || [];
       const normalized = raw.map(p =>
         typeof p === "string" ? { id: p, name: p, icon: "" } : p
       );
       setPlugins(normalized);
-      if (normalized.length > 0 && !selectedPlugin) {
-        setSelectedPlugin(normalized[0].id);
-      }
+      // Dùng functional update: không cần selectedPlugin trong dep
+      setSelectedPlugin(prev => prev ?? (normalized.length > 0 ? normalized[0].id : null));
     } catch (e) {
       console.error("Load plugins list error:", e);
     }
-  };
+  }, []); // ← dep rỗng, chỉ chạy 1 lần duy nhất
 
-  const loadPlugin = async (pluginId) => {
+  const loadPlugin = useCallback(async (pluginId) => {
     try {
       setLoading(true);
       const res = await axios.get(`${API_BASE_URL}/plugins/${pluginId}`);
@@ -4449,76 +4229,22 @@ export default function MainRiskPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [buildFormFromMetadata]); // buildFormFromMetadata ổn định (dep rỗng) → loadPlugin cũng ổn định
 
-  // ── Metadata-driven form init ──────────────────────────────────────────────
-  //
-  // Ưu tiên: field.health_profile_key (khai báo trong metadata)
-  // Fallback: EAV_FALLBACK[field.key]
-  // Không có hardcode tên bệnh nào ở đây.
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadPluginsList(); }, [loadPluginsList]);
 
-  const buildFormFromMetadata = (fields) => {
-    const data = {};
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (tenDangNhap) fetchHealthProfile();
+    else setProfileLoaded(true);
+  }, [tenDangNhap, fetchHealthProfile]);
 
-    // Giá trị mặc định
-    fields.forEach((field) => {
-      const key = field.key || field.code;
-      data[key] = field.default !== undefined
-        ? field.default
-        : (field.type === "boolean" ? false : "");
-    });
-
-    // Thêm field phụ trợ tính BMI
-    data.chieuCao = "";
-    data.canNang = "";
-
-    if (!healthProfile) return data;
-
-    // Bơm dữ liệu từ hồ sơ sức khỏe
-    // Cột cứng: luôn load nếu healthProfile có
-    const hardCols = ["tuoi", "gioiTinh", "chieuCao", "canNang", "bmi", "vongEo",
-      "huyetApTamThu", "huyetApTamTruong", "hutThuoc", "uongRuouBia",
-      "soPhutVanDongMoiTuan"];
-    hardCols.forEach(k => {
-      if (healthProfile[k] !== undefined) data[k] = healthProfile[k];
-    });
-
-    // Bơm theo từng field trong metadata
-    fields.forEach((field) => {
-      const key = field.key || field.code;
-      const hpKey = field.health_profile_key || EAV_FALLBACK[key] || key;
-      let value = healthProfile[hpKey];
-
-      if (value === undefined || value === null) return;
-
-      // Convert giá trị đặc biệt
-      if (key === "smoking_status") {
-        const map = { "Chưa bao giờ": "never", "Đã bỏ": "former", "Đang hút": "current", "Không": "never" };
-        value = map[value] ?? value;
-      }
-
-      if (key === "alcohol") {
-        const map = { "Không": "0", "Thỉnh thoảng": "0", "Thường xuyên": "1", "Nhiều": "1" };
-        value = map[value] ?? "0";
-      }
-
-      if (key === "diabetes_status" || key === "htn_status") {
-        if (typeof value === "boolean") value = value ? "yes" : "no";
-      }
-
-      // Ép kiểu theo type của field
-      if (field.type === "boolean") data[key] = Boolean(value);
-      else if (field.type === "number") data[key] = Number(value);
-      else data[key] = value;
-    });
-
-    // Tính BMI từ chiều cao + cân nặng nếu có
-    const h = parseFloat(data.chieuCao);
-    const w = parseFloat(data.canNang);
-    if (h > 0 && w > 0) data.bmi = Number((w / (h / 100) ** 2).toFixed(1));
-
-    return data;
-  };
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (profileLoaded && selectedPlugin) loadPlugin(selectedPlugin);
+  }, [selectedPlugin, profileLoaded, loadPlugin]);
 
   // ── Input handling ─────────────────────────────────────────────────────────
 
@@ -4528,7 +4254,6 @@ export default function MainRiskPage() {
       : fieldOrKey;
     const updated = { ...formData, [key]: value };
 
-    // Tự tính BMI
     if (key === "chieuCao" || key === "canNang") {
       const h = parseFloat(updated.chieuCao);
       const w = parseFloat(updated.canNang);
@@ -4539,7 +4264,6 @@ export default function MainRiskPage() {
 
     setFormData(updated);
 
-    // Real-time validate field nếu là field của plugin
     const isPluginField = plugin?.fields?.some(f => (f.key || f.code) === key);
     if (isPluginField) {
       try {
@@ -4582,7 +4306,6 @@ export default function MainRiskPage() {
     try {
       setIsCalculating(true);
 
-      // Chỉ gửi các key thuộc plugin (bỏ aux keys và giá trị rỗng)
       const pluginKeys = new Set(plugin?.fields?.map(f => f.key || f.code) || []);
       const cleanData = {};
       for (const [k, v] of Object.entries(currentData)) {
@@ -4599,12 +4322,13 @@ export default function MainRiskPage() {
       setRiskResult(response.data);
       setErrors({});
 
-      // Refresh cache hồ sơ sau khi backend auto-save
       if (tenDangNhap) {
         try {
           const pr = await axios.get(`${API_BASE_URL}/health-profile/${tenDangNhap}`);
           if (pr.data.data) setHealthProfile(pr.data.data);
-        } catch (_) { /* non-blocking */ }
+        } catch {
+          // non-blocking
+        }
       }
     } catch (error) {
       setRiskResult(null);
@@ -4690,7 +4414,6 @@ export default function MainRiskPage() {
           </p>
         </div>
 
-        {/* Dropdown — label và icon lấy từ metadata, không hardcode */}
         <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
           <span style={{ fontSize: "14px", fontWeight: 600, color: "#475569" }}>Mô hình đích:</span>
           <select
@@ -4714,12 +4437,10 @@ export default function MainRiskPage() {
           background: "white", padding: "32px", borderRadius: "16px",
           boxShadow: "0 1px 3px rgba(0,0,0,0.05)", border: "1px solid #E2E8F0"
         }}>
-
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
             {plugin.fields.map((field) => {
               const key = field.key || field.code;
 
-              // BMI field: render block chiều cao + cân nặng + BMI readonly
               if (key === "bmi") return (
                 <div key="bmi_group" style={{
                   gridColumn: "1 / -1", background: "#F8FAFC",
@@ -4850,8 +4571,6 @@ export default function MainRiskPage() {
                 {String(riskResult.rule_based?.risk_level ?? "").toUpperCase()}
               </strong>
             </p>
-
-            {/* Các rule đã kích hoạt */}
             {riskResult.rule_based?.matched_rules?.length > 0 && (
               <div style={{ marginTop: 12 }}>
                 <p style={{ margin: "0 0 8px 0", fontSize: 13, fontWeight: 600, color: "#475569" }}>
@@ -4883,7 +4602,6 @@ export default function MainRiskPage() {
                 : <span style={{ color: "#F59E0B", fontSize: 14 }}>PARTIAL</span>
               }
             </h3>
-
             {riskResult.ai_based?.status === "READY" ? (
               <>
                 <div style={{ width: "100%", height: 12, background: "#F1F5F9", borderRadius: 6, overflow: "hidden", marginBottom: 16 }}>
@@ -4922,7 +4640,8 @@ export default function MainRiskPage() {
                 const text = typeof rec === "string" ? rec : rec.text;
                 return (
                   <div key={i} style={{
-                    padding: "8px 0", borderBottom: i < riskResult.recommendations.length - 1 ? "1px solid #FEF3C7" : "none",
+                    padding: "8px 0",
+                    borderBottom: i < riskResult.recommendations.length - 1 ? "1px solid #FEF3C7" : "none",
                     color: "#78350F", fontSize: 14
                   }}>
                     {i + 1}. {text}

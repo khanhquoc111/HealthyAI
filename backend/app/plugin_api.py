@@ -30,7 +30,7 @@ plugin_loader = PluginLoader()
 HO_SO_COLS = {
     "tuoi", "gioiTinh", "chieuCao", "canNang", "bmi", "vongEo",
     "huyetApTamThu", "huyetApTamTruong", "hutThuoc", "uongRuouBia",
-    "soPhutVanDongMoiTuan",
+    "soPhutVanDongMoiTuan", "anMan"
 }
 
 # EAV fields cần ép kiểu khi đọc
@@ -171,9 +171,10 @@ def _enrich_profile(profile: dict) -> dict:
         enriched["alcohol"] = float(mapping.get(enriched["uongRuouBia"], 0))
 
     # mucDoAnMan → sodium_intake (mg/ngày)
-    if "mucDoAnMan" in enriched and "sodium_intake" not in enriched:
+    # anMan → sodium_intake (mg/ngày) để model AI đọc được
+    if "anMan" in enriched and "sodium_intake" not in enriched:
         mapping = {"Nhạt": 1200, "Vừa": 2000, "Mặn": 3500}
-        enriched["sodium_intake"] = mapping.get(enriched["mucDoAnMan"], 2000)
+        enriched["sodium_intake"] = mapping.get(enriched["anMan"], 2000)
 
     # tieuDuong (bool) → diabetes_status ("yes"/"no")
     if "tieuDuong" in enriched and "diabetes_status" not in enriched:
@@ -196,8 +197,9 @@ def _save_form_to_profile(user_id: int, form_data: dict, db: Session):
             db_key = "hutThuoc"
             value = {"current": "Đang hút", "former": "Đã bỏ", "never": "Không"}.get(value, value)
         elif form_key == "alcohol":
-            # Lưu giá trị gốc vào EAV
-            db_key = "alcohol"
+            # MAP NGƯỢC LẠI BẢNG CỨNG THAY VÌ LƯU VÀO EAV
+            db_key = "uongRuouBia"
+            value = "Thường xuyên" if str(value) in ["1", "1.0"] else "Không"
         else:
             db_key = FORM_TO_DB.get(form_key, form_key)
 

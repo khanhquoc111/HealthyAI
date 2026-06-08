@@ -67,7 +67,7 @@ export default function MainRiskPage() {
 
     const hardCols = ["tuoi", "gioiTinh", "chieuCao", "canNang", "bmi", "vongEo",
       "huyetApTamThu", "huyetApTamTruong", "hutThuoc", "uongRuouBia",
-      "soPhutVanDongMoiTuan"];
+      "soPhutVanDongMoiTuan", "anMan"]; // <-- THÊM "anMan" VÀO ĐÂY
     hardCols.forEach(k => {
       if (hp[k] !== undefined) data[k] = hp[k];
     });

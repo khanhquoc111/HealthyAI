@@ -3,7 +3,6 @@ from sqlalchemy import Column, BigInteger, Integer, Float, String, DateTime, For
 from sqlalchemy.sql import func
 from database.database import Base
 
-
 class HoSoSucKhoe(Base):
     __tablename__ = "hoSoSucKhoe"
 
@@ -22,6 +21,7 @@ class HoSoSucKhoe(Base):
     huyetApTamTruong = Column(Float, nullable=True)
 
     hutThuoc         = Column(String(50), nullable=True)
+    anMan            = Column(String(20), nullable=True) 
     uongRuouBia      = Column(String(50), nullable=True)
 
     soPhutVanDongMoiTuan = Column(Integer, nullable=True)
