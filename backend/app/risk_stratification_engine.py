@@ -190,6 +190,7 @@ class RiskStratificationEngine:
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
                         proba = self.ml_model.predict_proba(df_input)[0, 1]
+                        print(df_input.T)
                     
                     print(f"✅ proba = {proba}")
                     ai_score = round(proba * 100, 2)

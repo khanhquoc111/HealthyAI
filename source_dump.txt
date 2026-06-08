@@ -1,12 +1,14 @@
 # ==================================================
-# Path: D:\CodeProject\LuanVanKTPM
+# Path: C:\Users\trann\CODE\ProjectMachineLearning\HealthyAI
 # Detected tech: c, cpp, javascript, python, react, typescript
 # ==================================================
 
 ## DIRECTORY STRUCTURE
 ```
-LuanVanKTPM/
+HealthyAI/
 ├── .git/
+├── .venv/
+├── __pycache__/
 ├── backend/
 │   ├── __pycache__/
 │   ├── app/
@@ -42,7 +44,6 @@ LuanVanKTPM/
 │   │   ├── __pycache__/
 │   │   └── chiso_suckhoe_cn.py
 │   ├── ml/
-│   │   ├── __pycache__/
 │   │   ├── models/
 │   │   │   ├── cardiovascular_feature_cols.pkl
 │   │   │   ├── cardiovascular_model.pkl
@@ -75,11 +76,13 @@ LuanVanKTPM/
 │   │   │   └── metadata.json
 │   │   └── stroke/
 │   │       └── metadata.json
-│   ├── venv/
 │   ├── main.py
 │   ├── requirements.txt
 │   └── test_db.py
+├── core/
+│   └── __pycache__/
 ├── frontend/
+│   ├── dist/
 │   ├── node_modules/
 │   ├── public/
 │   │   ├── favicon.svg
@@ -105,6 +108,13 @@ LuanVanKTPM/
 │   ├── package-lock.json
 │   ├── package.json
 │   └── vite.config.js
+├── modules/
+│   └── __pycache__/
+├── plugins/
+│   └── kidney/
+│       └── __pycache__/
+├── venv/
+├── .env
 ├── .gitignore
 ├── README.md
 ├── api_server_8001.err.log
@@ -912,8 +922,9 @@ def _save_form_to_profile(user_id: int, form_data: dict, db: Session):
             db_key = "hutThuoc"
             value = {"current": "Đang hút", "former": "Đã bỏ", "never": "Không"}.get(value, value)
         elif form_key == "alcohol":
-            # Lưu giá trị gốc vào EAV
-            db_key = "alcohol"
+            # MAP NGƯỢC LẠI BẢNG CỨNG THAY VÌ LƯU VÀO EAV
+            db_key = "uongRuouBia"
+            value = "Thường xuyên" if str(value) in ["1", "1.0"] else "Không"
         else:
             db_key = FORM_TO_DB.get(form_key, form_key)
 
@@ -3022,7 +3033,7 @@ FEATURE_COLS = [
     "age", "gender_code", "bmi", "waist", "systolic", "diastolic", "hypertension",
     "fasting_glucose", "hba1c", "total_cholesterol", "ldl", "creatinine",
     "smoke", "exercise", "alcohol", "sodium_intake",
-    "family_hypertension", "family_cardiovascular",
+    "family_diabetes"
 ]
 
 # positive rate ~7.67% → scale_pos_weight ~11

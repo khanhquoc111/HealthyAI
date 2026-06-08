@@ -29,7 +29,7 @@ FEATURE_COLS = [
     "age", "gender_code", "bmi", "waist", "systolic", "diastolic", "hypertension",
     "fasting_glucose", "hba1c", "total_cholesterol", "ldl", "creatinine",
     "smoke", "exercise", "alcohol", "sodium_intake",
-    "family_hypertension", "family_cardiovascular",
+    "family_history_diabetes"
 ]
 
 # positive rate ~7.67% → scale_pos_weight ~11
@@ -85,7 +85,7 @@ def load_and_build():
     df["family_cardiovascular"] = np.nan
     # Family_History_Diabetes: 1=có, 2=không
     fhd = pd.to_numeric(df.get("Family_History_Diabetes"), errors="coerce")
-    df["family_diabetes"]  = (fhd == 1).astype(float)
+    df["family_history_diabetes"] = (fhd == 1).astype(float)
 
     X = df[FEATURE_COLS].copy()
     y = df["Target_Label"].astype(int)
