@@ -1,9 +1,0 @@
-ok hướng đó cũng hợp lí nhưng phải giải quyết được vấn đề sau, 
-ví dụ: - Giả dụ 1 người dùng mới hoàn toàn, lúc này hồ sơ thông tin = 0. 
-- Họ xét tiểu đường dựa theo JSON có 7 cột, họ hoàn tất thông tin vô 7 cột đó 
-=> Chỉ số sức khỏe sẽ đc lưu 7/18 yêu cầu => Có đủ để ml chạy vì thiếu quá nhiều chỉ số 
-- Một khía cạnh khác: 
-- Cho rằng ml sẽ chạy từng bệnh riêng lẻ, k chỉ cần hoàn thành đủ 1 bộ chỉ số, nhưng 
-+ bệnh tiểu đường do json cần 5 chỉ số 
-+ ml cần tới 8 
-=> giải quyết sao?

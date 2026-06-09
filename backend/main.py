@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.plugin_api import router as plugin_router
 from auth.dang_ky import router as register_router
 from auth.dang_nhap import router as login_router
-from function.chiso_suckhoe_cn import router as health_router  # <-- [THÊM DÒNG NÀY] Import API Chỉ Số Sức Khỏe
+from function.cn_hs_suckhoe import router as health_router  # <-- [THÊM DÒNG NÀY] Import API Chỉ Số Sức Khỏe
 
 app = FastAPI(title="LuanVanKTPM - Disease Risk Engine")
 

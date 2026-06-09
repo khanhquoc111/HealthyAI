@@ -1,0 +1,303 @@
+/* ===============================================================
+   header.css  |  Navbar + Avatar Dropdown
+   =============================================================== */
+
+/* ─── CSS Variables (fallback nếu index.css chưa khai báo) ──── */
+:root {
+  --nav-h: 68px;
+  --primary: #2563eb;
+  --secondary: #0f172a;
+  --accent: #38bdf8;
+  --text-muted: #64748b;
+  --border: #e2e8f0;
+  --border-light: #f1f5f9;
+  --bg-subtle: #eff6ff;
+  --radius-sm: 8px;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.07);
+  --transition: 0.18s ease;
+  --font-display: "Segoe UI", system-ui, sans-serif;
+  --navy: #0f172a;
+}
+
+/* ─── Navbar ─────────────────────────────────────────────────── */
+.navbar {
+  position: sticky;
+  top: 0;
+  z-index: 999;
+  height: var(--nav-h);
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--transition);
+}
+
+.nav-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+  height: 100%;
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* ─── Brand ──────────────────────────────────────────────────── */
+.nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  cursor: default;
+}
+
+.nav-logo {
+  height: 42px;
+  width: auto;
+  object-fit: contain;
+}
+
+.nav-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.nav-title {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--secondary);
+  letter-spacing: -0.01em;
+}
+
+.nav-subtitle {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--primary);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 6px;
+  letter-spacing: 0.04em;
+}
+
+/* ─── Menu ───────────────────────────────────────────────────── */
+.nav-menu {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  justify-content: center;
+}
+
+.nav-link {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 6px 13px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--transition), background var(--transition);
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.nav-link:hover {
+  color: var(--primary);
+  background: var(--bg-subtle);
+}
+
+.nav-link--active {
+  color: var(--primary) !important;
+  background: var(--bg-subtle) !important;
+  font-weight: 600;
+}
+
+/* ─── Avatar Button ──────────────────────────────────────────── */
+.nav-actions {
+  flex-shrink: 0;
+  position: relative;
+}
+
+.avatar-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-subtle);
+  border: 1.5px solid var(--border);
+  border-radius: 40px;
+  padding: 5px 10px 5px 5px;
+  cursor: pointer;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.avatar-btn:hover {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.avatar-initials {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.avatar-caret {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  transition: transform var(--transition);
+}
+
+/* ─── Dropdown ───────────────────────────────────────────────── */
+.avatar-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 260px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px -4px rgba(15, 23, 42, 0.14),
+              0 4px 8px -2px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+  animation: dropdown-in 0.16s ease;
+  z-index: 1000;
+}
+
+@keyframes dropdown-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.dropdown-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%);
+}
+
+.dropdown-avatar-lg {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+}
+
+.dropdown-user-info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dropdown-username {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--secondary);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.dropdown-role {
+  font-size: 0.73rem;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.dropdown-divider {
+  height: 1px;
+  background: var(--border-light);
+  margin: 0;
+}
+
+.dropdown-menu-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 16px;
+  background: none;
+  border: none;
+  font-size: 0.865rem;
+  color: #334155;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition), color var(--transition);
+  font-family: inherit;
+}
+
+.dropdown-item:hover {
+  background: var(--bg-subtle);
+  color: var(--primary);
+}
+
+.dropdown-item-icon {
+  font-size: 1rem;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.dropdown-logout {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 16px;
+  background: none;
+  border: none;
+  font-size: 0.865rem;
+  color: #ef4444;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background var(--transition);
+  font-family: inherit;
+  margin: 0;
+}
+
+.dropdown-logout:hover {
+  background: #fef2f2;
+}
+
+/* ─── Responsive ─────────────────────────────────────────────── */
+@media (max-width: 960px) {
+  .nav-container { gap: 20px; }
+  .nav-title { font-size: 1rem; }
+  .nav-link { font-size: 0.82rem; padding: 5px 10px; }
+}
+
+@media (max-width: 768px) {
+  .navbar { height: 60px; }
+  .nav-logo { height: 36px; }
+  .nav-menu { display: none; }
+  .nav-title { font-size: 0.95rem; }
+  .nav-subtitle { font-size: 0.7rem; padding: 0px 4px; }
+  .avatar-dropdown { width: 240px; }
+}
