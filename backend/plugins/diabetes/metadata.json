@@ -2,10 +2,10 @@
   "disease_info": {
     "id": "diabetes",
     "name": "Đánh giá Nguy cơ Tiểu đường Type 2",
-    "version": "1.1",
+    "version": "1.2",
     "description": "Công cụ đánh giá nguy cơ phát triển tiểu đường type 2 dựa trên các yếu tố nguy cơ.",
     "author": "LuanVanKTPM",
-    "last_updated": "2026-06-04"
+    "last_updated": "2026-06-09"
   },
   "fields": [
     {
@@ -196,8 +196,9 @@
   ],
   "cross_validations": [],
   "ml_required_features": [
-    "age", "gender_code", "bmi", "waist", "systolic", "diastolic", "hypertension",
-    "fasting_glucose", "hba1c", "total_cholesterol", "ldl", "creatinine",
-    "smoke", "exercise", "alcohol", "sodium_intake", "family_history_diabetes"
+    "age", "gender_code", "bmi", "waist",
+    "systolic", "diastolic", "hypertension",
+    "hba1c", "total_cholesterol", "hdl_cholesterol",
+    "smoke", "family_diabetes"
   ]
 }

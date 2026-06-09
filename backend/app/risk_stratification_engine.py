@@ -4,6 +4,7 @@ import logging
 import os
 import pandas as pd
 import joblib
+import math
 
 try:
     from app.explanation_engine import ExplanationEngine
@@ -82,11 +83,11 @@ class RiskStratificationEngine:
         if "hutThuoc" in unified_data:
             ml_data["smoke"] = 1.0 if str(unified_data["hutThuoc"]).strip().lower() in ["đang hút", "yes", "1"] else 0.0
 
-        if "soPhutVanDongMoiTuan" in unified_data:
-            try:
-                ml_data["exercise"] = 1.0 if float(unified_data["soPhutVanDongMoiTuan"]) >= 150 else 0.0
-            except:
-                ml_data["exercise"] = 0.0
+        # if "soPhutVanDongMoiTuan" in unified_data:
+        #     try:
+        #         ml_data["exercise"] = 1.0 if float(unified_data["soPhutVanDongMoiTuan"]) >= 150 else 0.0
+        #     except:
+        #         ml_data["exercise"] = 0.0
 
         if "smoking_status" in unified_data and "smoke" not in ml_data:
             ml_data["smoke"] = 1.0 if unified_data["smoking_status"] == "current" else 0.0
@@ -97,11 +98,35 @@ class RiskStratificationEngine:
             except (ValueError, TypeError):
                 ml_data["alcohol"] = 0.0
         
-        if "exercise_minutes_per_week" in unified_data and "exercise" not in ml_data:
+        # if "exercise_minutes_per_week" in unified_data and "exercise" not in ml_data:
+        #     try:
+        #         ml_data["exercise"] = 1.0 if float(unified_data["exercise_minutes_per_week"]) >= 150 else 0.0
+        #     except (ValueError, TypeError):
+        #         ml_data["exercise"] = 0.0
+
+        # HDL Cholesterol
+        if "hdlCholesterol" in unified_data and "hdl_cholesterol" not in ml_data:
             try:
-                ml_data["exercise"] = 1.0 if float(unified_data["exercise_minutes_per_week"]) >= 150 else 0.0
+                ml_data["hdl_cholesterol"] = float(unified_data["hdlCholesterol"])
             except (ValueError, TypeError):
-                ml_data["exercise"] = 0.0
+                pass
+
+        # Insulin
+        if "insulin" in unified_data and "insulin" not in ml_data:
+            try:
+                ml_data["insulin"] = float(unified_data["insulin"])
+            except (ValueError, TypeError):
+                pass
+
+        # Family history diabetes — convert từ form field boolean
+        if "family_history_diabetes" in unified_data and "family_diabetes" not in ml_data:
+            val = unified_data["family_history_diabetes"]
+            ml_data["family_diabetes"] = 1.0 if val in [True, 1, "true", "1", "yes"] else 0.0
+
+        # Fallback từ DB key tiếng Việt
+        if "tienSuGiaDinhTieuDuong" in unified_data and "family_diabetes" not in ml_data:
+            val = unified_data["tienSuGiaDinhTieuDuong"]
+            ml_data["family_diabetes"] = 1.0 if val in [True, 1, "true", "1", "yes"] else 0.0
         
         if "diabetes_status" in unified_data and "diabetes" not in ml_data:
             ml_data["diabetes"] = 1.0 if unified_data["diabetes_status"] == "yes" else 0.0
@@ -111,6 +136,12 @@ class RiskStratificationEngine:
                 ml_data["creatinine"] = float(unified_data["creatinine"])
             except (ValueError, TypeError):
                 pass
+        
+        # Tính lại hypertension từ số đo thực tế, ưu tiên hơn giá trị DB
+        if "systolic" in ml_data and "diastolic" in ml_data:
+            ml_data["hypertension"] = 1.0 if (
+                ml_data["systolic"] >= 130 or ml_data["diastolic"] >= 80
+            ) else 0.0
 
         # Ép kiểu dữ liệu về số thực (Float)
         final_ml = {}
@@ -156,10 +187,26 @@ class RiskStratificationEngine:
 
         if self.ml_model and self.ml_required_features:
             ml_ready_features = self._convert_to_ml_format(unified_data)
+
+            # ── DEBUG: in toàn bộ unified_data keys và ml_ready_features ──
+            print(f"\n{'='*60}")
+            print(f"[ML DEBUG] unified_data keys: {sorted(unified_data.keys())}")
+            print(f"[ML DEBUG] ml_ready_features: {ml_ready_features}")
+            print(f"[ML DEBUG] ml_required_features: {self.ml_required_features}")
+            missing_debug = []
+            for feature in self.ml_required_features:
+                val = ml_ready_features.get(feature)
+                status = "✅" if val is not None and not (isinstance(val, float) and math.isnan(val)) else "❌ MISSING"
+                print(f"  {status}  {feature} = {val}")
+                if status.startswith("❌"):
+                    missing_debug.append(feature)
+            print(f"[ML DEBUG] Missing count: {len(missing_debug)} → {missing_debug}")
+            print(f"{'='*60}\n")
             
             # Kiểm đếm các feature bị thiếu
             for feature in self.ml_required_features:
-                if feature not in ml_ready_features:
+                val = ml_ready_features.get(feature)
+                if val is None or (isinstance(val, float) and math.isnan(val)):
                     missing_fields.append(inverse_mapping.get(feature, feature))
 
             if len(missing_fields) == 0:

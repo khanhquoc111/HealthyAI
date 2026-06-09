@@ -54,9 +54,8 @@ DB_TO_FORM = {
     "hba1c":             "hba1c",
     "cholesterol":       "total_cholesterol",
     "ldl":               "ldl",
-    "hdl":               "hdl",
+    "hdl":               "hdl_cholesterol",
     "creatinine":        "creatinine",
-    "soPhutVanDongMoiTuan": "exercise",
     "giaDinhTieuDuong":  "family_diabetes",
     "giaDinhCaoHuyetAp": "family_hypertension",
     "giaDinhTimMach":    "family_cardiovascular",
@@ -161,9 +160,9 @@ def _enrich_profile(profile: dict) -> dict:
     # soPhutVanDongMoiTuan → exercise (boolean float)
     if "soPhutVanDongMoiTuan" in enriched:
         try:
-            enriched["exercise"] = 1.0 if float(enriched["soPhutVanDongMoiTuan"]) >= 150 else 0.0
+            enriched["exercise_flag"] = 1.0 if float(enriched["soPhutVanDongMoiTuan"]) >= 150 else 0.0
         except (ValueError, TypeError):
-            enriched["exercise"] = 0.0
+            enriched["exercise_flag"] = 0.0
 
     # uongRuouBia → alcohol (0/1 float)
     if "uongRuouBia" in enriched and "alcohol" not in enriched:
