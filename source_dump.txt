@@ -1,12 +1,14 @@
 # ==================================================
-# Path: D:\CodeProject\LuanVanKTPM
+# Path: C:\Users\trann\CODE\ProjectMachineLearning\HealthyAI
 # Detected tech: c, cpp, javascript, python, react, typescript
 # ==================================================
 
 ## DIRECTORY STRUCTURE
 ```
-LuanVanKTPM/
+HealthyAI/
 ├── .git/
+├── .venv/
+├── __pycache__/
 ├── backend/
 │   ├── __pycache__/
 │   ├── app/
@@ -42,7 +44,6 @@ LuanVanKTPM/
 │   │   ├── __pycache__/
 │   │   └── cn_hs_suckhoe.py
 │   ├── ml/
-│   │   ├── __pycache__/
 │   │   ├── models/
 │   │   │   ├── cardiovascular_feature_cols.pkl
 │   │   │   ├── cardiovascular_model.pkl
@@ -75,12 +76,13 @@ LuanVanKTPM/
 │   │   │   └── metadata.json
 │   │   └── stroke/
 │   │       └── metadata.json
-│   ├── venv/
 │   ├── main.py
 │   ├── requirements.txt
 │   └── test_db.py
+├── core/
+│   └── __pycache__/
 ├── frontend/
-│   ├── mobile/
+│   ├── dist/
 │   ├── node_modules/
 │   └── web/
 │       ├── node_modules/
@@ -97,7 +99,6 @@ LuanVanKTPM/
 │       │   │   ├── footer.jsx
 │       │   │   ├── header.css
 │       │   │   └── header.jsx
-│       │   ├── css/
 │       │   ├── App.css
 │       │   ├── App.jsx
 │       │   ├── dang-ky.jsx
@@ -114,6 +115,13 @@ LuanVanKTPM/
 │       ├── package-lock.json
 │       ├── package.json
 │       └── vite.config.js
+├── modules/
+│   └── __pycache__/
+├── plugins/
+│   └── kidney/
+│       └── __pycache__/
+├── venv/
+├── .env
 ├── .gitignore
 ├── README.md
 ├── api_server_8001.err.log

@@ -82,11 +82,11 @@ class RiskStratificationEngine:
         if "hutThuoc" in unified_data:
             ml_data["smoke"] = 1.0 if str(unified_data["hutThuoc"]).strip().lower() in ["đang hút", "yes", "1"] else 0.0
 
-        if "soPhutVanDongMoiTuan" in unified_data:
-            try:
-                ml_data["exercise"] = 1.0 if float(unified_data["soPhutVanDongMoiTuan"]) >= 150 else 0.0
-            except:
-                ml_data["exercise"] = 0.0
+        # if "soPhutVanDongMoiTuan" in unified_data:
+        #     try:
+        #         ml_data["exercise"] = 1.0 if float(unified_data["soPhutVanDongMoiTuan"]) >= 150 else 0.0
+        #     except:
+        #         ml_data["exercise"] = 0.0
 
         if "smoking_status" in unified_data and "smoke" not in ml_data:
             ml_data["smoke"] = 1.0 if unified_data["smoking_status"] == "current" else 0.0
@@ -97,11 +97,11 @@ class RiskStratificationEngine:
             except (ValueError, TypeError):
                 ml_data["alcohol"] = 0.0
         
-        if "exercise_minutes_per_week" in unified_data and "exercise" not in ml_data:
-            try:
-                ml_data["exercise"] = 1.0 if float(unified_data["exercise_minutes_per_week"]) >= 150 else 0.0
-            except (ValueError, TypeError):
-                ml_data["exercise"] = 0.0
+        # if "exercise_minutes_per_week" in unified_data and "exercise" not in ml_data:
+        #     try:
+        #         ml_data["exercise"] = 1.0 if float(unified_data["exercise_minutes_per_week"]) >= 150 else 0.0
+        #     except (ValueError, TypeError):
+        #         ml_data["exercise"] = 0.0
         
         if "diabetes_status" in unified_data and "diabetes" not in ml_data:
             ml_data["diabetes"] = 1.0 if unified_data["diabetes_status"] == "yes" else 0.0

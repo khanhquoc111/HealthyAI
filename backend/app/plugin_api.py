@@ -54,7 +54,7 @@ DB_TO_FORM = {
     "hba1c":             "hba1c",
     "cholesterol":       "total_cholesterol",
     "ldl":               "ldl",
-    "hdl":               "hdl",
+    "hdl":               "hdl_cholesterol",
     "creatinine":        "creatinine",
     "soPhutVanDongMoiTuan": "exercise",
     "giaDinhTieuDuong":  "family_diabetes",
