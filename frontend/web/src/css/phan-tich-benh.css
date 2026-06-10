@@ -93,7 +93,14 @@
   flex-wrap: wrap;
 }
 
-.ptb-header-text {}
+.ptb-header-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  flex: 1;
+}
 
 .ptb-breadcrumb {
   display: inline-flex;
@@ -158,6 +165,7 @@
   padding: 10px 14px;
   box-shadow: var(--shadow-sm);
   flex-shrink: 0;
+  align-self: flex-end;
 }
 
 .ptb-selector-label {

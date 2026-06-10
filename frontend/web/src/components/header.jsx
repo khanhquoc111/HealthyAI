@@ -33,7 +33,6 @@ export default function Header({ currentView, setCurrentView, userName, onLogout
     { icon: "👤", label: "Quản Lý Thông Tin", key: "quan-ly-thong-tin" },
     { icon: "🫀", label: "Hồ Sơ Sức Khỏe", key: "profile" },
     { icon: "📈", label: "Lịch Sử Đánh Giá", key: "history" },
-    { icon: "🧠", label: "Phân Tích Bệnh AI", key: "risk" },
     { icon: "⚙️", label: "Cài Đặt Tài Khoản", key: "cai-dat" },
     { icon: "🔔", label: "Thông Báo", key: "thong-bao" },
   ];
@@ -111,7 +110,7 @@ export default function Header({ currentView, setCurrentView, userName, onLogout
 
               <button className="dropdown-logout" onClick={onLogout}>
                 <span>🚪</span>
-                <span>Dang Xuat</span>
+                <span>Đăng Xuất</span>
               </button>
             </div>
           )}
