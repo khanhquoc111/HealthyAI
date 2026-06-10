@@ -29,18 +29,15 @@ LuanVanKTPM/
 │   ├── data/
 │   │   ├── cardio_final.csv
 │   │   ├── ckd_final.csv
-│   │   ├── demographic.csv
 │   │   ├── diabetes_final.csv
-│   │   ├── diet.csv
-│   │   ├── examination.csv
 │   │   ├── hypertension_final.csv
-│   │   ├── labs.csv
-│   │   ├── medications.csv
-│   │   └── questionnaire.csv
+│   │   ├── liver_final.csv
+│   │   └── medicine_details.csv
 │   ├── database/
 │   ├── function/
 │   │   ├── __pycache__/
-│   │   └── cn_hs_suckhoe.py
+│   │   ├── cn_hs_suckhoe.py
+│   │   └── cn_tra_thuoc.py
 │   ├── ml/
 │   │   ├── __pycache__/
 │   │   ├── models/
@@ -98,14 +95,20 @@ LuanVanKTPM/
 │       │   │   ├── header.css
 │       │   │   └── header.jsx
 │       │   ├── css/
+│       │   │   ├── gioi-thieu.css
+│       │   │   ├── phan-tich-benh.css
+│       │   │   ├── tra-thuoc.css
+│       │   │   └── trang-chu.css
 │       │   ├── App.css
 │       │   ├── App.jsx
 │       │   ├── dang-ky.jsx
 │       │   ├── dang-nhap.jsx
+│       │   ├── gioi-thieu.jsx
 │       │   ├── hs-suckhoe.jsx
 │       │   ├── index.css
 │       │   ├── main.jsx
 │       │   ├── phan-tich-benh.jsx
+│       │   ├── tra-thuoc.jsx
 │       │   └── trang-chu.jsx
 │       ├── .gitignore
 │       ├── README.md
@@ -139,7 +142,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.plugin_api import router as plugin_router
 from auth.dang_ky import router as register_router
 from auth.dang_nhap import router as login_router
-from function.cn_hs_suckhoe import router as health_router  # <-- [THÊM DÒNG NÀY] Import API Chỉ Số Sức Khỏe
+from function.cn_hs_suckhoe import router as health_router
+from function.cn_tra_thuoc import router as medicine_router  # <-- [THÊM DÒNG NÀY] Import API Trả Thuốc
+  # <-- [THÊM DÒNG NÀY] Import API Chỉ Số Sức Khỏe
 
 app = FastAPI(title="LuanVanKTPM - Disease Risk Engine")
 
@@ -156,6 +161,7 @@ app.include_router(plugin_router)
 app.include_router(register_router)
 app.include_router(login_router)
 app.include_router(health_router)  # <-- [THÊM DÒNG NÀY] Khai báo để FastAPI nhận diện router mới
+app.include_router(medicine_router)  # <-- [THÊM DÒNG NÀY] Khai báo để FastAPI nhận diện router mới
 
 @app.get("/")
 def root():
@@ -2854,6 +2860,590 @@ def upsert_health_profile(profile_data: HealthProfileSchema, db: Session = Depen
         raise HTTPException(status_code=500, detail=f"Lỗi lưu hồ sơ: {str(e)}")
 ```
 
+### backend\function\cn_tra_thuoc.py
+```py
+# backend/function/cn_tra_thuoc.py
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel
+import pandas as pd
+import logging
+import re
+from pathlib import Path
+
+from database.database import SessionLocal
+from database.nguoi_dung import NguoiDung
+from database.hs_suckhoe import HoSoSucKhoe
+from database.cs_suckhoe import ChiSoSucKhoe
+from app.condition_evaluator import ConditionEvaluator
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/medicines", tags=["Tra Cuu Thuoc"])
+
+# ---------------------------------------------------------------------------
+# Duong dan file CSV
+# CSV columns: Medicine Name | Composition | Uses | Side_effects | Image URL
+#              Manufacturer  | Excellent Review % | Average Review % | Poor Review % | Ingredients_List
+# ---------------------------------------------------------------------------
+
+_CSV_PATH = Path(__file__).parent.parent / "data" / "medicine_details.csv"
+
+_medicine_df: Optional[pd.DataFrame] = None
+
+
+def _load_medicines() -> pd.DataFrame:
+    """Tai va cache DataFrame thuoc tu CSV. Goi 1 lan duy nhat."""
+    global _medicine_df
+    if _medicine_df is None:
+        if not _CSV_PATH.exists():
+            logger.error("medicine_details.csv khong tim thay tai %s", _CSV_PATH)
+            _medicine_df = pd.DataFrame()
+        else:
+            _medicine_df = pd.read_csv(_CSV_PATH, encoding="utf-8")
+            _medicine_df.columns = [c.strip() for c in _medicine_df.columns]
+            logger.info("Da tai %d thuoc tu %s", len(_medicine_df), _CSV_PATH)
+    return _medicine_df
+
+
+# ---------------------------------------------------------------------------
+# DB session
+# ---------------------------------------------------------------------------
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Doc ho so suc khoe nguoi dung
+# ---------------------------------------------------------------------------
+
+BOOLEAN_FIELDS = {
+    "caoHuyetAp", "tieuDuong", "benhTimMach", "gout",
+    "giaDinhCaoHuyetAp", "giaDinhTieuDuong", "giaDinhTimMach", "giaDinhGout",
+}
+
+NUMBER_FIELDS = {
+    "duongHuyet", "hba1c", "cholesterol", "ldl", "hdl",
+    "triglyceride", "creatinine", "acidUric",
+}
+
+
+def _load_user_profile(ten_dang_nhap: str, db: Session) -> Optional[Dict[str, Any]]:
+    """Tra ve dict phang ho so suc khoe. None neu khong tim thay user."""
+    user = db.query(NguoiDung).filter(
+        NguoiDung.tenDangNhap == ten_dang_nhap
+    ).first()
+
+    if not user:
+        return None
+
+    hoso = db.query(HoSoSucKhoe).filter(
+        HoSoSucKhoe.idNguoiDung == user.idNguoiDung
+    ).first()
+
+    chisos = db.query(ChiSoSucKhoe).filter(
+        ChiSoSucKhoe.idNguoiDung == user.idNguoiDung
+    ).all()
+
+    profile: Dict[str, Any] = {}
+
+    if hoso:
+        for k, v in hoso.__dict__.items():
+            if not k.startswith("_") and v is not None:
+                profile[k] = v
+
+    for cs in chisos:
+        if cs.giaTri is None:
+            continue
+        if cs.maChiSo in BOOLEAN_FIELDS:
+            profile[cs.maChiSo] = cs.giaTri.lower() in ("true", "1", "yes")
+        elif cs.maChiSo in NUMBER_FIELDS:
+            try:
+                profile[cs.maChiSo] = float(cs.giaTri)
+            except ValueError:
+                profile[cs.maChiSo] = cs.giaTri
+        else:
+            profile[cs.maChiSo] = cs.giaTri
+
+    return profile
+
+
+# ---------------------------------------------------------------------------
+# Bo quy tac canh bao y te (Rule-based)
+#
+# Moi rule:
+#   id        – dinh danh duy nhat
+#   label     – ten hien thi ngan gon
+#   message   – noi dung canh bao day du, co dau tieng Viet
+#   severity  – "danger" | "warning" | "info"
+#   condition – dieu kien tuong thich ConditionEvaluator
+#
+# Operators duoc ho tro: gte, gt, lte, lt, eq, neq,
+#                        bool_true, bool_false, in, range
+# ---------------------------------------------------------------------------
+
+MEDICINE_WARNING_RULES: List[Dict[str, Any]] = [
+
+    # ── Tieu duong ─────────────────────────────────────────────────────────
+    {
+        "id": "high_glucose",
+        "label": "Đường huyết cao",
+        "message": (
+            "Chỉ số đường huyết của bạn đang ở mức cao (≥ 126 mg/dL). "
+            "Một số thuốc có thể ảnh hưởng đến kiểm soát đường huyết "
+            "(corticosteroid, thuốc lợi tiểu thiazide). "
+            "Tham khảo bác sĩ hoặc dược sĩ trước khi sử dụng thuốc mới."
+        ),
+        "severity": "danger",
+        "condition": {"field": "duongHuyet", "op": "gte", "value": 126},
+    },
+    {
+        "id": "diabetes_diagnosed",
+        "label": "Bệnh tiểu đường",
+        "message": (
+            "Bạn đã được chẩn đoán mắc tiểu đường. "
+            "Một số thuốc (corticosteroid, thuốc lợi tiểu) có thể làm tăng đường huyết. "
+            "Luôn kiểm tra đường huyết khi bắt đầu dùng thuốc mới."
+        ),
+        "severity": "danger",
+        "condition": {"field": "tieuDuong", "op": "bool_true"},
+    },
+    {
+        "id": "elevated_hba1c",
+        "label": "HbA1c cao",
+        "message": (
+            "Chỉ số HbA1c ≥ 6.5% cho thấy đường huyết trung bình đang ở mức cao. "
+            "Cẩn thận với các thuốc có thể gây tăng đường huyết như corticosteroid."
+        ),
+        "severity": "warning",
+        "condition": {"field": "hba1c", "op": "gte", "value": 6.5},
+    },
+
+    # ── Huyet ap ───────────────────────────────────────────────────────────
+    {
+        "id": "hypertension_stage2",
+        "label": "Huyết áp cao độ 2",
+        "message": (
+            "Huyết áp tâm thu của bạn ≥ 140 mmHg (cao huyết áp độ 2). "
+            "Tránh dùng thuốc kháng viêm NSAIDs (ibuprofen, naproxen) và thuốc giảm cân "
+            "có thể làm tăng huyết áp. Cần theo dõi thường xuyên cùng bác sĩ."
+        ),
+        "severity": "danger",
+        "condition": {"field": "huyetApTamThu", "op": "gte", "value": 140},
+    },
+    {
+        "id": "hypertension_stage1",
+        "label": "Huyết áp cao độ 1",
+        "message": (
+            "Huyết áp tâm thu của bạn trong khoảng 130–139 mmHg (cao huyết áp độ 1). "
+            "Một số thuốc có thể làm tăng huyết áp nhẹ (NSAIDs, thuốc giải cảm chứa pseudoephedrine). "
+            "Theo dõi huyết áp thường xuyên khi bắt đầu thuốc mới."
+        ),
+        "severity": "warning",
+        "condition": {
+            "field": "huyetApTamThu",
+            "op": "range",
+            "min": 130,
+            "max": 139,
+        },
+    },
+    {
+        "id": "hypertension_diagnosed",
+        "label": "Cao huyết áp (đã chẩn đoán)",
+        "message": (
+            "Bạn đã được chẩn đoán cao huyết áp. "
+            "Tránh dùng NSAIDs kéo dài, thuốc có chứa ma hoàng (pseudoephedrine), "
+            "và kiểm tra tương tác thuốc nếu đang dùng thuốc hạ áp."
+        ),
+        "severity": "warning",
+        "condition": {"field": "caoHuyetAp", "op": "bool_true"},
+    },
+
+    # ── Than ───────────────────────────────────────────────────────────────
+    {
+        "id": "high_creatinine",
+        "label": "Creatinine cao (nguy cơ suy thận)",
+        "message": (
+            "Creatinine ≥ 1.3 mg/dL gợi ý chức năng thận có thể bị suy giảm. "
+            "Nhiều loại thuốc được thải qua thận (metformin, một số kháng sinh, NSAIDs). "
+            "Lưu ý liều dùng và tham khảo ý kiến bác sĩ."
+        ),
+        "severity": "danger",
+        "condition": {"field": "creatinine", "op": "gte", "value": 1.3},
+    },
+
+    # ── Tim mach ───────────────────────────────────────────────────────────
+    {
+        "id": "high_ldl",
+        "label": "LDL cao",
+        "message": (
+            "LDL ≥ 160 mg/dL cho thấy mỡ máu cao. "
+            "Một số thuốc (corticosteroid, isotretinoin, thuốc tránh thai) "
+            "có thể làm tăng LDL. Nên kiểm tra lipid máu định kỳ."
+        ),
+        "severity": "warning",
+        "condition": {"field": "ldl", "op": "gte", "value": 160},
+    },
+    {
+        "id": "low_hdl",
+        "label": "HDL thấp",
+        "message": (
+            "HDL < 40 mg/dL là yếu tố nguy cơ tim mạch. "
+            "Một số loại thuốc có thể làm giảm HDL thêm. "
+            "Nên thảo luận với bác sĩ trước khi dùng thêm thuốc."
+        ),
+        "severity": "info",
+        "condition": {"field": "hdl", "op": "lt", "value": 40},
+    },
+    {
+        "id": "heart_disease_diagnosed",
+        "label": "Bệnh tim mạch (đã chẩn đoán)",
+        "message": (
+            "Bạn đã được chẩn đoán bệnh tim mạch. "
+            "Tránh dùng NSAIDs (tăng nguy cơ biến cố tim mạch). "
+            "Kiểm tra tương tác thuốc nếu đang dùng aspirin, thuốc chống đông máu."
+        ),
+        "severity": "danger",
+        "condition": {"field": "benhTimMach", "op": "bool_true"},
+    },
+    {
+        "id": "high_triglyceride",
+        "label": "Triglyceride cao",
+        "message": (
+            "Triglyceride ≥ 200 mg/dL. "
+            "Một số thuốc như corticosteroid, thuốc tránh thai nội tiết, "
+            "thuốc hạ huyết áp beta-blocker có thể làm tăng triglyceride."
+        ),
+        "severity": "warning",
+        "condition": {"field": "triglyceride", "op": "gte", "value": 200},
+    },
+
+    # ── Gout ───────────────────────────────────────────────────────────────
+    {
+        "id": "high_uric_acid",
+        "label": "Acid uric cao",
+        "message": (
+            "Acid uric ≥ 7.0 mg/dL. "
+            "Một số thuốc lợi tiểu (thiazide, furosemide) và aspirin liều thấp "
+            "có thể làm tăng acid uric. Theo dõi nếu có triệu chứng đau khớp."
+        ),
+        "severity": "warning",
+        "condition": {"field": "acidUric", "op": "gte", "value": 7.0},
+    },
+    {
+        "id": "gout_diagnosed",
+        "label": "Bệnh Gout (đã chẩn đoán)",
+        "message": (
+            "Bạn đã được chẩn đoán bệnh Gout. "
+            "Tránh dùng aspirin liều thấp, thuốc lợi tiểu nhóm thiazide. "
+            "Uống nhiều nước khi sử dụng kháng sinh hoặc thuốc có thể ảnh hưởng đến acid uric."
+        ),
+        "severity": "warning",
+        "condition": {"field": "gout", "op": "bool_true"},
+    },
+
+    # ── Loi song ───────────────────────────────────────────────────────────
+    {
+        "id": "current_smoker",
+        "label": "Đang hút thuốc lá",
+        "message": (
+            "Bạn đang hút thuốc lá. Nicotine ảnh hưởng đến hấp thu và tác dụng "
+            "của nhiều loại thuốc (thuốc chống đông, estrogen, một số thuốc tâm thần). "
+            "Thông báo cho bác sĩ hoặc dược sĩ biết tình trạng hút thuốc."
+        ),
+        "severity": "info",
+        "condition": {"field": "hutThuoc", "op": "eq", "value": "Đang hút"},
+    },
+    {
+        "id": "frequent_alcohol",
+        "label": "Uống rượu bia thường xuyên",
+        "message": (
+            "Uống rượu bia thường xuyên làm tăng nguy cơ tương tác thuốc nghiêm trọng "
+            "(đặc biệt với paracetamol, metronidazole, warfarin, thuốc an thần). "
+            "Tránh uống rượu khi đang dùng thuốc."
+        ),
+        "severity": "danger",
+        "condition": {"field": "uongRuouBia", "op": "eq", "value": "Thường xuyên"},
+    },
+
+    # ── BMI ────────────────────────────────────────────────────────────────
+    {
+        "id": "obesity",
+        "label": "Béo phì (BMI ≥ 30)",
+        "message": (
+            "BMI ≥ 30 (béo phì). "
+            "Liều dùng một số thuốc cần hiệu chỉnh theo cân nặng. "
+            "Trao đổi với bác sĩ hoặc dược sĩ về liều dùng phù hợp."
+        ),
+        "severity": "info",
+        "condition": {"field": "bmi", "op": "gte", "value": 30},
+    },
+
+    # ── Tuoi ───────────────────────────────────────────────────────────────
+    {
+        "id": "elderly",
+        "label": "Người cao tuổi (≥ 65)",
+        "message": (
+            "Người cao tuổi (≥ 65 tuổi) có nguy cơ tác dụng phụ cao hơn. "
+            "Chức năng thận và gan có thể suy giảm, ảnh hưởng đến chuyển hóa thuốc. "
+            "Nên bắt đầu với liều thấp và theo dõi chặt chẽ."
+        ),
+        "severity": "info",
+        "condition": {"field": "tuoi", "op": "gte", "value": 65},
+    },
+]
+
+
+# ---------------------------------------------------------------------------
+# Rule engine
+# ---------------------------------------------------------------------------
+
+def _evaluate_warnings(profile: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Chay tat ca MEDICINE_WARNING_RULES doi chieu voi ho so. Tra ve danh sach canh bao."""
+    triggered = []
+    for rule in MEDICINE_WARNING_RULES:
+        try:
+            matched = ConditionEvaluator.evaluate(rule["condition"], profile)
+        except Exception as exc:
+            logger.warning("Rule %s loi khi danh gia: %s", rule["id"], exc)
+            matched = False
+
+        if matched:
+            triggered.append({
+                "id": rule["id"],
+                "label": rule["label"],
+                "message": rule["message"],
+                "severity": rule["severity"],
+            })
+
+    # Sap xep: danger > warning > info
+    severity_order = {"danger": 0, "warning": 1, "info": 2}
+    triggered.sort(key=lambda x: severity_order.get(x["severity"], 9))
+    return triggered
+
+
+# ---------------------------------------------------------------------------
+# Serializer: chuyen 1 dong DataFrame -> dict chuan
+# CSV columns (chinh xac):
+#   Medicine Name | Composition  | Uses      | Side_effects
+#   Image URL     | Manufacturer | Excellent Review % | Average Review % | Poor Review % | Ingredients_List
+# ---------------------------------------------------------------------------
+
+def _serialize_medicine(row: pd.Series) -> Dict[str, Any]:
+    """Chuyen 1 hang DataFrame thanh dict thuoc chuan hoa."""
+    def safe(val):
+        if pd.isna(val):
+            return None
+        return str(val).strip() if isinstance(val, str) else val
+
+    return {
+        "id": int(row.name),
+        "tenThuoc": safe(row.get("Medicine Name", "")),
+        "thanhPhan": safe(row.get("Composition", "")),
+        "congDung": safe(row.get("Uses", "")),
+        "tacDungPhu": safe(row.get("Side_effects", "")),
+        "nhaSanXuat": safe(row.get("Manufacturer", "")),
+        "danhSachHoatChat": safe(row.get("Ingredients_List", "")),
+        "hinhAnh": safe(row.get("Image URL", "")),
+        "danhGiaTot": safe(row.get("Excellent Review %", 0)),
+        "danhGiaTrungBinh": safe(row.get("Average Review %", 0)),
+        "danhGiaKem": safe(row.get("Poor Review %", 0)),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tim kiem
+# ---------------------------------------------------------------------------
+
+def _search_medicines(query: str, limit: int = 10) -> List[Dict[str, Any]]:
+    """Tim thuoc theo ten hoac thanh phan hoat chat. Case-insensitive, partial match."""
+    df = _load_medicines()
+    if df.empty:
+        return []
+
+    q = query.strip().lower()
+    if not q:
+        return []
+
+    mask = pd.Series([False] * len(df), index=df.index)
+
+    if "Medicine Name" in df.columns:
+        mask |= df["Medicine Name"].fillna("").str.lower().str.contains(
+            re.escape(q), regex=True
+        )
+    if "Composition" in df.columns:
+        mask |= df["Composition"].fillna("").str.lower().str.contains(
+            re.escape(q), regex=True
+        )
+    if "Ingredients_List" in df.columns:
+        mask |= df["Ingredients_List"].fillna("").str.lower().str.contains(
+            re.escape(q), regex=True
+        )
+
+    results = df[mask].head(limit)
+    return [_serialize_medicine(row) for _, row in results.iterrows()]
+
+
+# ---------------------------------------------------------------------------
+# Pydantic schemas
+# ---------------------------------------------------------------------------
+
+class MedicineLookupRequest(BaseModel):
+    query: str
+    tenDangNhap: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/search")
+def search_medicines(q: str, limit: int = 10):
+    """
+    GET /medicines/search?q=paracetamol&limit=10
+    Tim kiem cong khai, khong can xac thuc. Chi tra ve danh sach thuoc.
+    """
+    if not q or len(q.strip()) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Từ khóa tìm kiếm phải có ít nhất 2 ký tự."
+        )
+
+    results = _search_medicines(q.strip(), limit=min(limit, 30))
+    return {
+        "query": q,
+        "count": len(results),
+        "results": results,
+    }
+
+
+@router.post("/lookup")
+def lookup_medicine_with_profile(
+    payload: MedicineLookupRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    POST /medicines/lookup
+    Body: { "query": "aspirin", "tenDangNhap": "user123" }
+
+    Tra ve:
+    {
+      "query": "...",
+      "count": N,
+      "medicines": [...],
+      "health_warnings": [...],
+      "profile_available": bool,
+      "warning_count": N
+    }
+    """
+    query = payload.query.strip()
+    if len(query) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Từ khóa tìm kiếm phải có ít nhất 2 ký tự."
+        )
+
+    medicines = _search_medicines(query, limit=15)
+
+    health_warnings: List[Dict[str, Any]] = []
+    profile_available = False
+
+    if payload.tenDangNhap:
+        profile = _load_user_profile(payload.tenDangNhap, db)
+        if profile:
+            profile_available = True
+            health_warnings = _evaluate_warnings(profile)
+        else:
+            logger.info("Khong tim thay ho so cho user: %s", payload.tenDangNhap)
+
+    return {
+        "query": query,
+        "count": len(medicines),
+        "medicines": medicines,
+        "health_warnings": health_warnings,
+        "profile_available": profile_available,
+        "warning_count": len(health_warnings),
+    }
+
+
+@router.get("/detail/{medicine_name}")
+def get_medicine_detail(
+    medicine_name: str,
+    tenDangNhap: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    GET /medicines/detail/{medicine_name}?tenDangNhap=user123
+    Tra ve thuoc khop nhat va canh bao suc khoe ca nhan.
+    """
+    df = _load_medicines()
+    if df.empty:
+        raise HTTPException(status_code=503, detail="Không thể tải dữ liệu thuốc.")
+
+    if "Medicine Name" not in df.columns:
+        raise HTTPException(status_code=500, detail="Cấu trúc dữ liệu thuốc không hợp lệ.")
+
+    q = medicine_name.strip().lower()
+    match = df[df["Medicine Name"].fillna("").str.lower() == q]
+
+    if match.empty:
+        match = df[
+            df["Medicine Name"].fillna("").str.lower().str.contains(
+                re.escape(q), regex=True
+            )
+        ]
+
+    if match.empty:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Không tìm thấy thuốc '{medicine_name}'."
+        )
+
+    medicine = _serialize_medicine(match.iloc[0])
+
+    health_warnings: List[Dict[str, Any]] = []
+    profile_available = False
+
+    if tenDangNhap:
+        profile = _load_user_profile(tenDangNhap, db)
+        if profile:
+            profile_available = True
+            health_warnings = _evaluate_warnings(profile)
+
+    return {
+        "medicine": medicine,
+        "health_warnings": health_warnings,
+        "profile_available": profile_available,
+        "warning_count": len(health_warnings),
+    }
+
+
+@router.get("/warning-rules")
+def get_warning_rules():
+    """
+    GET /medicines/warning-rules
+    Tra ve danh sach tat ca cac quy tac canh bao (de debug va tai lieu hoa).
+    """
+    return {
+        "count": len(MEDICINE_WARNING_RULES),
+        "rules": [
+            {
+                "id": r["id"],
+                "label": r["label"],
+                "severity": r["severity"],
+                "condition": r["condition"],
+            }
+            for r in MEDICINE_WARNING_RULES
+        ],
+    }
+```
+
 ### backend\ml\train_cardiovascular_final.py
 ```py
 """
@@ -3487,12 +4077,16 @@ export default defineConfig({
 ```jsx
 // frontend/src/App.jsx
 import { useState } from "react";
-// Đã cập nhật đúng tên các file mới đổi của bạn
 import PhanTichBenh from "./phan-tich-benh"; 
 import DangNhap from "./dang-nhap";
 import DangKy from "./dang-ky";
 import ChiSoSucKhoe from "./hs-suckhoe";   
 import TrangChu from "./trang-chu";
+import GioiThieu from "./gioi-thieu";
+import TraThuoc from "./tra-thuoc";
+
+import Header from "./components/header.jsx";
+import Footer from "./components/footer.jsx"; // <-- ĐÃ THÊM IMPORT FOOTER
 
 // Đọc trạng thái auth từ localStorage ngay lúc khởi tạo state
 function getInitialAuth() {
@@ -3512,12 +4106,15 @@ const initialAuth = getInitialAuth();
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(initialAuth.isAuthenticated);
   const [userEmail, setUserEmail] = useState(initialAuth.userEmail);
-  const [authMode, setAuthMode] = useState("welcome");
-  const [currentView, setCurrentView] = useState("risk");
+  // ĐỂ MỞ TRANG ĐĂNG NHẬP ĐẦU TIÊN: Đổi trạng thái mặc định từ "welcome" thành "login"
+  const [authMode, setAuthMode] = useState("login");
+  const [currentView, setCurrentView] = useState("trang-chu");
 
   const handleLoginSuccess = (email) => {
     setIsAuthenticated(true);
     setUserEmail(email);
+    setCurrentView("trang-chu");
+    // Đăng nhập thành công trả về trang chủ
   };
 
   const handleLogout = () => {
@@ -3525,12 +4122,122 @@ export default function App() {
     localStorage.removeItem("userName");
     setIsAuthenticated(false);
     setUserEmail("");
-    setAuthMode("welcome");
-    setCurrentView("risk");
+    setAuthMode("login");
+    // Khi đăng xuất, điều hướng quay lại màn hình đăng nhập
+    setCurrentView("trang-chu");
+  };
+
+  // Hàm quản lý render các màn hình theo currentView từ Header
+  const renderContent = () => {
+    switch (currentView) {
+      // 1. Các component đã có sẵn
+      case "phan-tich-benh":
+      case "risk": 
+        return <PhanTichBenh />;
+      case "profile":
+        return <ChiSoSucKhoe />;
+      case "trang-chu":
+        return (
+          <TrangChu
+            currentView={currentView}
+            setCurrentView={setCurrentView}
+            userName={userEmail}
+            onLogout={handleLogout}
+          />
+        );
+      case "gioi-thieu":
+        return <GioiThieu setCurrentView={setCurrentView} />;
+      // 2. Các đường dẫn từ Header đang chờ phát triển (Placeholder)
+      case "tu-van-ai":
+      case "y-te":
+      case "thuc-don":
+      case "tra-thuoc":
+      case "quan-ly-thong-tin":
+      case "history":
+      case "cai-dat":
+      case "thong-bao":
+      case "dashboard":
+        return (
+          <div style={{ 
+            background: "white", 
+            padding: "40px", 
+            borderRadius: "16px", 
+            textAlign: "center", 
+            border: "1px solid #E2E8F0", 
+            color: "#64748B",
+            marginTop: "20px"
+           }}>
+            <h3 style={{ fontSize: "20px", color: "#334155", marginBottom: "12px" }}>
+              🛠 Tính năng đang phát triển
+            </h3>
+            <p>
+              Phân hệ đường dẫn <strong>{currentView}</strong> hiện đang được xây dựng và đồng bộ hóa.
+             </p>
+          </div>
+        );
+      default:
+        return (
+          <TrangChu
+            currentView={currentView}
+            setCurrentView={setCurrentView}
+            userName={userEmail}
+            onLogout={handleLogout}
+          />
+        );
+    }
   };
 
   if (!isAuthenticated) {
-    if (authMode === "welcome") return <TrangChu onGoToLogin={() => setAuthMode("login")} />;
+    // Khối hiển thị giao diện Khách xem trước (chỉ kích hoạt nếu thiết lập authMode về "welcome")
+    if (authMode === "welcome") {
+      return (
+        <div style={{ 
+          display: "flex", 
+          flexDirection: "column", 
+          minHeight: "100vh", 
+          width: "100vw", 
+          backgroundColor: "#F8FAFC", 
+          margin: 0, 
+          padding: 0 
+        }}>
+          <style>{`
+            body, html, #root {
+              margin: 0 !important;
+              padding: 0 !important;
+              width: 100% !important;
+              max-width: 100% !important;
+              overflow-x: hidden;
+              background-color: #F8FAFC;
+            }
+            * { box-sizing: border-box; }
+          `}</style>
+          
+          <Header 
+            currentView={currentView}
+            setCurrentView={() => setAuthMode("login")}
+            userName="Khách"
+            onLogout={() => setAuthMode("login")}
+          />
+          
+           <main style={{ 
+            flex: 1, 
+            display: "flex", 
+            flexDirection: "column",
+            padding: "0",
+            overflowY: "auto",
+            width: "100%",
+            margin: "0 auto"
+          }}>
+            <TrangChu onGoToLogin={() => setAuthMode("login")} />
+          </main>
+
+          {/* <-- ĐÃ THÊM FOOTER CHO CHẾ ĐỘ KHÁCH --> */}
+          <Footer setCurrentView={() => setAuthMode("login")} />
+        </div>
+      );
+    }
+
+    // Mặc định render khối này trước khi chưa đăng nhập
     return (
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", backgroundColor: "#F8FAFC" }}>
         {authMode === "login" ? (
@@ -3542,8 +4249,19 @@ export default function App() {
     );
   }
 
+  // Giao diện chính sau khi đã xác thực tài khoản thành công
   return (
-    <div style={{ display: "flex", minHeight: "100vh", width: "100vw", backgroundColor: "#F8FAFC", fontFamily: "Segoe UI, sans-serif", margin: 0, padding: 0, boxSizing: "border-box" }}>
+    <div style={{ 
+      display: "flex", 
+      flexDirection: "column", 
+      minHeight: "100vh", 
+      width: "100vw", 
+      backgroundColor: "#F8FAFC", 
+      fontFamily: "Segoe UI, sans-serif", 
+      margin: 0, 
+      padding: 0, 
+      boxSizing: "border-box" 
+    }}>
       <style>{`
         body, html, #root {
           margin: 0 !important;
@@ -3552,92 +4270,38 @@ export default function App() {
           max-width: 100% !important;
           overflow-x: hidden;
           background-color: #F8FAFC;
-        }
+         }
         * { box-sizing: border-box; }
       `}</style>
 
-      {/* SIDEBAR */}
-      <div style={{ width: "260px", backgroundColor: "#FFFFFF", borderRight: "1px solid #E2E8F0", display: "flex", flexDirection: "column", height: "100vh", position: "sticky", top: 0, zIndex: 10 }}>
-        <div style={{ padding: "24px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
-          <span style={{ fontSize: "24px" }}>🩺</span>
-          <span style={{ fontWeight: "800", color: "#2563EB", fontSize: "20px", letterSpacing: "-0.5px" }}>HealthyAI</span>
-        </div>
+      {/* Header hệ thống */}
+      <Header 
+        currentView={currentView}
+        setCurrentView={setCurrentView}
+        userName={userEmail}
+        onLogout={handleLogout}
+      />
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "0 16px" }}>
-          <button onClick={() => setCurrentView("dashboard")} style={sidebarBtnStyle(currentView === "dashboard")}>
-            📊 Dashboard
-          </button>
-          <button onClick={() => setCurrentView("risk")} style={sidebarBtnStyle(currentView === "risk")}>
-            🧠 Khám bệnh AI
-          </button>
-          <button onClick={() => setCurrentView("profile")} style={sidebarBtnStyle(currentView === "profile")}>
-            📋 Hồ sơ sức khỏe
-          </button>
-          <button onClick={() => setCurrentView("history")} style={sidebarBtnStyle(currentView === "history")}>
-            📈 Lịch sử đánh giá
-          </button>
-        </div>
+      {/* Nội dung tương ứng với các phân hệ điều hướng */}
+      <main style={{ 
+        flex: 1, 
+        display: "flex", 
+        flexDirection: "column",
+        padding: currentView === "trang-chu" ? "0" : "32px",
+        overflowY: "auto",
+        width: "100%",
+        maxWidth: currentView === "trang-chu" ? "100%" : "1400px",
+        margin: "0 auto"
+      }}>
+        {renderContent()}
+      </main>
 
-        {/* PHẦN ĐĂNG XUẤT ĐÃ ĐƯỢC KHÔI PHỤC Ở ĐÂY */}
-        <div style={{ marginTop: "auto", padding: "20px", borderTop: "1px solid #E2E8F0", backgroundColor: "#F8FAFC" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
-            <div style={{ width: "36px", height: "36px", borderRadius: "50%", backgroundColor: "#DBEAFE", color: "#2563EB", display: "flex", justifyContent: "center", alignItems: "center", fontWeight: "bold", fontSize: "14px" }}>
-              👤
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
-              <span style={{ fontSize: "12px", color: "#64748B" }}>Tài khoản</span>
-              <span style={{ fontWeight: "600", color: "#334155", fontSize: "14px", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>{userEmail}</span>
-            </div>
-          </div>
-          <button
-            onClick={handleLogout}
-            style={{ width: "100%", padding: "10px", backgroundColor: "#FEF2F2", color: "#EF4444", border: "1px solid #FECACA", borderRadius: "8px", cursor: "pointer", fontWeight: "600", fontSize: "14px", transition: "all 0.2s" }}
-            onMouseOver={(e) => e.target.style.backgroundColor = "#FEE2E2"}
-            onMouseOut={(e) => e.target.style.backgroundColor = "#FEF2F2"}
-          >
-            Đăng xuất
-          </button>
-        </div>
-      </div>
+      {/* <-- ĐÃ THÊM FOOTER CHO GIAO DIỆN ĐÃ ĐĂNG NHẬP --> */}
+      <Footer setCurrentView={setCurrentView} />
 
-      {/* NỘI DUNG BÊN PHẢI */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <div style={{ backgroundColor: "#FFFFFF", height: "64px", padding: "0 32px", display: "flex", justifyContent: "flex-end", alignItems: "center", borderBottom: "1px solid #E2E8F0" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "24px" }}>
-            <span style={{ cursor: "pointer", fontSize: "20px", color: "#64748B" }}>🔔</span>
-            <span style={{ color: "#E2E8F0" }}>|</span>
-            <span style={{ fontSize: "14px", color: "#64748B", fontWeight: "500" }}>Phiên bản Hệ thống v2.0</span>
-          </div>
-        </div>
-
-        <div style={{ padding: "32px", overflowY: "auto", height: "calc(100vh - 64px)", width: "100%" }}>
-          {currentView === "risk" && <PhanTichBenh />}
-          {currentView === "profile" && <ChiSoSucKhoe />}
-          {(currentView === "dashboard" || currentView === "history") && (
-            <div style={{ background: "white", padding: "40px", borderRadius: "16px", textAlign: "center", border: "1px solid #E2E8F0", color: "#64748B" }}>
-              <h3>📈 Phân vùng dữ liệu</h3>
-              <p>Tính năng đang được đồng bộ hóa dữ liệu từ mô hình đám mây.</p>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
-
-const sidebarBtnStyle = (isActive) => ({
-  padding: "12px 16px",
-  backgroundColor: isActive ? "#EFF6FF" : "transparent",
-  color: isActive ? "#2563EB" : "#64748B",
-  border: "none",
-  borderRadius: "8px",
-  cursor: "pointer",
-  fontWeight: isActive ? "700" : "500",
-  textAlign: "left",
-  fontSize: "15px",
-  transition: "all 0.2s",
-  borderLeft: isActive ? "4px solid #2563EB" : "4px solid transparent"
-});
 ```
 
 ### frontend\web\src\dang-ky.jsx
@@ -3835,6 +4499,516 @@ export default function DangNhap({ onLoginSuccess, onSwitchToRegister }) {
     </div>
   );
 }
+```
+
+### frontend\web\src\gioi-thieu.jsx
+```jsx
+import React from "react";
+// Nhớ đảm bảo bạn đã copy nội dung file gioi-thieu.css vào đường dẫn này nhé
+import "./css/gioi-thieu.css";
+
+export default function GioiThieu({ setCurrentView }) {
+  // Hàm điều hướng nội bộ
+  const navigate = (view) => {
+    if (setCurrentView) setCurrentView(view);
+  };
+
+  return (
+    <div className="gioi-thieu-page">
+      {/* ═══════════════════════════════════════════
+           PAGE HEADER
+      ═══════════════════════════════════════════ */}
+      <div className="page-header">
+        <div className="container">
+          <div className="page-header-inner">
+            <div>
+              <div className="page-badge">
+                <span className="badge-dot"></span>
+                Về chúng tôi
+              </div>
+              <h1 className="page-title">Giới Thiệu Healthy AI</h1>
+              <p className="page-desc">
+                Tìm hiểu về dự án, đội ngũ và công nghệ đằng sau hệ thống đánh
+                giá nguy cơ bệnh mạn tính kết hợp Luật chuyên gia và Trí tuệ
+                nhân tạo.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════
+           MAIN CONTENT
+      ═══════════════════════════════════════════ */}
+      <main>
+        {/* ─────────────────────────────────────
+             SECTION 1: ABOUT INSTITUTION
+        ───────────────────────────────────── */}
+        <section className="about-section">
+          <div className="container">
+            <div className="section-header">
+              <div className="section-badge">Cơ sở</div>
+              <h2 className="section-title">
+                Trường Công Nghệ Thông Tin Và Truyền Thông
+              </h2>
+            </div>
+
+            <div className="about-grid">
+              <div className="about-card">
+                <div className="about-icon">
+                  <img
+                    src="https://www.ctu.edu.vn/images/upload/logo.png"
+                    alt="CTU Logo"
+                    className="about-logo"
+                  />
+                </div>
+                <h3 className="about-card-title">Đại Học Cần Thơ</h3>
+                <p className="about-card-text">
+                  Đại học Cần Thơ là một trong những trường đại học hàng đầu khu
+                  vực ĐBSCL, đi đầu trong công tác đào tạo, nghiên cứu khoa học
+                  và chuyển giao công nghệ. Nhà trường cam kết thúc đẩy chuyển
+                  đổi số và ứng dụng công nghệ thông tin vào y tế công cộng.
+                </p>
+              </div>
+
+              <div className="about-card">
+                <div className="about-icon">
+                  <img
+                    src="https://drive.google.com/thumbnail?id=1eWowijMhg8LRCPTBTXFZEaBl7HcW-NiU&sz=w1000"
+                    alt="CICT Logo"
+                    className="about-logo"
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "contain",
+                      borderRadius: "50%",
+                    }}
+                  />
+                </div>
+                <h3 className="about-card-title">Trường CNTT & TT (CICT)</h3>
+                <p className="about-card-text">
+                  Trường Công Nghệ Thông tin & Truyền Thông là đơn vị chủ trì dự
+                  án. Với đội ngũ giàu kinh nghiệm, trường là trung tâm nghiên
+                  cứu khoa học hàng đầu trong lĩnh vực Kỹ thuật phần mềm, Trí
+                  tuệ nhân tạo (AI) và các hệ thống y tế số ứng dụng.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ─────────────────────────────────────
+             SECTION 2: ABOUT PROJECT
+        ───────────────────────────────────── */}
+        <section className="project-section">
+          <div className="container">
+            <div className="section-header">
+              <div className="section-badge">Dự án</div>
+              <h2 className="section-title">Về Healthy AI (LuanVanKTPM)</h2>
+            </div>
+
+            <div className="project-content">
+              <div className="project-col project-col--text">
+                <h3 className="project-subtitle">
+                  Nền tảng Đánh giá Sức khỏe Kép (Dual-Engine)
+                </h3>
+                <p className="project-para">
+                  <strong>Healthy AI</strong> là nền tảng y tế số quản lý hồ sơ
+                  sức khỏe và sàng lọc nguy cơ mắc 5 loại bệnh mạn tính (Tiểu
+                  đường, Cao huyết áp, Tim mạch, Bệnh thận, Đột quỵ).
+                </p>
+
+                <p className="project-para">
+                  Dự án giải quyết bài toán cốt lõi của y tế số bằng{" "}
+                  <strong>Kiến trúc Plugin-Based</strong>
+                  và cơ chế{" "}
+                  <strong>đánh giá kép (Rule Engine + Machine Learning)</strong>
+                  , giúp dự đoán chính xác khi có đủ dữ liệu và luôn đảm bảo có
+                  kết quả nhờ luật y khoa chuyên gia làm fallback.
+                </p>
+
+                <div className="project-highlights">
+                  <h4 className="highlights-title">Điểm nổi bật</h4>
+                  <ul className="highlights-list">
+                    <li>
+                      <span className="highlight-icon">
+                        <i className="fa-solid fa-check"></i>
+                      </span>
+                      Hồ sơ sức khỏe trung tâm (nhập 1 lần, dùng N lần)
+                    </li>
+                    <li>
+                      <span className="highlight-icon">
+                        <i className="fa-solid fa-check"></i>
+                      </span>
+                      Kiến trúc Plugin-Based (Thêm bệnh không cần sửa code)
+                    </li>
+                    <li>
+                      <span className="highlight-icon">
+                        <i className="fa-solid fa-check"></i>
+                      </span>
+                      Kết hợp ML Models (XGBoost/RF) và Rule Engine
+                    </li>
+                    <li>
+                      <span className="highlight-icon">
+                        <i className="fa-solid fa-check"></i>
+                      </span>
+                      Tự động sinh lời giải thích (Explanation Engine)
+                    </li>
+                    <li>
+                      <span className="highlight-icon">
+                        <i className="fa-solid fa-check"></i>
+                      </span>
+                      Xây dựng form UI động (Metadata-Driven Design)
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="project-col project-col--visual">
+                <div className="project-visual-card">
+                  <div className="visual-header">
+                    <div className="visual-dots">
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                    </div>
+                    <span className="visual-title">
+                      Quy trình Đánh giá Nguy cơ
+                    </span>
+                  </div>
+                  <div className="visual-body">
+                    <div className="pipeline-item">
+                      <span className="pipeline-number">1</span>
+                      <span className="pipeline-text">
+                        Thu thập Hồ sơ Sức khỏe
+                      </span>
+                    </div>
+                    <div className="pipeline-arrow">
+                      <i className="fa-solid fa-arrow-down"></i>
+                    </div>
+                    <div className="pipeline-item">
+                      <span className="pipeline-number">2</span>
+                      <span className="pipeline-text">
+                        Tải Plugin Bệnh (Metadata)
+                      </span>
+                    </div>
+                    <div className="pipeline-arrow">
+                      <i className="fa-solid fa-arrow-down"></i>
+                    </div>
+                    <div className="pipeline-item">
+                      <span className="pipeline-number">3</span>
+                      <span className="pipeline-text">
+                        Hợp nhất & Chuẩn hóa Dữ liệu
+                      </span>
+                    </div>
+                    <div className="pipeline-arrow">
+                      <i className="fa-solid fa-arrow-down"></i>
+                    </div>
+                    <div className="pipeline-item">
+                      <span className="pipeline-number">4</span>
+                      <span className="pipeline-text">
+                        Dual Engine (Rule + Machine Learning)
+                      </span>
+                    </div>
+                    <div className="pipeline-arrow">
+                      <i className="fa-solid fa-arrow-down"></i>
+                    </div>
+                    <div className="pipeline-item pipeline-item--final">
+                      <span
+                        className="pipeline-number"
+                        style={{ background: "#22c55e" }}
+                      >
+                        ✓
+                      </span>
+                      <span className="pipeline-text">
+                        Sinh Giải thích & Khuyến nghị
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ─────────────────────────────────────
+             SECTION 3: TEAM
+        ───────────────────────────────────── */}
+        <section className="team-section">
+          <div className="container">
+            <div className="section-header">
+              <div className="section-badge">Đội ngũ</div>
+              <h2 className="section-title">Những người đứng sau dự án</h2>
+            </div>
+
+            {/* Advisors */}
+            <div className="team-group">
+              <h3 className="team-group-title">Giảng viên hướng dẫn</h3>
+              <div className="team-grid team-grid--advisors">
+                <div className="team-member">
+                  <div className="member-avatar member-avatar--advisor">
+                    <img
+                      src="https://drive.google.com/thumbnail?id=1ezRKzGVCVNobRF0kEJeWUUtchSdPu_rP&sz=w1000"
+                      alt="TS. Trương Minh Thái"
+                      className="member-image"
+                    />
+                  </div>
+                  <h4 className="member-name">TS. Trương Minh Thái</h4>
+                  <p className="member-role">Hướng dẫn khoa học</p>
+                  <p className="member-info">
+                    <small>Lĩnh vực: Công Nghệ Phần Mềm</small>
+                  </p>
+                </div>
+
+                <div className="team-member">
+                  <div className="member-avatar member-avatar--advisor">
+                    <img
+                      src="https://drive.google.com/thumbnail?id=1bM76xY1C0jYUyKYBiO68C7YFt0-j1R8-&sz=w1000"
+                      alt="TS. Mã Trường Thành"
+                      className="member-image"
+                    />
+                  </div>
+                  <h4 className="member-name">TS. Mã Trường Thành</h4>
+                  <p className="member-role">Hướng dẫn kỹ thuật</p>
+                  <p className="member-info">
+                    <small>Lĩnh vực: Khoa Học Máy Tính</small>
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Team Members - Giữ nguyên layout nhóm nhưng điều chỉnh Role cho phù hợp KTPM */}
+            <div className="team-group">
+              <h3 className="team-group-title">Đội ngũ thực hiện</h3>
+
+              <div className="team-grid">
+                <div className="team-member">
+                  <div className="member-avatar">
+                    <img
+                      src="https://drive.google.com/thumbnail?id=146qa8yRMF_cE44wmgafREtJA9KYYsvip&sz=w1000"
+                      alt="T. Lê Gia Linh"
+                      className="member-image"
+                    />
+                  </div>
+
+                  <h4 className="member-name">T. Lê Gia Linh</h4>
+                  <p className="member-role">Lập Trình Viên</p>
+                  <p className="member-id">B2203561 - DI2296F1</p>
+                </div>
+
+                <div className="team-member">
+                  <div className="member-avatar">
+                    <img
+                      src="https://drive.google.com/thumbnail?id=146qa8yRMF_cE44wmgafREtJA9KYYsvip&sz=w1000"
+                      alt="Tr. Ng Khánh Quốc"
+                      className="member-image"
+                    />
+                  </div>
+
+                  <h4 className="member-name">Tr. Ng Khánh Quốc</h4>
+                  <p className="member-role">Lập Trình Viên</p>
+                  <p className="member-id">B2203576 - DI2296F2</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ─────────────────────────────────────
+             SECTION 4: OBJECTIVES
+        ───────────────────────────────────── */}
+        <section className="objectives-section">
+          <div className="container">
+            <div className="section-header">
+              <div className="section-badge">Mục tiêu</div>
+              <h2 className="section-title">
+                Những gì chúng tôi muốn đạt được
+              </h2>
+            </div>
+
+            <div className="objectives-grid">
+              <div className="objective-card">
+                <div className="obj-icon obj-icon--1">
+                  <i className="fa-solid fa-notes-medical"></i>
+                </div>
+                <h3 className="obj-title">Hồ sơ sức khỏe dùng chung</h3>
+                <p className="obj-desc">
+                  Giải quyết vấn đề nhập liệu lặp lại. Người dùng chỉ cần cung
+                  cấp chỉ số một lần để đánh giá cho mọi loại bệnh.
+                </p>
+              </div>
+
+              <div className="objective-card">
+                <div className="obj-icon obj-icon--2">
+                  <i className="fa-solid fa-puzzle-piece"></i>
+                </div>
+                <h3 className="obj-title">Kiến trúc Plugin linh hoạt</h3>
+                <p className="obj-desc">
+                  Cho phép thêm bệnh lý mới vào hệ thống thông qua file JSON mà
+                  không cần chỉnh sửa mã nguồn cốt lõi.
+                </p>
+              </div>
+
+              <div className="objective-card">
+                <div className="obj-icon obj-icon--3">
+                  <i className="fa-solid fa-scale-balanced"></i>
+                </div>
+                <h3 className="obj-title">Đánh giá minh bạch</h3>
+                <p className="obj-desc">
+                  Kết hợp Rule Engine chuẩn y tế với Machine Learning, đảm bảo
+                  kết quả có thể giải thích chi tiết, không phải "hộp đen".
+                </p>
+              </div>
+
+              <div className="objective-card">
+                <div className="obj-icon obj-icon--4">
+                  <i className="fa-solid fa-brain"></i>
+                </div>
+                <h3 className="obj-title">AI Fallback thông minh</h3>
+                <p className="obj-desc">
+                  Mô hình ML dự đoán khi đủ dữ liệu, tự động lui về hệ thống
+                  Luật chuyên gia khi thiếu thông số để luôn có kết quả.
+                </p>
+              </div>
+
+              <div className="objective-card">
+                <div className="obj-icon obj-icon--5">
+                  <i className="fa-solid fa-comment-medical"></i>
+                </div>
+                <h3 className="obj-title">Khuyến nghị cá nhân hóa</h3>
+                <p className="obj-desc">
+                  Explanation Engine tự động sinh ra lời giải thích chi tiết và
+                  các khuyến nghị theo dõi, thay đổi lối sống.
+                </p>
+              </div>
+
+              <div className="objective-card">
+                <div className="obj-icon obj-icon--6">
+                  <i className="fa-solid fa-shield-halved"></i>
+                </div>
+                <h3 className="obj-title">Giao diện Metadata-Driven</h3>
+                <p className="obj-desc">
+                  UI được tự động tạo hình dựa trên cấu hình của từng plugin
+                  bệnh, đảm bảo đồng bộ hoàn hảo với backend.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ─────────────────────────────────────
+             SECTION 5: TECH STACK
+        ───────────────────────────────────── */}
+        <section className="tech-section">
+          <div className="container">
+            <div className="section-header">
+              <div className="section-badge">Công nghệ</div>
+              <h2 className="section-title">Các công nghệ được sử dụng</h2>
+            </div>
+
+            <div className="tech-grid">
+              <div className="tech-category">
+                <h3 className="tech-category-title">Frontend</h3>
+                <div className="tech-items">
+                  <div className="tech-item">
+                    <span className="tech-name">React 18 & Vite</span>
+                  </div>
+                  <div className="tech-item">
+                    <span className="tech-name">Metadata-Driven UI</span>
+                  </div>
+                  <div className="tech-item">
+                    <span className="tech-name">Axios (API Integration)</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="tech-category">
+                <h3 className="tech-category-title">Backend</h3>
+                <div className="tech-items">
+                  <div className="tech-item">
+                    <span className="tech-name">Python & FastAPI</span>
+                  </div>
+                  <div className="tech-item">
+                    <span className="tech-name">Pydantic Validation</span>
+                  </div>
+                  <div className="tech-item">
+                    <span className="tech-name">
+                      Plugin Loader Architecture
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="tech-category">
+                <h3 className="tech-category-title">AI & ML</h3>
+                <div className="tech-items">
+                  <div className="tech-item">
+                    <span className="tech-name">Scikit-learn & Pandas</span>
+                  </div>
+                  <div className="tech-item">
+                    <span className="tech-name">XGBoost & Random Forest</span>
+                  </div>
+                  <div className="tech-item">
+                    <span className="tech-name">Dataset từ NHANES</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="tech-category">
+                <h3 className="tech-category-title">Database & Auth</h3>
+                <div className="tech-items">
+                  <div className="tech-item">
+                    <span className="tech-name">SQLite / MySQL</span>
+                  </div>
+                  <div className="tech-item">
+                    <span className="tech-name">SQLAlchemy ORM</span>
+                  </div>
+                  <div className="tech-item">
+                    <span className="tech-name">Bcrypt Password Hashing</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ─────────────────────────────────────
+             SECTION 6: CTA & NAVIGATION
+        ───────────────────────────────────── */}
+        <section className="cta-section">
+          <div className="container">
+            <div className="cta-content">
+              <h2 className="cta-title">Sẵn sàng bảo vệ sức khỏe?</h2>
+              <p className="cta-desc">
+                Cập nhật Hồ sơ sức khỏe của bạn ngay hôm nay để nhận báo cáo
+                phân tích rủi ro chi tiết từ Healthy AI.
+              </p>
+              <div className="cta-actions">
+                <button
+                  onClick={() => navigate("risk")}
+                  className="cta-btn cta-btn--primary"
+                  style={{ border: "none", cursor: "pointer" }}
+                >
+                  <i className="fa-solid fa-heart-pulse"></i>
+                  Bắt đầu đánh giá ngay
+                </button>
+                <button
+                  onClick={() => navigate("profile")}
+                  className="cta-btn cta-btn--outline"
+                  style={{ cursor: "pointer" }}
+                >
+                  <i className="fa-solid fa-file-medical"></i>
+                  Thiết lập hồ sơ
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
 ```
 
 ### frontend\web\src\hs-suckhoe.jsx
@@ -4095,6 +5269,7 @@ createRoot(document.getElementById('root')).render(
 // frontend/src/MainRiskPage.jsx
 import { useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
+import "./css/phan-tich-benh.css";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 
@@ -4120,6 +5295,169 @@ const EAV_FALLBACK = {
   family_history_cardiovascular: "giaDinhTimMach",
 };
 
+// ── UI helpers ──────────────────────────────────────────────────
+function riskColorClass(score) {
+  return score > 60 ? "high" : score > 30 ? "mid" : "low";
+}
+
+function riskColorClassByLevel(level) {
+  const l = String(level).toLowerCase();
+  return l.includes("high") || l.includes("cao") ? "high"
+    : l.includes("medium") || l.includes("trung") ? "mid"
+    : "low";
+}
+
+function riskHexColor(score) {
+  return score > 60 ? "#EF4444" : score > 30 ? "#F59E0B" : "#22C55E";
+}
+
+// ── Sub-components ──────────────────────────────────────────────
+function EmptyResults() {
+  return (
+    <div className="ptb-results-empty">
+      <div className="ptb-empty-icon">🩺</div>
+      <p className="ptb-empty-title">Kết quả xuất hiện tại đây</p>
+      <p className="ptb-empty-desc">
+        Điền đầy đủ thông tin và nhấn <strong>Phân tích nguy cơ</strong> để
+        nhận kết quả từ Rule Engine và AI Model.
+      </p>
+    </div>
+  );
+}
+
+function RuleBasedCard({ data }) {
+  const cls = riskColorClass(data?.score ?? 0);
+  const levelCls = riskColorClassByLevel(data?.risk_level ?? "");
+
+  return (
+    <div className="ptb-result-card">
+      <div className="ptb-result-card-header">
+        <span className="ptb-result-engine-label">
+          <span className="ptb-result-engine-icon">📋</span>
+          Rule-based Engine
+        </span>
+        <span
+          className="ptb-result-score"
+          style={{ color: riskHexColor(data?.score ?? 0) }}
+        >
+          {(data?.score ?? 0).toFixed(1)}
+          <span style={{ fontSize: "0.7em", fontWeight: 500, color: "#94a3b8", marginLeft: 2 }}>điểm</span>
+        </span>
+      </div>
+
+      <div className="ptb-result-card-body">
+        <div className="ptb-score-bar-track">
+          <div
+            className={`ptb-score-bar-fill ptb-score-bar-fill--${cls}`}
+            style={{ width: `${Math.min(data?.score ?? 0, 100)}%` }}
+          />
+        </div>
+
+        <div className="ptb-risk-level-row">
+          <span className="ptb-risk-level-label">Phân tầng nguy cơ</span>
+          <span className={`ptb-risk-pill ptb-risk-pill--${levelCls}`}>
+            {String(data?.risk_level ?? "").toUpperCase()}
+          </span>
+        </div>
+
+        {data?.matched_rules?.length > 0 && (
+          <div className="ptb-rules-section">
+            <p className="ptb-rules-heading">Yếu tố kích hoạt</p>
+            {data.matched_rules.map((r, i) => (
+              <div key={i} className="ptb-rule-item">
+                <span className="ptb-rule-dot" />
+                {r.description || r.id}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AIModelCard({ data }) {
+  const isReady = data?.status === "READY";
+  const pct = (data?.probability ?? 0) * 100;
+  const cls = riskColorClass(pct);
+  const levelCls = riskColorClassByLevel(data?.risk_level ?? "");
+
+  return (
+    <div className="ptb-result-card">
+      <div className="ptb-result-card-header">
+        <span className="ptb-result-engine-label">
+          <span className="ptb-result-engine-icon">🧠</span>
+          AI Model
+        </span>
+        {isReady
+          ? <span className="ptb-result-score" style={{ color: riskHexColor(pct) }}>
+              {pct.toFixed(1)}
+              <span style={{ fontSize: "0.7em", fontWeight: 500, color: "#94a3b8", marginLeft: 2 }}>%</span>
+            </span>
+          : <span className="ptb-risk-pill ptb-risk-pill--mid">PARTIAL</span>
+        }
+      </div>
+
+      <div className="ptb-result-card-body">
+        {isReady ? (
+          <>
+            <div className="ptb-score-bar-track">
+              <div
+                className={`ptb-score-bar-fill ptb-score-bar-fill--${cls}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+
+            <div className="ptb-risk-level-row">
+              <span className="ptb-risk-level-label">Phân tầng</span>
+              <span className={`ptb-risk-pill ptb-risk-pill--${levelCls}`}>
+                {String(data?.risk_level ?? "").toUpperCase()}
+              </span>
+            </div>
+
+            <div className="ptb-confidence-row">
+              <span>Độ tin cậy mô hình</span>
+              <span className="ptb-confidence-val">{data?.confidence ?? 0}%</span>
+            </div>
+          </>
+        ) : (
+          <div className="ptb-ai-partial">
+            <span className="ptb-ai-partial-icon">⚠️</span>
+            <p className="ptb-ai-partial-text">
+              Cần điền đầy đủ các chỉ số sinh hóa nâng cao trong mục{" "}
+              <strong>Hồ sơ sức khỏe</strong> để kích hoạt phân tích AI.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RecommendationsCard({ recs }) {
+  if (!recs?.length) return null;
+  return (
+    <div className="ptb-rec-card">
+      <div className="ptb-rec-card-header">
+        <span style={{ fontSize: "1.1rem" }}>💡</span>
+        <h4 className="ptb-rec-title">Khuyến nghị cá nhân hóa</h4>
+      </div>
+      <div className="ptb-rec-body">
+        {recs.map((rec, i) => {
+          const text = typeof rec === "string" ? rec : rec.text;
+          return (
+            <div key={i} className="ptb-rec-item">
+              <span className="ptb-rec-num">{i + 1}</span>
+              {text}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Main component ──────────────────────────────────────────────
 export default function MainRiskPage() {
   const [selectedPlugin, setSelectedPlugin] = useState(null);
   const [plugins, setPlugins] = useState([]);
@@ -4134,15 +5472,12 @@ export default function MainRiskPage() {
 
   const tenDangNhap = localStorage.getItem("userName");
 
-  // ── Dùng ref để giữ healthProfile luôn mới nhất mà không tạo re-render loop ──
-  // buildFormFromMetadata đọc từ ref thay vì closure → loadPlugin không cần
-  // thêm buildFormFromMetadata vào dep → tránh vòng lặp effect vô tận
   const healthProfileRef = useRef(healthProfile);
   useEffect(() => {
     healthProfileRef.current = healthProfile;
   }, [healthProfile]);
 
-  // ── Metadata-driven form init ──────────────────────────────────────────────
+  // ── Metadata-driven form init ──────────────────────────────────
   const buildFormFromMetadata = useCallback((fields) => {
     const data = {};
     const hp = healthProfileRef.current;
@@ -4161,7 +5496,7 @@ export default function MainRiskPage() {
 
     const hardCols = ["tuoi", "gioiTinh", "chieuCao", "canNang", "bmi", "vongEo",
       "huyetApTamThu", "huyetApTamTruong", "hutThuoc", "uongRuouBia",
-      "soPhutVanDongMoiTuan", "anMan"]; // <-- THÊM "anMan" VÀO ĐÂY
+      "soPhutVanDongMoiTuan", "anMan"];
     hardCols.forEach(k => {
       if (hp[k] !== undefined) data[k] = hp[k];
     });
@@ -4195,10 +5530,9 @@ export default function MainRiskPage() {
     if (h > 0 && w > 0) data.bmi = Number((w / (h / 100) ** 2).toFixed(1));
 
     return data;
-  }, []); // ← dep rỗng vì đọc healthProfile qua ref, không qua closure
+  }, []);
 
-  // ── Data loading ───────────────────────────────────────────────────────────
-
+  // ── Data loading ───────────────────────────────────────────────
   const fetchHealthProfile = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/health-profile/${tenDangNhap}`);
@@ -4218,12 +5552,11 @@ export default function MainRiskPage() {
         typeof p === "string" ? { id: p, name: p, icon: "" } : p
       );
       setPlugins(normalized);
-      // Dùng functional update: không cần selectedPlugin trong dep
       setSelectedPlugin(prev => prev ?? (normalized.length > 0 ? normalized[0].id : null));
     } catch (e) {
       console.error("Load plugins list error:", e);
     }
-  }, []); // ← dep rỗng, chỉ chạy 1 lần duy nhất
+  }, []);
 
   const loadPlugin = useCallback(async (pluginId) => {
     try {
@@ -4239,25 +5572,21 @@ export default function MainRiskPage() {
     } finally {
       setLoading(false);
     }
-  }, [buildFormFromMetadata]); // buildFormFromMetadata ổn định (dep rỗng) → loadPlugin cũng ổn định
+  }, [buildFormFromMetadata]);
 
-  // ── Lifecycle ──────────────────────────────────────────────────────────────
-  // eslint-disable-next-line react-hooks/set-state-in-effect
+  // ── Lifecycle ──────────────────────────────────────────────────
   useEffect(() => { loadPluginsList(); }, [loadPluginsList]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (tenDangNhap) fetchHealthProfile();
     else setProfileLoaded(true);
   }, [tenDangNhap, fetchHealthProfile]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (profileLoaded && selectedPlugin) loadPlugin(selectedPlugin);
   }, [selectedPlugin, profileLoaded, loadPlugin]);
 
-  // ── Input handling ─────────────────────────────────────────────────────────
-
+  // ── Input handling ─────────────────────────────────────────────
   const handleChange = async (fieldOrKey, value) => {
     const key = typeof fieldOrKey === "object"
       ? (fieldOrKey.key || fieldOrKey.code)
@@ -4291,8 +5620,7 @@ export default function MainRiskPage() {
     }
   };
 
-  // ── Risk analysis ──────────────────────────────────────────────────────────
-
+  // ── Risk analysis ──────────────────────────────────────────────
   const handleAnalyzeClick = () => {
     if (!plugin) return;
 
@@ -4357,309 +5685,768 @@ export default function MainRiskPage() {
     }
   };
 
-  // ── UI helpers ─────────────────────────────────────────────────────────────
-
-  const riskColor = (score) =>
-    score > 60 ? "#EF4444" : score > 30 ? "#F59E0B" : "#22C55E";
-
-  const riskColorByLevel = (level) => {
-    const l = String(level).toLowerCase();
-    return l.includes("high") || l.includes("cao") ? "#EF4444"
-      : l.includes("medium") || l.includes("trung") ? "#F59E0B"
-        : "#22C55E";
-  };
-
-  // ── Render ─────────────────────────────────────────────────────────────────
-
+  // ── Loading state ──────────────────────────────────────────────
   if (!profileLoaded || (loading && !plugin)) {
-    return <div style={{ padding: "40px", textAlign: "center", color: "#64748B" }}>Đang tải cấu hình dữ liệu y tế...</div>;
+    return (
+      <div className="ptb-page">
+        <div className="ptb-header">
+          <div className="ptb-header-mesh">
+            <div className="ptb-mesh-blob ptb-mesh-blob--1" />
+            <div className="ptb-mesh-blob ptb-mesh-blob--2" />
+          </div>
+          <div className="ptb-header-inner">
+            <div className="ptb-header-text">
+              <div className="ptb-breadcrumb">
+                <span className="ptb-breadcrumb-dot" />
+                Phân Tích Bệnh
+              </div>
+              <div className="ptb-skeleton" style={{ width: 280, height: 32, marginBottom: 10 }} />
+              <div className="ptb-skeleton" style={{ width: 420, height: 18 }} />
+            </div>
+          </div>
+        </div>
+        <div className="ptb-body">
+          <div className="ptb-form-card">
+            <div className="ptb-form-card-header">
+              <div className="ptb-skeleton" style={{ width: 200, height: 22 }} />
+            </div>
+            <div className="ptb-form-body">
+              <div className="ptb-fields-grid">
+                {[...Array(6)].map((_, i) => (
+                  <div key={i} className="ptb-field">
+                    <div className="ptb-skeleton" style={{ width: 100, height: 14, marginBottom: 4 }} />
+                    <div className="ptb-skeleton" style={{ width: "100%", height: 42 }} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="ptb-results-panel">
+            <EmptyResults />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const disease = plugin?.disease_info || {};
-  if (riskResult) {
-    console.log("🔍 riskResult structure:", JSON.stringify(riskResult, null, 2));
-  }
+  const hasProfile = !!healthProfile;
 
+  // ── Render ─────────────────────────────────────────────────────
   return (
-    <div style={{ width: "100%", maxWidth: "1200px", margin: "0 auto" }}>
-      <style>{`
-        .custom-input {
-          background-color: #FFFFFF !important;
-          color: #1E293B !important;
-          border: 1px solid #D1D5DB;
-          border-radius: 8px;
-          padding: 12px;
-          width: 100%;
-          box-sizing: border-box;
-          font-size: 15px;
-          transition: all 0.2s;
-        }
-        .custom-input:focus {
-          outline: none;
-          border-color: #2563EB;
-          box-shadow: 0 0 0 3px rgba(37,99,235,.15);
-        }
-        select.custom-input option { color: #1E293B !important; background: #FFF !important; }
-        .btn-analyze {
-          height: 56px; font-size: 18px; font-weight: 700; border-radius: 12px;
-          background: #2563EB; color: white; border: none; cursor: pointer;
-          transition: all 0.2s; box-shadow: 0 4px 6px -1px rgba(37,99,235,.2);
-        }
-        .btn-analyze:hover  { transform: translateY(-2px); background: #1D4ED8; }
-        .btn-analyze:disabled { background: #94A3B8; cursor: not-allowed; transform: none; }
-      `}</style>
+    <div className="ptb-page">
 
-      {/* HEADER */}
-      <div style={{
-        display: "flex", justifyContent: "space-between", alignItems: "center",
-        background: "#FFF", padding: "20px 24px", borderRadius: "12px",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.05)", marginBottom: "32px"
-      }}>
-        <div>
-          <h2 style={{ margin: 0, color: "#1E293B", fontSize: "20px", fontWeight: 700 }}>
-            {disease.icon ? `${disease.icon} ` : "🫁 "}{disease.name || "Đánh giá nguy cơ"}
-          </h2>
-          <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "#64748B" }}>
-            {disease.description}
-          </p>
+      {/* ── PAGE HEADER ── */}
+      <div className="ptb-header">
+        <div className="ptb-header-mesh" aria-hidden="true">
+          <div className="ptb-mesh-blob ptb-mesh-blob--1" />
+          <div className="ptb-mesh-blob ptb-mesh-blob--2" />
         </div>
 
-        <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-          <span style={{ fontSize: "14px", fontWeight: 600, color: "#475569" }}>Mô hình đích:</span>
-          <select
-            value={selectedPlugin || ""}
-            onChange={(e) => setSelectedPlugin(e.target.value)}
-            className="custom-input"
-            style={{ width: "240px", padding: "8px 12px" }}
-          >
-            {plugins.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.icon ? `${p.icon} ` : ""}{p.name || p.id}
-              </option>
-            ))}
-          </select>
+        <div className="ptb-header-inner">
+          <div className="ptb-header-text">
+            <div className="ptb-breadcrumb">
+              <span className="ptb-breadcrumb-dot" />
+              Phân Tích Bệnh Mạn Tính
+            </div>
+            <h1 className="ptb-page-title">
+              Đánh giá nguy cơ{" "}
+              <em>{disease.name || "bệnh mạn tính"}</em>
+            </h1>
+            <p className="ptb-page-desc">
+              {disease.description || "Kết hợp Rule Engine và AI Model để phân tích nguy cơ chính xác và có thể giải thích."}
+            </p>
+          </div>
+
+          {/* Plugin tab selector */}
+          {plugins.length > 0 && (
+            <div className="ptb-plugin-selector">
+              <span className="ptb-selector-label">Mô hình</span>
+              <div className="ptb-plugin-tabs">
+                {plugins.map(p => (
+                  <button
+                    key={p.id}
+                    className={`ptb-plugin-tab${selectedPlugin === p.id ? " ptb-plugin-tab--active" : ""}`}
+                    onClick={() => setSelectedPlugin(p.id)}
+                  >
+                    {p.icon && <span>{p.icon}</span>}
+                    {p.name || p.id}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* FORM */}
-      {!loading && plugin && (
-        <div style={{
-          background: "white", padding: "32px", borderRadius: "16px",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.05)", border: "1px solid #E2E8F0"
-        }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-            {plugin.fields.map((field) => {
-              const key = field.key || field.code;
+      {/* ── BODY ── */}
+      <div className="ptb-body">
 
-              if (key === "bmi") return (
-                <div key="bmi_group" style={{
-                  gridColumn: "1 / -1", background: "#F8FAFC",
-                  padding: "16px", borderRadius: "8px", border: "1px dashed #CBD5E1"
-                }}>
-                  <p style={{ margin: "0 0 10px 0", fontSize: "13px", color: "#64748B", fontStyle: "italic" }}>
-                    Chỉ số BMI được tự động tính từ chiều cao và cân nặng.
-                  </p>
-                  <div style={{ display: "flex", gap: "12px", marginBottom: "10px" }}>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ fontWeight: 600, color: "#475569", fontSize: "14px", display: "block", marginBottom: 6 }}>
-                        Chiều cao (cm)
-                      </label>
-                      <input type="number" className="custom-input"
-                        value={formData.chieuCao || ""}
-                        onChange={e => handleChange("chieuCao", e.target.value === "" ? "" : Number(e.target.value))} />
+        {/* ── FORM CARD (left) ── */}
+        <div className="ptb-form-card">
+          <div className="ptb-form-card-header">
+            <div className="ptb-form-title-row">
+              <div className="ptb-form-disease-icon">
+                {disease.icon || "🩺"}
+              </div>
+              <div>
+                <h2 className="ptb-form-title">
+                  {disease.name || "Thông số đánh giá"}
+                </h2>
+                <p className="ptb-form-subtitle">
+                  Điền các chỉ số bên dưới để nhận kết quả phân tích
+                </p>
+              </div>
+            </div>
+
+            <div className={`ptb-profile-badge${hasProfile ? "" : " ptb-profile-badge--empty"}`}>
+              {hasProfile ? (
+                <>
+                  <span className="ptb-profile-badge-dot" />
+                  Hồ sơ đã tải
+                </>
+              ) : (
+                <>⚠️ Chưa có hồ sơ</>
+              )}
+            </div>
+          </div>
+
+          <div className="ptb-form-body">
+            <div className="ptb-fields-grid">
+              {plugin?.fields?.map((field) => {
+                const key = field.key || field.code;
+
+                // ── BMI group ──
+                if (key === "bmi") return (
+                  <div key="bmi_group" className="ptb-bmi-group ptb-field--full">
+                    <p className="ptb-bmi-hint">
+                      <span>ℹ️</span>
+                      Chỉ số BMI được tính tự động từ chiều cao và cân nặng.
+                    </p>
+                    <div className="ptb-bmi-row">
+                      <div className="ptb-field">
+                        <label className="ptb-label">Chiều cao <span className="ptb-label-unit">(cm)</span></label>
+                        <input
+                          type="number"
+                          className="ptb-input"
+                          value={formData.chieuCao || ""}
+                          onChange={e => handleChange("chieuCao", e.target.value === "" ? "" : Number(e.target.value))}
+                        />
+                      </div>
+                      <div className="ptb-field">
+                        <label className="ptb-label">Cân nặng <span className="ptb-label-unit">(kg)</span></label>
+                        <input
+                          type="number"
+                          className="ptb-input"
+                          value={formData.canNang || ""}
+                          onChange={e => handleChange("canNang", e.target.value === "" ? "" : Number(e.target.value))}
+                        />
+                      </div>
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ fontWeight: 600, color: "#475569", fontSize: "14px", display: "block", marginBottom: 6 }}>
-                        Cân nặng (kg)
+                    <div className="ptb-bmi-result">
+                      <label className="ptb-label" style={{ color: "#0f766e" }}>
+                        BMI <span className="ptb-label-unit">(tự động)</span>
                       </label>
-                      <input type="number" className="custom-input"
-                        value={formData.canNang || ""}
-                        onChange={e => handleChange("canNang", e.target.value === "" ? "" : Number(e.target.value))} />
+                      <input
+                        type="number"
+                        readOnly
+                        className="ptb-input ptb-input--readonly"
+                        value={formData.bmi || ""}
+                      />
                     </div>
                   </div>
-                  <div>
-                    <label style={{ fontWeight: 600, color: "#0F766E", fontSize: "14px", display: "block", marginBottom: 6 }}>
-                      BMI (tự động)
+                );
+
+                // ── Boolean ──
+                if (field.type === "boolean") return (
+                  <div key={key} className="ptb-field">
+                    <label className="ptb-label">
+                      {field.label}
+                      {field.required && <span className="ptb-label-required"> *</span>}
                     </label>
-                    <input type="number" readOnly className="custom-input"
-                      value={formData.bmi || ""}
-                      style={{ background: "#F0FDF4 !important", color: "#0F766E", fontWeight: 700 }} />
+                    <label className={`ptb-checkbox-label${formData[key] ? " ptb-checkbox-label--checked" : ""}`}>
+                      <input
+                        type="checkbox"
+                        checked={!!formData[key]}
+                        onChange={e => handleChange(field, e.target.checked)}
+                      />
+                      <span className={`ptb-checkbox-text${formData[key] ? " ptb-checkbox-text--checked" : ""}`}>
+                        Kích hoạt yếu tố này
+                      </span>
+                    </label>
+                    {errors[key] && <span className="ptb-field-error">⚠ {errors[key]}</span>}
                   </div>
-                </div>
-              );
+                );
 
-              return (
-                <div key={key} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                  <label style={{ fontWeight: 600, color: "#475569", fontSize: "14px" }}>
-                    {field.label}
-                    {field.unit && <span style={{ color: "#94A3B8", fontWeight: 400 }}> ({field.unit})</span>}
-                    {field.required && <span style={{ color: "#EF4444" }}> *</span>}
-                  </label>
-
-                  {field.type === "number" && (
-                    <input type="number" className="custom-input"
+                // ── Select ──
+                if (field.type === "select") return (
+                  <div key={key} className="ptb-field">
+                    <label className="ptb-label">
+                      {field.label}
+                      {field.unit && <span className="ptb-label-unit"> ({field.unit})</span>}
+                      {field.required && <span className="ptb-label-required"> *</span>}
+                    </label>
+                    <select
+                      className={`ptb-select${errors[key] ? " ptb-input--error" : ""}`}
                       value={formData[key] ?? ""}
-                      min={field.min} max={field.max} step={field.step ?? 1}
-                      onChange={e => handleChange(field, e.target.value === "" ? "" : Number(e.target.value))} />
-                  )}
-
-                  {field.type === "select" && (
-                    <select className="custom-input"
-                      value={formData[key] ?? ""}
-                      onChange={e => handleChange(field, e.target.value)}>
+                      onChange={e => handleChange(field, e.target.value)}
+                    >
                       <option value="">-- Chọn --</option>
                       {field.options?.map(opt => (
                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                       ))}
                     </select>
-                  )}
-
-                  {field.type === "boolean" && (
-                    <label style={{
-                      display: "flex", alignItems: "center", gap: "10px", padding: "12px",
-                      border: `1px solid ${formData[key] ? "#2563EB" : "#D1D5DB"}`,
-                      borderRadius: "8px", cursor: "pointer",
-                      background: formData[key] ? "#EFF6FF" : "#FFF", transition: "all 0.2s"
-                    }}>
-                      <input type="checkbox" checked={!!formData[key]}
-                        onChange={e => handleChange(field, e.target.checked)}
-                        style={{ width: 18, height: 18 }} />
-                      <span style={{
-                        color: formData[key] ? "#1E40AF" : "#475569", fontSize: 15,
-                        fontWeight: formData[key] ? 600 : 500
-                      }}>
-                        Kích hoạt yếu tố này
-                      </span>
-                    </label>
-                  )}
-
-                  {field.type === "text" && (
-                    <input type="text" className="custom-input"
-                      value={formData[key] ?? ""}
-                      onChange={e => handleChange(field, e.target.value)} />
-                  )}
-
-                  {errors[key] && (
-                    <div style={{ color: "#EF4444", fontSize: "13px", fontWeight: 500 }}>{errors[key]}</div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          <button className="btn-analyze" onClick={handleAnalyzeClick}
-            disabled={isCalculating} style={{ width: "100%", marginTop: "32px" }}>
-            {isCalculating ? "⏳ Đang phân tích chỉ số liên tầng..." : "🩺 Phân tích nguy cơ"}
-          </button>
-        </div>
-      )}
-
-      {/* KẾT QUẢ DUAL-ENGINE */}
-      {riskResult && (
-        <div style={{ marginTop: "32px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-
-          {/* Rule-based */}
-          <div style={{
-            background: "white", padding: "24px", borderRadius: "16px",
-            border: "1px solid #E2E8F0", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)"
-          }}>
-            <h3 style={{ margin: "0 0 16px 0", color: "#334155", display: "flex", justifyContent: "space-between" }}>
-              <span>📋 Rule-based Engine</span>
-              <span style={{ color: "#2563EB", fontWeight: 700 }}>
-                {(riskResult.rule_based?.score ?? 0).toFixed(1)} Điểm
-              </span>
-            </h3>
-            <div style={{ width: "100%", height: 12, background: "#F1F5F9", borderRadius: 6, overflow: "hidden", marginBottom: 16 }}>
-              <div style={{
-                width: `${Math.min(riskResult.rule_based?.score ?? 0, 100)}%`, height: "100%",
-                background: riskColor(riskResult.rule_based?.score ?? 0), transition: "width 1s"
-              }} />
-            </div>
-            <p style={{ margin: "0 0 12px 0", color: "#64748B" }}>
-              Phân tầng nguy cơ:{" "}
-              <strong style={{ color: riskColorByLevel(riskResult.rule_based?.risk_level) }}>
-                {String(riskResult.rule_based?.risk_level ?? "").toUpperCase()}
-              </strong>
-            </p>
-            {riskResult.rule_based?.matched_rules?.length > 0 && (
-              <div style={{ marginTop: 12 }}>
-                <p style={{ margin: "0 0 8px 0", fontSize: 13, fontWeight: 600, color: "#475569" }}>
-                  Yếu tố kích hoạt:
-                </p>
-                {riskResult.rule_based.matched_rules.map((r, i) => (
-                  <div key={i} style={{
-                    fontSize: 13, color: "#64748B", padding: "4px 0",
-                    borderBottom: "1px solid #F1F5F9"
-                  }}>
-                    • {r.description || r.id}
+                    {errors[key] && <span className="ptb-field-error">⚠ {errors[key]}</span>}
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
+                );
 
-          {/* AI Model */}
-          <div style={{
-            background: "white", padding: "24px", borderRadius: "16px",
-            border: "1px solid #E2E8F0", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)"
-          }}>
-            <h3 style={{ margin: "0 0 16px 0", color: "#334155", display: "flex", justifyContent: "space-between" }}>
-              <span>🧠 AI Model</span>
-              {riskResult.ai_based?.status === "READY"
-                ? <span style={{ color: "#10B981", fontWeight: 700 }}>
-                  {((riskResult.ai_based?.probability ?? 0) * 100).toFixed(1)}%
-                </span>
-                : <span style={{ color: "#F59E0B", fontSize: 14 }}>PARTIAL</span>
-              }
-            </h3>
-            {riskResult.ai_based?.status === "READY" ? (
-              <>
-                <div style={{ width: "100%", height: 12, background: "#F1F5F9", borderRadius: 6, overflow: "hidden", marginBottom: 16 }}>
-                  <div style={{
-                    width: `${(riskResult.ai_based?.probability ?? 0) * 100}%`, height: "100%",
-                    background: riskColor((riskResult.ai_based?.probability ?? 0) * 100),
-                    transition: "width 1s"
-                  }} />
-                </div>
-                <p style={{ margin: "0 0 8px 0", color: "#64748B" }}>
-                  Phân tầng:{" "}
-                  <strong style={{ color: riskColorByLevel(riskResult.ai_based?.risk_level) }}>
-                    {String(riskResult.ai_based?.risk_level ?? "").toUpperCase()}
-                  </strong>
-                </p>
-                <p style={{ margin: 0, color: "#64748B" }}>
-                  Độ tin cậy: <strong style={{ color: "#2563EB" }}>{riskResult.ai_based?.confidence ?? 0}%</strong>
-                </p>
-              </>
-            ) : (
-              <p style={{ margin: 0, fontSize: 14, color: "#64748B", lineHeight: 1.6 }}>
-                Cần điền đầy đủ các chỉ số sinh hóa nâng cao trong mục{" "}
-                <strong>Hồ sơ sức khỏe</strong> để kích hoạt phân tích AI.
-              </p>
-            )}
-          </div>
-
-          {/* Khuyến nghị */}
-          {riskResult.recommendations?.length > 0 && (
-            <div style={{
-              gridColumn: "1 / -1", background: "#FFFBEB", padding: "24px",
-              borderRadius: "16px", border: "1px solid #FDE68A"
-            }}>
-              <h3 style={{ margin: "0 0 12px 0", color: "#92400E" }}>💡 Khuyến nghị</h3>
-              {riskResult.recommendations.map((rec, i) => {
-                const text = typeof rec === "string" ? rec : rec.text;
+                // ── Number / Text ──
                 return (
-                  <div key={i} style={{
-                    padding: "8px 0",
-                    borderBottom: i < riskResult.recommendations.length - 1 ? "1px solid #FEF3C7" : "none",
-                    color: "#78350F", fontSize: 14
-                  }}>
-                    {i + 1}. {text}
+                  <div key={key} className="ptb-field">
+                    <label className="ptb-label">
+                      {field.label}
+                      {field.unit && <span className="ptb-label-unit"> ({field.unit})</span>}
+                      {field.required && <span className="ptb-label-required"> *</span>}
+                    </label>
+                    <input
+                      type={field.type === "number" ? "number" : "text"}
+                      className={`ptb-input${errors[key] ? " ptb-input--error" : ""}`}
+                      value={formData[key] ?? ""}
+                      min={field.min}
+                      max={field.max}
+                      step={field.step ?? 1}
+                      onChange={e => handleChange(field, field.type === "number"
+                        ? (e.target.value === "" ? "" : Number(e.target.value))
+                        : e.target.value
+                      )}
+                    />
+                    {errors[key] && <span className="ptb-field-error">⚠ {errors[key]}</span>}
                   </div>
                 );
               })}
             </div>
+
+            <button
+              className="ptb-analyze-btn"
+              onClick={handleAnalyzeClick}
+              disabled={isCalculating}
+            >
+              {isCalculating
+                ? <><span>⏳</span> Đang phân tích chỉ số liên tầng...</>
+                : <><span>🩺</span> Phân tích nguy cơ</>
+              }
+            </button>
+          </div>
+        </div>
+
+        {/* ── RESULTS PANEL (right) ── */}
+        <div className="ptb-results-panel">
+          {!riskResult ? (
+            <EmptyResults />
+          ) : (
+            <>
+              <RuleBasedCard data={riskResult.rule_based} />
+              <AIModelCard data={riskResult.ai_based} />
+              <RecommendationsCard recs={riskResult.recommendations} />
+            </>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+### frontend\web\src\tra-thuoc.jsx
+```jsx
+// frontend/web/src/tra-thuoc.jsx
+import { useState, useCallback, useRef } from "react";
+import axios from "axios";
+import "./css/tra-thuoc.css";
+
+const API_BASE_URL = "http://localhost:8000";
+
+// ---------------------------------------------------------------------------
+// Cau hinh hien thi theo muc do canh bao
+// ---------------------------------------------------------------------------
+
+const SEVERITY_CONFIG = {
+  danger: {
+    bullet: "tt-warning-bullet--danger",
+    label: "tt-warning-label--danger",
+    item: "tt-warning-item--danger",
+    icon: "!",
+    accordionHeader: "tt-warnings-accordion-header--danger",
+    accordionTitle: "tt-accordion-title--danger",
+    listClass: "tt-warnings-list--danger",
+    countBadge: "tt-count-badge--danger",
+  },
+  warning: {
+    bullet: "tt-warning-bullet--warning",
+    label: "tt-warning-label--warning",
+    item: "tt-warning-item--warning",
+    icon: "!",
+    accordionHeader: "tt-warnings-accordion-header--warning",
+    accordionTitle: "tt-accordion-title--warning",
+    listClass: "tt-warnings-list--warning",
+    countBadge: "tt-count-badge--warning",
+  },
+  info: {
+    bullet: "tt-warning-bullet--info",
+    label: "tt-warning-label--info",
+    item: "tt-warning-item--info",
+    icon: "i",
+    accordionHeader: "tt-warnings-accordion-header--warning",
+    accordionTitle: "tt-accordion-title--warning",
+    listClass: "tt-warnings-list--warning",
+    countBadge: "tt-count-badge--info",
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Sub-component: Thanh tim kiem
+// ---------------------------------------------------------------------------
+
+function SearchBar({ value, onChange, onSearch, loading }) {
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") onSearch();
+  };
+
+  return (
+    <div className="tt-search-row">
+      <div className="tt-search-input-wrap">
+        <input
+          type="text"
+          className="tt-search-input"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Nhập tên thuốc hoặc hoạt chất (ví dụ: aspirin, amoxicillin, ibuprofen…)"
+        />
+      </div>
+      <button
+        className="tt-search-btn"
+        onClick={onSearch}
+        disabled={loading || !value.trim()}
+      >
+        {loading ? "Đang tìm…" : "Tìm kiếm"}
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-component: Card thuoc trong danh sach
+// ---------------------------------------------------------------------------
+
+function MedicineCard({ medicine, isSelected, onClick }) {
+  return (
+    <div
+      className={`tt-medicine-card${isSelected ? " selected" : ""}`}
+      onClick={onClick}
+    >
+      <div className="tt-medicine-card-name">
+        {medicine.tenThuoc || "Không rõ tên"}
+      </div>
+      {medicine.thanhPhan && (
+        <div className="tt-medicine-card-ingredient">
+          {medicine.thanhPhan.length > 60
+            ? medicine.thanhPhan.slice(0, 60) + "…"
+            : medicine.thanhPhan}
+        </div>
+      )}
+      {medicine.nhaSanXuat && (
+        <div className="tt-medicine-card-mfr">{medicine.nhaSanXuat}</div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-component: Chi tiet thuoc
+// ---------------------------------------------------------------------------
+
+function MedicineDetail({ medicine }) {
+  if (!medicine) return null;
+
+  const hasRatings =
+    medicine.danhGiaTot || medicine.danhGiaTrungBinh || medicine.danhGiaKem;
+
+  return (
+    <div className="tt-medicine-detail-card">
+      <div className="tt-detail-header">
+        <div>
+          <h3 className="tt-detail-name">{medicine.tenThuoc}</h3>
+          {medicine.nhaSanXuat && (
+            <p className="tt-detail-mfr">Nhà sản xuất: {medicine.nhaSanXuat}</p>
+          )}
+        </div>
+
+        {hasRatings && (
+          <div className="tt-ratings">
+            {medicine.danhGiaTot != null && (
+              <div className="tt-rating-item">
+                <span className="tt-rating-num tt-rating-num--good">
+                  {medicine.danhGiaTot}%
+                </span>
+                <span className="tt-rating-label">Tốt</span>
+              </div>
+            )}
+            {medicine.danhGiaTrungBinh != null && (
+              <div className="tt-rating-item">
+                <span className="tt-rating-num tt-rating-num--avg">
+                  {medicine.danhGiaTrungBinh}%
+                </span>
+                <span className="tt-rating-label">TB</span>
+              </div>
+            )}
+            {medicine.danhGiaKem != null && (
+              <div className="tt-rating-item">
+                <span className="tt-rating-num tt-rating-num--poor">
+                  {medicine.danhGiaKem}%
+                </span>
+                <span className="tt-rating-label">Kém</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {medicine.congDung && (
+        <div className="tt-detail-section tt-detail-section--uses">
+          <div className="tt-detail-section-title">Công dụng</div>
+          <p className="tt-detail-section-text">{medicine.congDung}</p>
+        </div>
+      )}
+
+      {medicine.thanhPhan && (
+        <div className="tt-detail-section tt-detail-section--composition">
+          <div className="tt-detail-section-title">Thành phần / Hoạt chất</div>
+          <p className="tt-detail-section-text">{medicine.thanhPhan}</p>
+        </div>
+      )}
+
+      {medicine.tacDungPhu && (
+        <div className="tt-detail-section tt-detail-section--side-effects">
+          <div className="tt-detail-section-title">Tác dụng phụ có thể gặp</div>
+          <p className="tt-detail-section-text">{medicine.tacDungPhu}</p>
+        </div>
+      )}
+
+      {medicine.danhSachHoatChat && (
+        <span className="tt-ingredient-tag">
+          Nhóm hoạt chất: {medicine.danhSachHoatChat}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-component: Canh bao suc khoe
+// ---------------------------------------------------------------------------
+
+function HealthWarnings({ warnings, profileAvailable, tenDangNhap }) {
+  const [expanded, setExpanded] = useState(true);
+
+  // Chua dang nhap
+  if (!tenDangNhap) {
+    return (
+      <div className="tt-warning-notice tt-warning-notice--neutral">
+        <span className="tt-notice-icon tt-notice-icon--neutral">i</span>
+        <span>
+          Đăng nhập để xem cảnh báo dựa trên hồ sơ sức khỏe cá nhân.
+        </span>
+      </div>
+    );
+  }
+
+  // Chua co ho so
+  if (!profileAvailable) {
+    return (
+      <div className="tt-warning-notice tt-warning-notice--alert">
+        <span>⚠</span>
+        <span>
+          Chưa có hồ sơ sức khỏe. Vui lòng cập nhật hồ sơ sức khỏe để nhận
+          cảnh báo phù hợp.
+        </span>
+      </div>
+    );
+  }
+
+  // Khong co canh bao
+  if (warnings.length === 0) {
+    return (
+      <div className="tt-warning-notice tt-warning-notice--safe">
+        <span className="tt-notice-icon tt-notice-icon--safe">✓</span>
+        <span>
+          Không có cảnh báo đặc biệt dựa trên hồ sơ sức khỏe hiện tại của bạn.
+        </span>
+      </div>
+    );
+  }
+
+  const dangerCount = warnings.filter((w) => w.severity === "danger").length;
+  const warnCount = warnings.filter((w) => w.severity === "warning").length;
+  const hasDanger = dangerCount > 0;
+
+  const headerClass = hasDanger
+    ? "tt-warnings-accordion-header tt-warnings-accordion-header--danger"
+    : "tt-warnings-accordion-header tt-warnings-accordion-header--warning";
+
+  const titleClass = hasDanger
+    ? "tt-accordion-title tt-accordion-title--danger"
+    : "tt-accordion-title tt-accordion-title--warning";
+
+  const listClass = hasDanger
+    ? "tt-warnings-list tt-warnings-list--danger"
+    : "tt-warnings-list tt-warnings-list--warning";
+
+  return (
+    <div>
+      <div
+        className={headerClass}
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          borderRadius: expanded ? "8px 8px 0 0" : "8px",
+        }}
+      >
+        <div className="tt-accordion-header-left">
+          <span className={titleClass}>
+            Cảnh báo sức khỏe ({warnings.length})
+          </span>
+          <div className="tt-accordion-badges">
+            {dangerCount > 0 && (
+              <span className="tt-count-badge tt-count-badge--danger">
+                {dangerCount}
+              </span>
+            )}
+            {warnCount > 0 && (
+              <span className="tt-count-badge tt-count-badge--warning">
+                {warnCount}
+              </span>
+            )}
+          </div>
+        </div>
+        <span className="tt-accordion-toggle">
+          {expanded ? "Thu gọn ▲" : "Mở rộng ▼"}
+        </span>
+      </div>
+
+      {expanded && (
+        <div className={listClass}>
+          {warnings.map((w, idx) => {
+            const cfg = SEVERITY_CONFIG[w.severity] || SEVERITY_CONFIG.info;
+            return (
+              <div key={w.id || idx} className={`tt-warning-item ${cfg.item}`}>
+                <span className={`tt-warning-bullet ${cfg.bullet}`}>
+                  {cfg.icon}
+                </span>
+                <div>
+                  <div className={`tt-warning-label ${cfg.label}`}>
+                    {w.label}
+                  </div>
+                  <p className="tt-warning-message">{w.message}</p>
+                </div>
+              </div>
+            );
+          })}
+
+          <div className="tt-warnings-disclaimer">
+            Các cảnh báo này dựa trên Rule Engine đối chiếu với hồ sơ sức khỏe
+            cá nhân. Đây không phải lời khuyên y tế chính thức — vui lòng tham
+            khảo bác sĩ hoặc dược sĩ trước khi sử dụng thuốc.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
+export default function TraThuoc() {
+  const tenDangNhap = localStorage.getItem("userName") || "";
+
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const [medicines, setMedicines] = useState([]);
+  const [selectedMedicine, setSelectedMedicine] = useState(null);
+  const [healthWarnings, setHealthWarnings] = useState([]);
+  const [profileAvailable, setProfileAvailable] = useState(false);
+  const [searchDone, setSearchDone] = useState(false);
+
+  const resultRef = useRef(null);
+
+  const handleSearch = useCallback(async () => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setError("Vui lòng nhập ít nhất 2 ký tự để tìm kiếm.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setSelectedMedicine(null);
+    setMedicines([]);
+    setHealthWarnings([]);
+    setSearchDone(false);
+
+    try {
+      const res = await axios.post(`${API_BASE_URL}/medicines/lookup`, {
+        query: q,
+        tenDangNhap: tenDangNhap || null,
+      });
+
+      const data = res.data;
+      setMedicines(data.medicines || []);
+      setHealthWarnings(data.health_warnings || []);
+      setProfileAvailable(data.profile_available || false);
+      setSearchDone(true);
+
+      if ((data.medicines || []).length === 1) {
+        setSelectedMedicine(data.medicines[0]);
+      }
+
+      setTimeout(() => {
+        resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      setError(detail || "Lỗi kết nối máy chủ. Vui lòng thử lại.");
+    } finally {
+      setLoading(false);
+    }
+  }, [query, tenDangNhap]);
+
+  const handleSelectMedicine = (medicine) => {
+    setSelectedMedicine((prev) =>
+      prev?.id === medicine.id && prev?.tenThuoc === medicine.tenThuoc
+        ? null
+        : medicine
+    );
+  };
+
+  return (
+    <div className="tt-page">
+
+      {/* ── Page Header ── */}
+      <div className="tt-page-header">
+        <div className="tt-page-badge">
+          <span className="tt-badge-dot" />
+          Tra Cứu Thuốc
+        </div>
+        <h1 className="tt-page-title">Tra Cứu Thông Tin Thuốc</h1>
+        <p className="tt-page-desc">
+          Tìm kiếm theo tên thuốc hoặc hoạt chất.{" "}
+          {tenDangNhap
+            ? "Hệ thống sẽ tự động đối chiếu hồ sơ sức khỏe để đưa ra cảnh báo phù hợp."
+            : "Đăng nhập để nhận cảnh báo sức khỏe cá nhân hóa."}
+        </p>
+      </div>
+
+      {/* ── Search Box ── */}
+      <div className="tt-search-box">
+        <SearchBar
+          value={query}
+          onChange={setQuery}
+          onSearch={handleSearch}
+          loading={loading}
+        />
+
+        {error && (
+          <div className="tt-error-banner">
+            <span>⚠</span>
+            <span>{error}</span>
+          </div>
+        )}
+
+        {!tenDangNhap && (
+          <div className="tt-login-hint">
+            <span className="tt-hint-icon">i</span>
+            Đăng nhập để kích hoạt chức năng cảnh báo sức khỏe cá nhân.
+          </div>
+        )}
+      </div>
+
+      {/* ── Ket qua ── */}
+      {searchDone && (
+        <div ref={resultRef}>
+          {medicines.length === 0 ? (
+            <div className="tt-no-results">
+              <span className="tt-no-results-icon">🔍</span>
+              <p className="tt-no-results-text">
+                Không tìm thấy thuốc nào khớp với từ khóa{" "}
+                <strong>"{query}"</strong>. Thử tìm với tên khác hoặc tên hoạt
+                chất.
+              </p>
+            </div>
+          ) : (
+            <div className="tt-results-layout">
+
+              {/* Cot trai: danh sach thuoc */}
+              <div className="tt-medicine-list-panel">
+                <div className="tt-list-heading">
+                  {medicines.length} kết quả
+                </div>
+                {medicines.map((med) => (
+                  <MedicineCard
+                    key={med.id ?? med.tenThuoc}
+                    medicine={med}
+                    isSelected={
+                      selectedMedicine?.id === med.id &&
+                      selectedMedicine?.tenThuoc === med.tenThuoc
+                    }
+                    onClick={() => handleSelectMedicine(med)}
+                  />
+                ))}
+              </div>
+
+              {/* Cot phai: chi tiet + canh bao */}
+              <div className="tt-detail-panel">
+                {selectedMedicine ? (
+                  <>
+                    <MedicineDetail medicine={selectedMedicine} />
+
+                    <div className="tt-warnings-card">
+                      <h4 className="tt-warnings-card-title">
+                        Cảnh báo dựa trên Hồ sơ Sức khỏe
+                      </h4>
+                      <p className="tt-warnings-card-desc">
+                        Kết quả phân tích từ Rule Engine đối chiếu với các chỉ
+                        số sức khỏe hiện tại.
+                      </p>
+                      <HealthWarnings
+                        warnings={healthWarnings}
+                        profileAvailable={profileAvailable}
+                        tenDangNhap={tenDangNhap}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="tt-select-prompt">
+                    <span className="tt-select-prompt-icon">💊</span>
+                    Chọn một thuốc từ danh sách bên trái để xem thông tin chi
+                    tiết và cảnh báo sức khỏe.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Trang thai cho truoc khi tim kiem */}
+      {!searchDone && !loading && (
+        <div className="tt-empty-state">
+          <span className="tt-empty-icon">💊</span>
+          <p className="tt-empty-text">
+            Nhập tên thuốc hoặc hoạt chất và nhấn "Tìm kiếm" để bắt đầu.
+          </p>
         </div>
       )}
     </div>
@@ -4669,60 +6456,551 @@ export default function MainRiskPage() {
 
 ### frontend\web\src\trang-chu.jsx
 ```jsx
-// frontend/src/TrangChu.jsx
-import React from "react";
+// frontend/web/src/trang-chu.jsx
+import "../src/css/trang-chu.css";
 
-export default function TrangChu({ onGoToLogin }) {
+// SVG icons as inline components – no external dependencies
+function IconHeartPulse() {
   return (
-    <div style={{
-      display: "flex",
-      flexDirection: "column",
-      justifyContent: "center",
-      alignItems: "center",
-      minHeight: "100vh",
-      backgroundColor: "#f8fafc",
-      fontFamily: "Segoe UI, Arial, sans-serif",
-      textAlign: "center",
-      padding: "20px"
-    }}>
-      <div style={{
-        background: "white",
-        padding: "40px 60px",
-        borderRadius: "16px",
-        boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
-        maxWidth: "500px",
-        width: "100%"
-      }}>
-        <h1 style={{ color: "#1e293b", fontSize: "36px", marginBottom: "10px", fontWeight: "800" }}>
-          Hello 👋
-        </h1>
-        <h3 style={{ color: "#475569", fontWeight: "500", marginBottom: "24px", lineHeight: "1.5" }}>
-          Chào mừng bạn đến với Hệ thống Đánh giá Nguy cơ Bệnh Mạn tính ứng dụng Trí tuệ nhân tạo (AI & Rule Engine)
-        </h3>
-        <p style={{ color: "#64748b", fontSize: "14px", marginBottom: "32px" }}>
-          Vui lòng đăng nhập tài khoản để quản lý hồ sơ chỉ số sức khỏe cá nhân và nhận các phân tích chuẩn hóa từ mô hình học máy.
-        </p>
-        <button
-          onClick={onGoToLogin}
-          style={{
-            width: "100%",
-            padding: "14px",
-            backgroundColor: "#2563eb",
-            color: "white",
-            border: "none",
-            borderRadius: "8px",
-            fontSize: "16px",
-            fontWeight: "bold",
-            cursor: "pointer",
-            boxShadow: "0 4px 6px -1px rgba(37, 99, 235, 0.2)",
-            transition: "all 0.2s ease-in-out"
-          }}
-          onMouseOver={(e) => e.currentTarget.style.backgroundColor = "#1d4ed8"}
-          onMouseOut={(e) => e.currentTarget.style.backgroundColor = "#2563eb"}
-        >
-          🔑 ĐĂNG NHẬP NGAY
-        </button>
-      </div>
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+    </svg>
+  );
+}
+
+function IconDatabase() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <ellipse cx="12" cy="5" rx="9" ry="3" />
+      <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+      <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+    </svg>
+  );
+}
+
+function IconBrain() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9.5 2a5 5 0 0 1 5 5v4a5 5 0 0 1-5 5H5a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5z" />
+      <path d="M14.5 2a5 5 0 0 1 5 5v4a5 5 0 0 1-5 5H10" />
+      <path d="M9.5 16v6" />
+      <path d="M14.5 16v6" />
+      <path d="M6 22h12" />
+    </svg>
+  );
+}
+
+function IconCheck() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function IconUser() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  );
+}
+
+function IconPlugin() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2L2 7l10 5 10-5-10-5z" />
+      <path d="M2 17l10 5 10-5" />
+      <path d="M2 12l10 5 10-5" />
+    </svg>
+  );
+}
+
+function IconActivity() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+    </svg>
+  );
+}
+
+function IconShield() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  );
+}
+
+function IconBook() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+    </svg>
+  );
+}
+
+function IconPlay() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="5 3 19 12 5 21 5 3" />
+    </svg>
+  );
+}
+
+function IconInfo() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4" />
+      <path d="M12 8h.01" />
+    </svg>
+  );
+}
+
+// Disease cards data
+const DISEASES = [
+  {
+    id: "diabetes",
+    name: "Tiểu Đường",
+    desc: "Đánh giá nguy cơ đái tháo đường type 2 dựa trên đường huyết và HbA1c",
+    icon: "🩸",
+    iconClass: "dc-icon--red",
+    tag: "ML + Rule",
+    featured: false,
+  },
+  {
+    id: "hypertension",
+    name: "Cao Huyết Áp",
+    desc: "Phân tích huyết áp, BMI và lối sống để đánh giá nguy cơ tăng huyết áp",
+    icon: "💊",
+    iconClass: "dc-icon--blue",
+    tag: "ML + Rule",
+    featured: true,
+  },
+  {
+    id: "cardiovascular",
+    name: "Tim Mạch",
+    desc: "Dự đoán nguy cơ bệnh tim mạch từ cholesterol và các yếu tố rủi ro",
+    icon: "🫀",
+    iconClass: "dc-icon--amber",
+    tag: "ML + Rule",
+    featured: false,
+  },
+  {
+    id: "kidney",
+    name: "Bệnh Thận",
+    desc: "Đánh giá suy thận mạn qua creatinine, acid uric và hồ sơ sinh hóa",
+    icon: "🔬",
+    iconClass: "dc-icon--purple",
+    tag: "ML + Rule",
+    featured: false,
+  },
+  {
+    id: "stroke",
+    name: "Đột Quỵ",
+    desc: "Phân tích yếu tố nguy cơ đột quỵ dựa trên quy tắc chuyên gia",
+    icon: "🧠",
+    iconClass: "dc-icon--teal",
+    tag: "Rule Engine",
+    featured: false,
+  },
+];
+
+// Workflow steps data
+const WORKFLOW_STEPS = [
+  {
+    id: 1,
+    icon: <IconUser />,
+    iconVariant: "",
+    title: "Xây dựng Hồ Sơ Sức Khỏe",
+    desc: "Người dùng nhập các chỉ số sinh tồn, sinh hóa, lối sống và tiền sử bệnh một lần duy nhất. Dữ liệu được lưu vào Health Profile và tái sử dụng cho mọi lần đánh giá.",
+    tags: [
+      { label: "BMI", cls: "ws-tag--blue" },
+      { label: "Huyết áp", cls: "ws-tag--blue" },
+      { label: "Đường huyết", cls: "ws-tag--blue" },
+      { label: "Cholesterol", cls: "ws-tag--blue" },
+    ],
+    cardVariant: "",
+    isLast: false,
+  },
+  {
+    id: 2,
+    icon: <IconPlugin />,
+    iconVariant: "",
+    title: "Tải Plugin Bệnh Động",
+    desc: "Người dùng chọn bệnh cần đánh giá. Hệ thống tự động tải plugin tương ứng từ metadata.json và sinh form nhập liệu mà không cần code mới.",
+    tags: [
+      { label: "Plugin-Based", cls: "ws-tag--blue" },
+      { label: "Metadata-Driven", cls: "ws-tag--blue" },
+      { label: "No-Code Form", cls: "ws-tag" },
+    ],
+    cardVariant: "",
+    isLast: false,
+  },
+  {
+    id: 3,
+    icon: <IconDatabase />,
+    iconVariant: "",
+    title: "Hợp Nhất Dữ Liệu",
+    desc: "Backend kết hợp Health Profile từ cơ sở dữ liệu với dữ liệu bổ sung từ form. Form data được ưu tiên khi xung đột, tạo ra bộ dữ liệu hợp nhất để đưa vào engine.",
+    tags: [
+      { label: "Health Profile", cls: "ws-tag" },
+      { label: "Form Data", cls: "ws-tag" },
+      { label: "Unified Data", cls: "ws-tag--blue" },
+    ],
+    cardVariant: "",
+    isLast: false,
+  },
+  {
+    id: 4,
+    icon: <IconShield />,
+    iconVariant: "ws-icon--highlight",
+    title: "Rule Engine Đánh Giá",
+    desc: "Rule Engine luôn chạy, tính điểm rủi ro dựa trên các quy tắc y tế được định nghĩa rõ ràng — baseline mapping, risk modifiers, protective factors và interactions.",
+    tags: [
+      { label: "Luôn hoạt động", cls: "ws-tag--blue" },
+      { label: "Giải thích được", cls: "ws-tag--blue" },
+      { label: "Có Fallback", cls: "ws-tag" },
+    ],
+    cardVariant: "ws-card--highlight",
+    isLast: false,
+  },
+  {
+    id: 5,
+    icon: <IconBrain />,
+    iconVariant: "ws-icon--highlight",
+    title: "ML Engine Dự Đoán",
+    desc: "Mô hình học máy huấn luyện từ dữ liệu NHANES tính xác suất mắc bệnh. Chạy song song với Rule Engine khi đủ dữ liệu đầu vào, tự động fallback nếu thiếu đặc trưng.",
+    tags: [
+      { label: "XGBoost", cls: "ws-tag--blue" },
+      { label: "F-beta Optimized", cls: "ws-tag--blue" },
+      { label: "NHANES Dataset", cls: "ws-tag" },
+    ],
+    cardVariant: "ws-card--highlight",
+    isLast: false,
+  },
+  {
+    id: 6,
+    icon: <IconCheck />,
+    iconVariant: "ws-icon--success",
+    title: "Kết Quả & Khuyến Nghị",
+    desc: "Hệ thống trả về mức độ nguy cơ từ Rule Engine và ML Engine cùng giải thích chi tiết và các khuyến nghị cá nhân hóa. Kết quả được lưu vào lịch sử đánh giá.",
+    tags: [
+      { label: "Risk Level", cls: "ws-tag--green" },
+      { label: "Explanation", cls: "ws-tag--green" },
+      { label: "Recommendations", cls: "ws-tag--green" },
+    ],
+    cardVariant: "ws-card--success",
+    isLast: true,
+  },
+];
+
+// Feature cards data
+const FEATURES = [
+  {
+    id: 1,
+    iconClass: "fc-icon--1",
+    icon: <IconPlugin />,
+    title: "Plugin-Based Architecture",
+    desc: "Thêm bệnh mới chỉ cần tạo metadata.json trong thư mục plugin — không cần sửa code backend hay frontend.",
+    featured: false,
+  },
+  {
+    id: 2,
+    iconClass: "fc-icon--2",
+    icon: <IconHeartPulse />,
+    title: "Hồ Sơ Sức Khỏe Trung Tâm",
+    desc: "Nhập dữ liệu một lần, sử dụng cho tất cả các bệnh. Health Profile là nguồn dữ liệu chính được tái sử dụng.",
+    featured: false,
+  },
+  {
+    id: 3,
+    iconClass: "fc-icon--3",
+    icon: <IconShield />,
+    title: "Rule Engine Minh Bạch",
+    desc: "Kết quả dựa trên quy tắc y tế rõ ràng, có thể giải thích từng điểm số — không phải hộp đen.",
+    featured: true,
+    featuredLabel: "Nổi bật",
+  },
+  {
+    id: 4,
+    iconClass: "fc-icon--4",
+    icon: <IconBrain />,
+    title: "ML Engine với Fallback",
+    desc: "Mô hình học máy tự động fallback về Rule Engine khi thiếu dữ liệu, đảm bảo kết quả luôn có sẵn.",
+    featured: false,
+  },
+  {
+    id: 5,
+    iconClass: "fc-icon--5",
+    icon: <IconActivity />,
+    title: "Lịch Sử Đánh Giá",
+    desc: "Theo dõi xu hướng nguy cơ theo thời gian, so sánh kết quả giữa các lần đánh giá và phát hiện thay đổi sớm.",
+    featured: false,
+  },
+  {
+    id: 6,
+    iconClass: "fc-icon--6",
+    icon: <IconBook />,
+    title: "5 Bệnh Được Hỗ Trợ",
+    desc: "Tiểu đường, cao huyết áp, tim mạch, bệnh thận và đột quỵ — 4 bệnh có cả ML và Rule Engine.",
+    featured: false,
+  },
+];
+
+export default function TrangChu({ setCurrentView, userName, onLogout, onGoToLogin }) {
+
+  // Hàm navigate an toàn — nếu chưa đăng nhập (setCurrentView undefined) thì gọi onGoToLogin
+  function navigate(key) {
+    if (setCurrentView) {
+      setCurrentView(key);
+    } else if (onGoToLogin) {
+      onGoToLogin();
+    }
+  }
+
+  return (
+    <div className="tc-page">
+      <main>
+        {/* ====================================================
+            HERO
+        ==================================================== */}
+        <section className="hero">
+          <div className="hero-bg-mesh" aria-hidden="true">
+            <div className="mesh-circle mesh-circle--1" />
+            <div className="mesh-circle mesh-circle--2" />
+            <div className="mesh-circle mesh-circle--3" />
+          </div>
+
+          <div className="container hero-container">
+            {/* Left: Text */}
+            <div className="hero-text">
+              <div className="hero-badge">
+                <span className="badge-dot" />
+                Trường Công Nghệ Thông Tin &amp; Truyền Thông – Đại Học Cần Thơ
+              </div>
+
+              <h1 className="hero-heading">
+                Đánh Giá Nguy Cơ<br />
+                <em>Bệnh Mạn Tính</em> Bằng<br />
+                AI &amp; Rule Engine
+              </h1>
+
+              <p className="hero-desc">
+                Nền tảng sàng lọc sức khỏe thông minh kết hợp luật chuyên gia
+                và mô hình học máy. Hỗ trợ 5 nhóm bệnh mạn tính phổ biến với
+                kiến trúc Plugin-Based mở rộng linh hoạt.
+              </p>
+
+              <div className="hero-cta">
+                <button
+                  className="btn btn--primary"
+                  onClick={() => navigate("risk")}
+                >
+                  <IconPlay />
+                  Bắt đầu đánh giá
+                </button>
+                <button
+                  className="btn btn--outline"
+                  onClick={() => navigate("gioi-thieu")}
+                >
+                  <IconInfo />
+                  Tìm hiểu hệ thống
+                </button>
+              </div>
+
+              <div className="hero-trust">
+                <div className="trust-item">
+                  <span className="trust-num">5</span>
+                  <span className="trust-label">Bệnh mạn tính</span>
+                </div>
+                <div className="trust-divider" />
+                <div className="trust-item">
+                  <span className="trust-num">2 Engine</span>
+                  <span className="trust-label">Rule + ML kết hợp</span>
+                </div>
+                <div className="trust-divider" />
+                <div className="trust-item">
+                  <span className="trust-num">NHANES</span>
+                  <span className="trust-label">Dữ liệu huấn luyện</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Risk Assessment Card */}
+            <div className="hero-visual" aria-hidden="true">
+              <div className="visual-card--main">
+                <div className="vc-header">
+                  <div className="vc-dots">
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                  <span className="vc-title">Kết quả đánh giá · Nguy cơ tổng hợp</span>
+                </div>
+                <div className="vc-body">
+                  <div className="vc-patient-row">
+                    <div className="vc-patient-avatar">NV</div>
+                    <div className="vc-patient-info">
+                      <span className="vc-patient-name">Nguyễn Văn A</span>
+                      <span className="vc-patient-meta">45 tuổi · Nam · BMI 26.4</span>
+                    </div>
+                  </div>
+
+                  <div className="vc-risk-list">
+                    <div className="vc-risk-item">
+                      <div className="vc-risk-label">
+                        <span>Tiểu Đường</span>
+                        <span className="vc-risk-pct" style={{ color: "#f59e0b" }}>62%</span>
+                      </div>
+                      <div className="vc-risk-bar-track">
+                        <div className="vc-risk-bar-fill vc-risk-bar-fill--mid" style={{ width: "62%" }} />
+                      </div>
+                    </div>
+                    <div className="vc-risk-item">
+                      <div className="vc-risk-label">
+                        <span>Cao Huyết Áp</span>
+                        <span className="vc-risk-pct" style={{ color: "#ef4444" }}>81%</span>
+                      </div>
+                      <div className="vc-risk-bar-track">
+                        <div className="vc-risk-bar-fill vc-risk-bar-fill--high" style={{ width: "81%" }} />
+                      </div>
+                    </div>
+                    <div className="vc-risk-item">
+                      <div className="vc-risk-label">
+                        <span>Tim Mạch</span>
+                        <span className="vc-risk-pct" style={{ color: "#22c55e" }}>28%</span>
+                      </div>
+                      <div className="vc-risk-bar-track">
+                        <div className="vc-risk-bar-fill vc-risk-bar-fill--low" style={{ width: "28%" }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="vc-footer-meta">
+                    <span className="vc-meta-chip">Rule + ML Engine</span>
+                    <span className="vc-meta-status">
+                      <span className="vc-meta-dot" />
+                      Đã phân tích
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ====================================================
+            DISEASE STRIP
+        ==================================================== */}
+        <section className="diseases">
+          <div className="container">
+            <div className="section-header">
+              <div className="section-badge">5 Bệnh Được Hỗ Trợ</div>
+              <h2 className="section-title">Sàng lọc toàn diện các bệnh mạn tính</h2>
+              <p className="section-desc">
+                Mỗi bệnh là một plugin độc lập — thêm mới mà không cần sửa code, 
+                mỗi plugin tích hợp cả Rule Engine và ML Engine.
+              </p>
+            </div>
+
+            <div className="disease-grid">
+              {DISEASES.map((d) => (
+                <div
+                  key={d.id}
+                  className={`disease-card${d.featured ? " disease-card--featured" : ""}`}
+                >
+                  <div className={`dc-icon ${d.iconClass}`}>
+                    {d.icon}
+                  </div>
+                  <div className="dc-name">{d.name}</div>
+                  <div className="dc-desc">{d.desc}</div>
+                  <span className="dc-tag">{d.tag}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ====================================================
+            WORKFLOW SECTION
+        ==================================================== */}
+        <section className="workflow" id="workflow">
+          <div className="container">
+            <div className="section-header">
+              <div className="section-badge">Quy Trình Đánh Giá</div>
+              <h2 className="section-title">Từ hồ sơ đến kết quả phân tích</h2>
+              <p className="section-desc">
+                Pipeline kết hợp Rule Engine và ML Engine — đảm bảo kết quả
+                luôn có, dù dữ liệu đầy đủ hay chưa.
+              </p>
+            </div>
+
+            <div className="workflow-timeline">
+              {WORKFLOW_STEPS.map((step) => (
+                <div
+                  key={step.id}
+                  className={`workflow-step${step.isLast ? " workflow-step--last" : ""}`}
+                >
+                  <div className="ws-icon-wrap">
+                    <div className={`ws-icon ${step.iconVariant}`}>
+                      {step.icon}
+                    </div>
+                    {!step.isLast && <div className="ws-connector" />}
+                  </div>
+                  <div className={`ws-card ${step.cardVariant}`}>
+                    <span className="ws-step-num">BƯỚC {String(step.id).padStart(2, "0")}</span>
+                    <h3 className="ws-title">{step.title}</h3>
+                    <p className="ws-desc">{step.desc}</p>
+                    <div className="ws-tags">
+                      {step.tags.map((t) => (
+                        <span key={t.label} className={`ws-tag ${t.cls}`}>{t.label}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ====================================================
+            FEATURES SECTION
+        ==================================================== */}
+        <section className="features" id="features">
+          <div className="container">
+            <div className="section-header">
+              <div className="section-badge">Tính Năng</div>
+              <h2 className="section-title">Thiết kế cho độ mở rộng và tin cậy</h2>
+              <p className="section-desc">
+                Kiến trúc Plugin-Based với Metadata-Driven Design — 
+                thêm bệnh mới không cần sửa code, hệ thống luôn có kết quả.
+              </p>
+            </div>
+
+            <div className="features-grid">
+              {FEATURES.map((feat) => (
+                <div
+                  key={feat.id}
+                  className={`feature-card${feat.featured ? " feature-card--featured" : ""}`}
+                >
+                  <div className={`fc-icon ${feat.iconClass}`}>
+                    {feat.icon}
+                  </div>
+                  <h3 className="fc-title">{feat.title}</h3>
+                  <p className="fc-desc">{feat.desc}</p>
+                  {feat.featured && feat.featuredLabel && (
+                    <div className="fc-featured-tag">{feat.featuredLabel}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      </main>
     </div>
   );
 }
@@ -4730,44 +7008,187 @@ export default function TrangChu({ onGoToLogin }) {
 
 ### frontend\web\src\components\footer.jsx
 ```jsx
-export default function Footer() {
+// frontend/web/src/components/footer.jsx
+import "./footer.css";
+
+const NAV_LINKS = [
+  { label: "Trang Chủ", key: "trang-chu" },
+  { label: "Giới Thiệu", key: "gioi-thieu" },
+  { label: "Phân Tích Bệnh", key: "phan-tich-benh" },
+  { label: "Tư Vấn AI", key: "tu-van-ai" },
+  { label: "Tra Thuốc", key: "tra-thuoc" },
+  { label: "Thực Đơn", key: "thuc-don" },
+];
+
+const DISEASE_LINKS = [
+  { label: "Tiểu Đường", key: "diabetes" },
+  { label: "Cao Huyết Áp", key: "hypertension" },
+  { label: "Tim Mạch", key: "cardiovascular" },
+  { label: "Bệnh Thận Mạn", key: "kidney" },
+  { label: "Đột Quỵ", key: "stroke" },
+];
+
+const ACCOUNT_LINKS = [
+  { label: "Hồ Sơ Sức Khỏe", key: "profile" },
+  { label: "Lịch Sử Đánh Giá", key: "history" },
+  { label: "Quản Lý Thông Tin", key: "quan-ly-thong-tin" },
+  { label: "Cài Đặt Tài Khoản", key: "cai-dat" },
+];
+
+const CONTACT_ITEMS = [
+  { icon: "✉", text: "cict@ctu.edu.vn" },
+  { icon: "☎", text: "(0292) 3872 209" },
+  { icon: "⌖", text: "Khu II, đường 3/2, Q. Ninh Kiều, TP. Cần Thơ" },
+  { icon: "⊞", text: "Trường CNTT&TT – Đại học Cần Thơ" },
+];
+
+const TECH_BADGES = [
+  { dot: true, label: "Rule Engine" },
+  { dot: true, label: "ML Engine" },
+  { dot: false, label: "5 Bệnh Plugin" },
+  { dot: false, label: "NHANES Dataset" },
+];
+
+export default function Footer({ setCurrentView }) {
+  function handleNav(key) {
+    if (setCurrentView) setCurrentView(key);
+  }
+
   return (
-    <footer>
-      <div>
-        {/* Cột 1: Thông tin dự án */}
-        <div>
-          <h4>HealthyAI</h4>
-          <p>
-            Hệ thống hỗ trợ đánh giá nguy cơ bệnh mạn tính bằng AI. 
-            Giải pháp phát triển bởi CICT - Đại học Cần Thơ.
+    <footer className="footer">
+      <div className="footer-upper">
+
+        {/* ── Brand column ── */}
+        <div className="footer-brand">
+          <div className="footer-logo-row">
+            <img
+              src="https://www.ctu.edu.vn/images/upload/logo.png"
+              alt="Logo Dai hoc Can Tho"
+              className="footer-logo"
+            />
+            <div className="footer-brand-name">
+              <span className="footer-title">Healthy AI</span>
+              <span className="footer-subtitle">CICT</span>
+            </div>
+          </div>
+
+          <p className="footer-tagline">
+            Nền tảng sàng lọc nguy cơ bệnh mạn tính kết hợp luật chuyên gia
+            và học máy. Kiến trúc Plugin-Based — mở rộng không cần sửa code.
           </p>
+
+          <div className="footer-badges">
+            {TECH_BADGES.map((b, i) => (
+              <span key={i} className="footer-badge">
+                {b.dot && <span className="footer-badge-dot" />}
+                {b.label}
+              </span>
+            ))}
+          </div>
         </div>
 
-        {/* Cột 2: Đường dẫn nhanh */}
-        <div>
-          <h4>Liên kết</h4>
-          <ul>
-            <li><a href="#">Hướng dẫn sử dụng</a></li>
-            <li><a href="#">Chính sách bảo mật</a></li>
-            <li><a href="#">Điều khoản dịch vụ</a></li>
+        {/* ── Navigation column ── */}
+        <div className="footer-col">
+          <p className="footer-col-heading">Điều Hướng</p>
+          <ul className="footer-links">
+            {NAV_LINKS.map((item) => (
+              <li key={item.key}>
+                <button className="footer-link" onClick={() => handleNav(item.key)}>
+                  <span className="footer-link-arrow">›</span>
+                  {item.label}
+                </button>
+              </li>
+            ))}
           </ul>
         </div>
 
-        {/* Cột 3: Liên hệ */}
-        <div>
-          <h4>Liên hệ</h4>
-          <p>
-            📧 cict@ctu.edu.vn
-            <br />
-            📍 Khu II, đường 3/2, Q. Ninh Kiều, TP. Cần Thơ
-          </p>
+        {/* ── Disease plugins column ── */}
+        <div className="footer-col">
+          <p className="footer-col-heading">Bệnh Mạn Tính</p>
+          <ul className="footer-links">
+            {DISEASE_LINKS.map((item) => (
+              <li key={item.key}>
+                <button className="footer-link" onClick={() => handleNav(item.key)}>
+                  <span className="footer-link-arrow">›</span>
+                  {item.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="footer-col-heading" style={{ marginTop: 24 }}>Tài Khoản</p>
+          <ul className="footer-links">
+            {ACCOUNT_LINKS.map((item) => (
+              <li key={item.key}>
+                <button className="footer-link" onClick={() => handleNav(item.key)}>
+                  <span className="footer-link-arrow">›</span>
+                  {item.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* ── Contact column ── */}
+        <div className="footer-col">
+          <p className="footer-col-heading">Liên Hệ</p>
+          <ul className="footer-links footer-links--contact">
+            {CONTACT_ITEMS.map((item, i) => (
+              <li key={i} className="footer-contact-item">
+                <span className="footer-contact-icon">{item.icon}</span>
+                <span className="footer-contact-text">{item.text}</span>
+              </li>
+            ))}
+          </ul>
+
+          <div className="footer-social">
+            <p className="footer-col-heading" style={{ marginTop: 24 }}>Mạng Xã Hội</p>
+            <div className="footer-social-row">
+              <a
+                href="https://www.facebook.com/CICT.CTU"
+                target="_blank"
+                rel="noreferrer"
+                className="footer-social-btn"
+                aria-label="Facebook CICT"
+              >
+                fb
+              </a>
+              <a
+                href="https://cit.ctu.edu.vn"
+                target="_blank"
+                rel="noreferrer"
+                className="footer-social-btn"
+                aria-label="Website CICT"
+              >
+                web
+              </a>
+              <a
+                href="mailto:cict@ctu.edu.vn"
+                className="footer-social-btn"
+                aria-label="Email"
+              >
+                mail
+              </a>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div>
-        <p>
-          &copy; {new Date().getFullYear()} HealthyAI Project - CICT CTU. All rights reserved.
+      <div className="footer-divider" />
+
+      <div className="footer-lower">
+        <p className="footer-copy">
+          &copy; {new Date().getFullYear()} HealthyAI – CICT, Đại học Cần Thơ.
+          All rights reserved.
         </p>
+        <div className="footer-meta">
+          <span className="footer-meta-item">FastAPI Backend</span>
+          <span className="footer-meta-sep" />
+          <span className="footer-meta-item">React + Vite</span>
+          <span className="footer-meta-sep" />
+          <span className="footer-meta-item">SQLite / MySQL</span>
+          <span className="footer-meta-sep" />
+          <span className="footer-meta-item footer-meta-version">v1.0.0</span>
+        </div>
       </div>
     </footer>
   );
@@ -4798,11 +7219,13 @@ export default function Header({ currentView, setCurrentView, userName, onLogout
   }, []);
 
   const navItems = [
-    { key: "dashboard", label: "Trang Chủ" },
     { key: "gioi-thieu", label: "Giới Thiệu" },
-    { key: "risk", label: "Phân Tích Bệnh" },
-    { key: "profile", label: "Hồ Sơ Sức Khỏe" },
-    { key: "history", label: "Lịch Sử" },
+    { key: "trang-chu", label: "Trang Chủ" },
+    { key: "phan-tich-benh", label: "Phân Tích Bệnh" },
+    { key: "tu-van-ai", label: "Tư Vấn AI" },
+    { key: "y-te", label: "Y Tế" },
+    { key: "thuc-don", label: "Thực Đơn" },
+    { key: "tra-thuoc", label: "Tra Thuốc" },
   ];
 
   const menuItems = [

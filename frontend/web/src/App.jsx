@@ -1,11 +1,15 @@
 // frontend/src/App.jsx
 import { useState } from "react";
-// Đã cập nhật đúng tên các file mới đổi của bạn
 import PhanTichBenh from "./phan-tich-benh"; 
 import DangNhap from "./dang-nhap";
 import DangKy from "./dang-ky";
 import ChiSoSucKhoe from "./hs-suckhoe";   
 import TrangChu from "./trang-chu";
+import GioiThieu from "./gioi-thieu";
+import TraThuoc from "./tra-thuoc";
+
+import Header from "./components/header.jsx";
+import Footer from "./components/footer.jsx"; // <-- ĐÃ THÊM IMPORT FOOTER
 
 // Đọc trạng thái auth từ localStorage ngay lúc khởi tạo state
 function getInitialAuth() {
@@ -25,12 +29,15 @@ const initialAuth = getInitialAuth();
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(initialAuth.isAuthenticated);
   const [userEmail, setUserEmail] = useState(initialAuth.userEmail);
-  const [authMode, setAuthMode] = useState("welcome");
-  const [currentView, setCurrentView] = useState("risk");
+  // ĐỂ MỞ TRANG ĐĂNG NHẬP ĐẦU TIÊN: Đổi trạng thái mặc định từ "welcome" thành "login"
+  const [authMode, setAuthMode] = useState("login");
+  const [currentView, setCurrentView] = useState("trang-chu");
 
   const handleLoginSuccess = (email) => {
     setIsAuthenticated(true);
     setUserEmail(email);
+    setCurrentView("trang-chu");
+    // Đăng nhập thành công trả về trang chủ
   };
 
   const handleLogout = () => {
@@ -38,12 +45,123 @@ export default function App() {
     localStorage.removeItem("userName");
     setIsAuthenticated(false);
     setUserEmail("");
-    setAuthMode("welcome");
-    setCurrentView("risk");
+    setAuthMode("login");
+    // Khi đăng xuất, điều hướng quay lại màn hình đăng nhập
+    setCurrentView("trang-chu");
+  };
+
+  // Hàm quản lý render các màn hình theo currentView từ Header
+  const renderContent = () => {
+    switch (currentView) {
+      // 1. Các component đã có sẵn
+      case "phan-tich-benh":
+      case "risk": 
+        return <PhanTichBenh />;
+      case "profile":
+        return <ChiSoSucKhoe />;
+      case "trang-chu":
+        return (
+          <TrangChu
+            currentView={currentView}
+            setCurrentView={setCurrentView}
+            userName={userEmail}
+            onLogout={handleLogout}
+          />
+        );
+      case "gioi-thieu":
+        return <GioiThieu setCurrentView={setCurrentView} />;
+      case "tra-thuoc":
+        return <TraThuoc />;
+      // 2. Các đường dẫn từ Header đang chờ phát triển (Placeholder)
+      case "tu-van-ai":
+      case "y-te":
+      case "thuc-don":
+      case "quan-ly-thong-tin":
+      case "history":
+      case "cai-dat":
+      case "thong-bao":
+      case "dashboard":
+        return (
+          <div style={{ 
+            background: "white", 
+            padding: "40px", 
+            borderRadius: "16px", 
+            textAlign: "center", 
+            border: "1px solid #E2E8F0", 
+            color: "#64748B",
+            marginTop: "20px"
+           }}>
+            <h3 style={{ fontSize: "20px", color: "#334155", marginBottom: "12px" }}>
+              🛠 Tính năng đang phát triển
+            </h3>
+            <p>
+              Phân hệ đường dẫn <strong>{currentView}</strong> hiện đang được xây dựng và đồng bộ hóa.
+             </p>
+          </div>
+        );
+      default:
+        return (
+          <TrangChu
+            currentView={currentView}
+            setCurrentView={setCurrentView}
+            userName={userEmail}
+            onLogout={handleLogout}
+          />
+        );
+    }
   };
 
   if (!isAuthenticated) {
-    if (authMode === "welcome") return <TrangChu onGoToLogin={() => setAuthMode("login")} />;
+    // Khối hiển thị giao diện Khách xem trước (chỉ kích hoạt nếu thiết lập authMode về "welcome")
+    if (authMode === "welcome") {
+      return (
+        <div style={{ 
+          display: "flex", 
+          flexDirection: "column", 
+          minHeight: "100vh", 
+          width: "100vw", 
+          backgroundColor: "#F8FAFC", 
+          margin: 0, 
+          padding: 0 
+        }}>
+          <style>{`
+            body, html, #root {
+              margin: 0 !important;
+              padding: 0 !important;
+              width: 100% !important;
+              max-width: 100% !important;
+              overflow-x: hidden;
+              background-color: #F8FAFC;
+            }
+            * { box-sizing: border-box; }
+          `}</style>
+          
+          <Header 
+            currentView={currentView}
+            setCurrentView={() => setAuthMode("login")}
+            userName="Khách"
+            onLogout={() => setAuthMode("login")}
+          />
+          
+           <main style={{ 
+            flex: 1, 
+            display: "flex", 
+            flexDirection: "column",
+            padding: "0",
+            overflowY: "auto",
+            width: "100%",
+            margin: "0 auto"
+          }}>
+            <TrangChu onGoToLogin={() => setAuthMode("login")} />
+          </main>
+
+          {/* <-- ĐÃ THÊM FOOTER CHO CHẾ ĐỘ KHÁCH --> */}
+          <Footer setCurrentView={() => setAuthMode("login")} />
+        </div>
+      );
+    }
+
+    // Mặc định render khối này trước khi chưa đăng nhập
     return (
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", backgroundColor: "#F8FAFC" }}>
         {authMode === "login" ? (
@@ -55,8 +173,19 @@ export default function App() {
     );
   }
 
+  // Giao diện chính sau khi đã xác thực tài khoản thành công
   return (
-    <div style={{ display: "flex", minHeight: "100vh", width: "100vw", backgroundColor: "#F8FAFC", fontFamily: "Segoe UI, sans-serif", margin: 0, padding: 0, boxSizing: "border-box" }}>
+    <div style={{ 
+      display: "flex", 
+      flexDirection: "column", 
+      minHeight: "100vh", 
+      width: "100vw", 
+      backgroundColor: "#F8FAFC", 
+      fontFamily: "Segoe UI, sans-serif", 
+      margin: 0, 
+      padding: 0, 
+      boxSizing: "border-box" 
+    }}>
       <style>{`
         body, html, #root {
           margin: 0 !important;
@@ -65,89 +194,35 @@ export default function App() {
           max-width: 100% !important;
           overflow-x: hidden;
           background-color: #F8FAFC;
-        }
+         }
         * { box-sizing: border-box; }
       `}</style>
 
-      {/* SIDEBAR */}
-      <div style={{ width: "260px", backgroundColor: "#FFFFFF", borderRight: "1px solid #E2E8F0", display: "flex", flexDirection: "column", height: "100vh", position: "sticky", top: 0, zIndex: 10 }}>
-        <div style={{ padding: "24px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
-          <span style={{ fontSize: "24px" }}>🩺</span>
-          <span style={{ fontWeight: "800", color: "#2563EB", fontSize: "20px", letterSpacing: "-0.5px" }}>HealthyAI</span>
-        </div>
+      {/* Header hệ thống */}
+      <Header 
+        currentView={currentView}
+        setCurrentView={setCurrentView}
+        userName={userEmail}
+        onLogout={handleLogout}
+      />
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "0 16px" }}>
-          <button onClick={() => setCurrentView("dashboard")} style={sidebarBtnStyle(currentView === "dashboard")}>
-            📊 Dashboard
-          </button>
-          <button onClick={() => setCurrentView("risk")} style={sidebarBtnStyle(currentView === "risk")}>
-            🧠 Khám bệnh AI
-          </button>
-          <button onClick={() => setCurrentView("profile")} style={sidebarBtnStyle(currentView === "profile")}>
-            📋 Hồ sơ sức khỏe
-          </button>
-          <button onClick={() => setCurrentView("history")} style={sidebarBtnStyle(currentView === "history")}>
-            📈 Lịch sử đánh giá
-          </button>
-        </div>
+      {/* Nội dung tương ứng với các phân hệ điều hướng */}
+      <main style={{ 
+        flex: 1, 
+        display: "flex", 
+        flexDirection: "column",
+        padding: currentView === "trang-chu" ? "0" : "32px",
+        overflowY: "auto",
+        width: "100%",
+        maxWidth: currentView === "trang-chu" ? "100%" : "1400px",
+        margin: "0 auto"
+      }}>
+        {renderContent()}
+      </main>
 
-        {/* PHẦN ĐĂNG XUẤT ĐÃ ĐƯỢC KHÔI PHỤC Ở ĐÂY */}
-        <div style={{ marginTop: "auto", padding: "20px", borderTop: "1px solid #E2E8F0", backgroundColor: "#F8FAFC" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
-            <div style={{ width: "36px", height: "36px", borderRadius: "50%", backgroundColor: "#DBEAFE", color: "#2563EB", display: "flex", justifyContent: "center", alignItems: "center", fontWeight: "bold", fontSize: "14px" }}>
-              👤
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
-              <span style={{ fontSize: "12px", color: "#64748B" }}>Tài khoản</span>
-              <span style={{ fontWeight: "600", color: "#334155", fontSize: "14px", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>{userEmail}</span>
-            </div>
-          </div>
-          <button
-            onClick={handleLogout}
-            style={{ width: "100%", padding: "10px", backgroundColor: "#FEF2F2", color: "#EF4444", border: "1px solid #FECACA", borderRadius: "8px", cursor: "pointer", fontWeight: "600", fontSize: "14px", transition: "all 0.2s" }}
-            onMouseOver={(e) => e.target.style.backgroundColor = "#FEE2E2"}
-            onMouseOut={(e) => e.target.style.backgroundColor = "#FEF2F2"}
-          >
-            Đăng xuất
-          </button>
-        </div>
-      </div>
+      {/* <-- ĐÃ THÊM FOOTER CHO GIAO DIỆN ĐÃ ĐĂNG NHẬP --> */}
+      <Footer setCurrentView={setCurrentView} />
 
-      {/* NỘI DUNG BÊN PHẢI */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <div style={{ backgroundColor: "#FFFFFF", height: "64px", padding: "0 32px", display: "flex", justifyContent: "flex-end", alignItems: "center", borderBottom: "1px solid #E2E8F0" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "24px" }}>
-            <span style={{ cursor: "pointer", fontSize: "20px", color: "#64748B" }}>🔔</span>
-            <span style={{ color: "#E2E8F0" }}>|</span>
-            <span style={{ fontSize: "14px", color: "#64748B", fontWeight: "500" }}>Phiên bản Hệ thống v2.0</span>
-          </div>
-        </div>
-
-        <div style={{ padding: "32px", overflowY: "auto", height: "calc(100vh - 64px)", width: "100%" }}>
-          {currentView === "risk" && <PhanTichBenh />}
-          {currentView === "profile" && <ChiSoSucKhoe />}
-          {(currentView === "dashboard" || currentView === "history") && (
-            <div style={{ background: "white", padding: "40px", borderRadius: "16px", textAlign: "center", border: "1px solid #E2E8F0", color: "#64748B" }}>
-              <h3>📈 Phân vùng dữ liệu</h3>
-              <p>Tính năng đang được đồng bộ hóa dữ liệu từ mô hình đám mây.</p>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
-
-const sidebarBtnStyle = (isActive) => ({
-  padding: "12px 16px",
-  backgroundColor: isActive ? "#EFF6FF" : "transparent",
-  color: isActive ? "#2563EB" : "#64748B",
-  border: "none",
-  borderRadius: "8px",
-  cursor: "pointer",
-  fontWeight: isActive ? "700" : "500",
-  textAlign: "left",
-  fontSize: "15px",
-  transition: "all 0.2s",
-  borderLeft: isActive ? "4px solid #2563EB" : "4px solid transparent"
-});

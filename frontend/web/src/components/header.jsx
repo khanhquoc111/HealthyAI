@@ -20,11 +20,13 @@ export default function Header({ currentView, setCurrentView, userName, onLogout
   }, []);
 
   const navItems = [
-    { key: "dashboard", label: "Trang Chủ" },
     { key: "gioi-thieu", label: "Giới Thiệu" },
-    { key: "risk", label: "Phân Tích Bệnh" },
-    { key: "profile", label: "Hồ Sơ Sức Khỏe" },
-    { key: "history", label: "Lịch Sử" },
+    { key: "trang-chu", label: "Trang Chủ" },
+    { key: "phan-tich-benh", label: "Phân Tích Bệnh" },
+    { key: "tu-van-ai", label: "Tư Vấn AI" },
+    { key: "y-te", label: "Y Tế" },
+    { key: "thuc-don", label: "Thực Đơn" },
+    { key: "tra-thuoc", label: "Tra Thuốc" },
   ];
 
   const menuItems = [

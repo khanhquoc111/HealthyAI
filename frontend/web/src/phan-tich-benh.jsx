@@ -1,6 +1,7 @@
 // frontend/src/MainRiskPage.jsx
 import { useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
+import "./css/phan-tich-benh.css";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 
@@ -26,6 +27,169 @@ const EAV_FALLBACK = {
   family_history_cardiovascular: "giaDinhTimMach",
 };
 
+// ── UI helpers ──────────────────────────────────────────────────
+function riskColorClass(score) {
+  return score > 60 ? "high" : score > 30 ? "mid" : "low";
+}
+
+function riskColorClassByLevel(level) {
+  const l = String(level).toLowerCase();
+  return l.includes("high") || l.includes("cao") ? "high"
+    : l.includes("medium") || l.includes("trung") ? "mid"
+    : "low";
+}
+
+function riskHexColor(score) {
+  return score > 60 ? "#EF4444" : score > 30 ? "#F59E0B" : "#22C55E";
+}
+
+// ── Sub-components ──────────────────────────────────────────────
+function EmptyResults() {
+  return (
+    <div className="ptb-results-empty">
+      <div className="ptb-empty-icon">🩺</div>
+      <p className="ptb-empty-title">Kết quả xuất hiện tại đây</p>
+      <p className="ptb-empty-desc">
+        Điền đầy đủ thông tin và nhấn <strong>Phân tích nguy cơ</strong> để
+        nhận kết quả từ Rule Engine và AI Model.
+      </p>
+    </div>
+  );
+}
+
+function RuleBasedCard({ data }) {
+  const cls = riskColorClass(data?.score ?? 0);
+  const levelCls = riskColorClassByLevel(data?.risk_level ?? "");
+
+  return (
+    <div className="ptb-result-card">
+      <div className="ptb-result-card-header">
+        <span className="ptb-result-engine-label">
+          <span className="ptb-result-engine-icon">📋</span>
+          Rule-based Engine
+        </span>
+        <span
+          className="ptb-result-score"
+          style={{ color: riskHexColor(data?.score ?? 0) }}
+        >
+          {(data?.score ?? 0).toFixed(1)}
+          <span style={{ fontSize: "0.7em", fontWeight: 500, color: "#94a3b8", marginLeft: 2 }}>điểm</span>
+        </span>
+      </div>
+
+      <div className="ptb-result-card-body">
+        <div className="ptb-score-bar-track">
+          <div
+            className={`ptb-score-bar-fill ptb-score-bar-fill--${cls}`}
+            style={{ width: `${Math.min(data?.score ?? 0, 100)}%` }}
+          />
+        </div>
+
+        <div className="ptb-risk-level-row">
+          <span className="ptb-risk-level-label">Phân tầng nguy cơ</span>
+          <span className={`ptb-risk-pill ptb-risk-pill--${levelCls}`}>
+            {String(data?.risk_level ?? "").toUpperCase()}
+          </span>
+        </div>
+
+        {data?.matched_rules?.length > 0 && (
+          <div className="ptb-rules-section">
+            <p className="ptb-rules-heading">Yếu tố kích hoạt</p>
+            {data.matched_rules.map((r, i) => (
+              <div key={i} className="ptb-rule-item">
+                <span className="ptb-rule-dot" />
+                {r.description || r.id}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AIModelCard({ data }) {
+  const isReady = data?.status === "READY";
+  const pct = (data?.probability ?? 0) * 100;
+  const cls = riskColorClass(pct);
+  const levelCls = riskColorClassByLevel(data?.risk_level ?? "");
+
+  return (
+    <div className="ptb-result-card">
+      <div className="ptb-result-card-header">
+        <span className="ptb-result-engine-label">
+          <span className="ptb-result-engine-icon">🧠</span>
+          AI Model
+        </span>
+        {isReady
+          ? <span className="ptb-result-score" style={{ color: riskHexColor(pct) }}>
+              {pct.toFixed(1)}
+              <span style={{ fontSize: "0.7em", fontWeight: 500, color: "#94a3b8", marginLeft: 2 }}>%</span>
+            </span>
+          : <span className="ptb-risk-pill ptb-risk-pill--mid">PARTIAL</span>
+        }
+      </div>
+
+      <div className="ptb-result-card-body">
+        {isReady ? (
+          <>
+            <div className="ptb-score-bar-track">
+              <div
+                className={`ptb-score-bar-fill ptb-score-bar-fill--${cls}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+
+            <div className="ptb-risk-level-row">
+              <span className="ptb-risk-level-label">Phân tầng</span>
+              <span className={`ptb-risk-pill ptb-risk-pill--${levelCls}`}>
+                {String(data?.risk_level ?? "").toUpperCase()}
+              </span>
+            </div>
+
+            <div className="ptb-confidence-row">
+              <span>Độ tin cậy mô hình</span>
+              <span className="ptb-confidence-val">{data?.confidence ?? 0}%</span>
+            </div>
+          </>
+        ) : (
+          <div className="ptb-ai-partial">
+            <span className="ptb-ai-partial-icon">⚠️</span>
+            <p className="ptb-ai-partial-text">
+              Cần điền đầy đủ các chỉ số sinh hóa nâng cao trong mục{" "}
+              <strong>Hồ sơ sức khỏe</strong> để kích hoạt phân tích AI.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RecommendationsCard({ recs }) {
+  if (!recs?.length) return null;
+  return (
+    <div className="ptb-rec-card">
+      <div className="ptb-rec-card-header">
+        <span style={{ fontSize: "1.1rem" }}>💡</span>
+        <h4 className="ptb-rec-title">Khuyến nghị cá nhân hóa</h4>
+      </div>
+      <div className="ptb-rec-body">
+        {recs.map((rec, i) => {
+          const text = typeof rec === "string" ? rec : rec.text;
+          return (
+            <div key={i} className="ptb-rec-item">
+              <span className="ptb-rec-num">{i + 1}</span>
+              {text}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Main component ──────────────────────────────────────────────
 export default function MainRiskPage() {
   const [selectedPlugin, setSelectedPlugin] = useState(null);
   const [plugins, setPlugins] = useState([]);
@@ -40,15 +204,12 @@ export default function MainRiskPage() {
 
   const tenDangNhap = localStorage.getItem("userName");
 
-  // ── Dùng ref để giữ healthProfile luôn mới nhất mà không tạo re-render loop ──
-  // buildFormFromMetadata đọc từ ref thay vì closure → loadPlugin không cần
-  // thêm buildFormFromMetadata vào dep → tránh vòng lặp effect vô tận
   const healthProfileRef = useRef(healthProfile);
   useEffect(() => {
     healthProfileRef.current = healthProfile;
   }, [healthProfile]);
 
-  // ── Metadata-driven form init ──────────────────────────────────────────────
+  // ── Metadata-driven form init ──────────────────────────────────
   const buildFormFromMetadata = useCallback((fields) => {
     const data = {};
     const hp = healthProfileRef.current;
@@ -67,7 +228,7 @@ export default function MainRiskPage() {
 
     const hardCols = ["tuoi", "gioiTinh", "chieuCao", "canNang", "bmi", "vongEo",
       "huyetApTamThu", "huyetApTamTruong", "hutThuoc", "uongRuouBia",
-      "soPhutVanDongMoiTuan", "anMan"]; // <-- THÊM "anMan" VÀO ĐÂY
+      "soPhutVanDongMoiTuan", "anMan"];
     hardCols.forEach(k => {
       if (hp[k] !== undefined) data[k] = hp[k];
     });
@@ -101,10 +262,9 @@ export default function MainRiskPage() {
     if (h > 0 && w > 0) data.bmi = Number((w / (h / 100) ** 2).toFixed(1));
 
     return data;
-  }, []); // ← dep rỗng vì đọc healthProfile qua ref, không qua closure
+  }, []);
 
-  // ── Data loading ───────────────────────────────────────────────────────────
-
+  // ── Data loading ───────────────────────────────────────────────
   const fetchHealthProfile = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/health-profile/${tenDangNhap}`);
@@ -124,12 +284,11 @@ export default function MainRiskPage() {
         typeof p === "string" ? { id: p, name: p, icon: "" } : p
       );
       setPlugins(normalized);
-      // Dùng functional update: không cần selectedPlugin trong dep
       setSelectedPlugin(prev => prev ?? (normalized.length > 0 ? normalized[0].id : null));
     } catch (e) {
       console.error("Load plugins list error:", e);
     }
-  }, []); // ← dep rỗng, chỉ chạy 1 lần duy nhất
+  }, []);
 
   const loadPlugin = useCallback(async (pluginId) => {
     try {
@@ -145,25 +304,21 @@ export default function MainRiskPage() {
     } finally {
       setLoading(false);
     }
-  }, [buildFormFromMetadata]); // buildFormFromMetadata ổn định (dep rỗng) → loadPlugin cũng ổn định
+  }, [buildFormFromMetadata]);
 
-  // ── Lifecycle ──────────────────────────────────────────────────────────────
-  // eslint-disable-next-line react-hooks/set-state-in-effect
+  // ── Lifecycle ──────────────────────────────────────────────────
   useEffect(() => { loadPluginsList(); }, [loadPluginsList]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (tenDangNhap) fetchHealthProfile();
     else setProfileLoaded(true);
   }, [tenDangNhap, fetchHealthProfile]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (profileLoaded && selectedPlugin) loadPlugin(selectedPlugin);
   }, [selectedPlugin, profileLoaded, loadPlugin]);
 
-  // ── Input handling ─────────────────────────────────────────────────────────
-
+  // ── Input handling ─────────────────────────────────────────────
   const handleChange = async (fieldOrKey, value) => {
     const key = typeof fieldOrKey === "object"
       ? (fieldOrKey.key || fieldOrKey.code)
@@ -197,8 +352,7 @@ export default function MainRiskPage() {
     }
   };
 
-  // ── Risk analysis ──────────────────────────────────────────────────────────
-
+  // ── Risk analysis ──────────────────────────────────────────────
   const handleAnalyzeClick = () => {
     if (!plugin) return;
 
@@ -263,311 +417,273 @@ export default function MainRiskPage() {
     }
   };
 
-  // ── UI helpers ─────────────────────────────────────────────────────────────
-
-  const riskColor = (score) =>
-    score > 60 ? "#EF4444" : score > 30 ? "#F59E0B" : "#22C55E";
-
-  const riskColorByLevel = (level) => {
-    const l = String(level).toLowerCase();
-    return l.includes("high") || l.includes("cao") ? "#EF4444"
-      : l.includes("medium") || l.includes("trung") ? "#F59E0B"
-        : "#22C55E";
-  };
-
-  // ── Render ─────────────────────────────────────────────────────────────────
-
+  // ── Loading state ──────────────────────────────────────────────
   if (!profileLoaded || (loading && !plugin)) {
-    return <div style={{ padding: "40px", textAlign: "center", color: "#64748B" }}>Đang tải cấu hình dữ liệu y tế...</div>;
+    return (
+      <div className="ptb-page">
+        <div className="ptb-header">
+          <div className="ptb-header-mesh">
+            <div className="ptb-mesh-blob ptb-mesh-blob--1" />
+            <div className="ptb-mesh-blob ptb-mesh-blob--2" />
+          </div>
+          <div className="ptb-header-inner">
+            <div className="ptb-header-text">
+              <div className="ptb-breadcrumb">
+                <span className="ptb-breadcrumb-dot" />
+                Phân Tích Bệnh
+              </div>
+              <div className="ptb-skeleton" style={{ width: 280, height: 32, marginBottom: 10 }} />
+              <div className="ptb-skeleton" style={{ width: 420, height: 18 }} />
+            </div>
+          </div>
+        </div>
+        <div className="ptb-body">
+          <div className="ptb-form-card">
+            <div className="ptb-form-card-header">
+              <div className="ptb-skeleton" style={{ width: 200, height: 22 }} />
+            </div>
+            <div className="ptb-form-body">
+              <div className="ptb-fields-grid">
+                {[...Array(6)].map((_, i) => (
+                  <div key={i} className="ptb-field">
+                    <div className="ptb-skeleton" style={{ width: 100, height: 14, marginBottom: 4 }} />
+                    <div className="ptb-skeleton" style={{ width: "100%", height: 42 }} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="ptb-results-panel">
+            <EmptyResults />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const disease = plugin?.disease_info || {};
-  if (riskResult) {
-    console.log("🔍 riskResult structure:", JSON.stringify(riskResult, null, 2));
-  }
+  const hasProfile = !!healthProfile;
 
+  // ── Render ─────────────────────────────────────────────────────
   return (
-    <div style={{ width: "100%", maxWidth: "1200px", margin: "0 auto" }}>
-      <style>{`
-        .custom-input {
-          background-color: #FFFFFF !important;
-          color: #1E293B !important;
-          border: 1px solid #D1D5DB;
-          border-radius: 8px;
-          padding: 12px;
-          width: 100%;
-          box-sizing: border-box;
-          font-size: 15px;
-          transition: all 0.2s;
-        }
-        .custom-input:focus {
-          outline: none;
-          border-color: #2563EB;
-          box-shadow: 0 0 0 3px rgba(37,99,235,.15);
-        }
-        select.custom-input option { color: #1E293B !important; background: #FFF !important; }
-        .btn-analyze {
-          height: 56px; font-size: 18px; font-weight: 700; border-radius: 12px;
-          background: #2563EB; color: white; border: none; cursor: pointer;
-          transition: all 0.2s; box-shadow: 0 4px 6px -1px rgba(37,99,235,.2);
-        }
-        .btn-analyze:hover  { transform: translateY(-2px); background: #1D4ED8; }
-        .btn-analyze:disabled { background: #94A3B8; cursor: not-allowed; transform: none; }
-      `}</style>
+    <div className="ptb-page">
 
-      {/* HEADER */}
-      <div style={{
-        display: "flex", justifyContent: "space-between", alignItems: "center",
-        background: "#FFF", padding: "20px 24px", borderRadius: "12px",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.05)", marginBottom: "32px"
-      }}>
-        <div>
-          <h2 style={{ margin: 0, color: "#1E293B", fontSize: "20px", fontWeight: 700 }}>
-            {disease.icon ? `${disease.icon} ` : "🫁 "}{disease.name || "Đánh giá nguy cơ"}
-          </h2>
-          <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "#64748B" }}>
-            {disease.description}
-          </p>
+      {/* ── PAGE HEADER ── */}
+      <div className="ptb-header">
+        <div className="ptb-header-mesh" aria-hidden="true">
+          <div className="ptb-mesh-blob ptb-mesh-blob--1" />
+          <div className="ptb-mesh-blob ptb-mesh-blob--2" />
         </div>
 
-        <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-          <span style={{ fontSize: "14px", fontWeight: 600, color: "#475569" }}>Mô hình đích:</span>
-          <select
-            value={selectedPlugin || ""}
-            onChange={(e) => setSelectedPlugin(e.target.value)}
-            className="custom-input"
-            style={{ width: "240px", padding: "8px 12px" }}
-          >
-            {plugins.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.icon ? `${p.icon} ` : ""}{p.name || p.id}
-              </option>
-            ))}
-          </select>
+        <div className="ptb-header-inner">
+          <div className="ptb-header-text">
+            <div className="ptb-breadcrumb">
+              <span className="ptb-breadcrumb-dot" />
+              Phân Tích Bệnh Mạn Tính
+            </div>
+            <h1 className="ptb-page-title">
+              Đánh giá nguy cơ{" "}
+              <em>{disease.name || "bệnh mạn tính"}</em>
+            </h1>
+            <p className="ptb-page-desc">
+              {disease.description || "Kết hợp Rule Engine và AI Model để phân tích nguy cơ chính xác và có thể giải thích."}
+            </p>
+          </div>
+
+          {/* Plugin tab selector */}
+          {plugins.length > 0 && (
+            <div className="ptb-plugin-selector">
+              <span className="ptb-selector-label">Mô hình</span>
+              <div className="ptb-plugin-tabs">
+                {plugins.map(p => (
+                  <button
+                    key={p.id}
+                    className={`ptb-plugin-tab${selectedPlugin === p.id ? " ptb-plugin-tab--active" : ""}`}
+                    onClick={() => setSelectedPlugin(p.id)}
+                  >
+                    {p.icon && <span>{p.icon}</span>}
+                    {p.name || p.id}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* FORM */}
-      {!loading && plugin && (
-        <div style={{
-          background: "white", padding: "32px", borderRadius: "16px",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.05)", border: "1px solid #E2E8F0"
-        }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-            {plugin.fields.map((field) => {
-              const key = field.key || field.code;
+      {/* ── BODY ── */}
+      <div className="ptb-body">
 
-              if (key === "bmi") return (
-                <div key="bmi_group" style={{
-                  gridColumn: "1 / -1", background: "#F8FAFC",
-                  padding: "16px", borderRadius: "8px", border: "1px dashed #CBD5E1"
-                }}>
-                  <p style={{ margin: "0 0 10px 0", fontSize: "13px", color: "#64748B", fontStyle: "italic" }}>
-                    Chỉ số BMI được tự động tính từ chiều cao và cân nặng.
-                  </p>
-                  <div style={{ display: "flex", gap: "12px", marginBottom: "10px" }}>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ fontWeight: 600, color: "#475569", fontSize: "14px", display: "block", marginBottom: 6 }}>
-                        Chiều cao (cm)
-                      </label>
-                      <input type="number" className="custom-input"
-                        value={formData.chieuCao || ""}
-                        onChange={e => handleChange("chieuCao", e.target.value === "" ? "" : Number(e.target.value))} />
+        {/* ── FORM CARD (left) ── */}
+        <div className="ptb-form-card">
+          <div className="ptb-form-card-header">
+            <div className="ptb-form-title-row">
+              <div className="ptb-form-disease-icon">
+                {disease.icon || "🩺"}
+              </div>
+              <div>
+                <h2 className="ptb-form-title">
+                  {disease.name || "Thông số đánh giá"}
+                </h2>
+                <p className="ptb-form-subtitle">
+                  Điền các chỉ số bên dưới để nhận kết quả phân tích
+                </p>
+              </div>
+            </div>
+
+            <div className={`ptb-profile-badge${hasProfile ? "" : " ptb-profile-badge--empty"}`}>
+              {hasProfile ? (
+                <>
+                  <span className="ptb-profile-badge-dot" />
+                  Hồ sơ đã tải
+                </>
+              ) : (
+                <>⚠️ Chưa có hồ sơ</>
+              )}
+            </div>
+          </div>
+
+          <div className="ptb-form-body">
+            <div className="ptb-fields-grid">
+              {plugin?.fields?.map((field) => {
+                const key = field.key || field.code;
+
+                // ── BMI group ──
+                if (key === "bmi") return (
+                  <div key="bmi_group" className="ptb-bmi-group ptb-field--full">
+                    <p className="ptb-bmi-hint">
+                      <span>ℹ️</span>
+                      Chỉ số BMI được tính tự động từ chiều cao và cân nặng.
+                    </p>
+                    <div className="ptb-bmi-row">
+                      <div className="ptb-field">
+                        <label className="ptb-label">Chiều cao <span className="ptb-label-unit">(cm)</span></label>
+                        <input
+                          type="number"
+                          className="ptb-input"
+                          value={formData.chieuCao || ""}
+                          onChange={e => handleChange("chieuCao", e.target.value === "" ? "" : Number(e.target.value))}
+                        />
+                      </div>
+                      <div className="ptb-field">
+                        <label className="ptb-label">Cân nặng <span className="ptb-label-unit">(kg)</span></label>
+                        <input
+                          type="number"
+                          className="ptb-input"
+                          value={formData.canNang || ""}
+                          onChange={e => handleChange("canNang", e.target.value === "" ? "" : Number(e.target.value))}
+                        />
+                      </div>
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ fontWeight: 600, color: "#475569", fontSize: "14px", display: "block", marginBottom: 6 }}>
-                        Cân nặng (kg)
+                    <div className="ptb-bmi-result">
+                      <label className="ptb-label" style={{ color: "#0f766e" }}>
+                        BMI <span className="ptb-label-unit">(tự động)</span>
                       </label>
-                      <input type="number" className="custom-input"
-                        value={formData.canNang || ""}
-                        onChange={e => handleChange("canNang", e.target.value === "" ? "" : Number(e.target.value))} />
+                      <input
+                        type="number"
+                        readOnly
+                        className="ptb-input ptb-input--readonly"
+                        value={formData.bmi || ""}
+                      />
                     </div>
                   </div>
-                  <div>
-                    <label style={{ fontWeight: 600, color: "#0F766E", fontSize: "14px", display: "block", marginBottom: 6 }}>
-                      BMI (tự động)
+                );
+
+                // ── Boolean ──
+                if (field.type === "boolean") return (
+                  <div key={key} className="ptb-field">
+                    <label className="ptb-label">
+                      {field.label}
+                      {field.required && <span className="ptb-label-required"> *</span>}
                     </label>
-                    <input type="number" readOnly className="custom-input"
-                      value={formData.bmi || ""}
-                      style={{ background: "#F0FDF4 !important", color: "#0F766E", fontWeight: 700 }} />
+                    <label className={`ptb-checkbox-label${formData[key] ? " ptb-checkbox-label--checked" : ""}`}>
+                      <input
+                        type="checkbox"
+                        checked={!!formData[key]}
+                        onChange={e => handleChange(field, e.target.checked)}
+                      />
+                      <span className={`ptb-checkbox-text${formData[key] ? " ptb-checkbox-text--checked" : ""}`}>
+                        Kích hoạt yếu tố này
+                      </span>
+                    </label>
+                    {errors[key] && <span className="ptb-field-error">⚠ {errors[key]}</span>}
                   </div>
-                </div>
-              );
+                );
 
-              return (
-                <div key={key} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                  <label style={{ fontWeight: 600, color: "#475569", fontSize: "14px" }}>
-                    {field.label}
-                    {field.unit && <span style={{ color: "#94A3B8", fontWeight: 400 }}> ({field.unit})</span>}
-                    {field.required && <span style={{ color: "#EF4444" }}> *</span>}
-                  </label>
-
-                  {field.type === "number" && (
-                    <input type="number" className="custom-input"
+                // ── Select ──
+                if (field.type === "select") return (
+                  <div key={key} className="ptb-field">
+                    <label className="ptb-label">
+                      {field.label}
+                      {field.unit && <span className="ptb-label-unit"> ({field.unit})</span>}
+                      {field.required && <span className="ptb-label-required"> *</span>}
+                    </label>
+                    <select
+                      className={`ptb-select${errors[key] ? " ptb-input--error" : ""}`}
                       value={formData[key] ?? ""}
-                      min={field.min} max={field.max} step={field.step ?? 1}
-                      onChange={e => handleChange(field, e.target.value === "" ? "" : Number(e.target.value))} />
-                  )}
-
-                  {field.type === "select" && (
-                    <select className="custom-input"
-                      value={formData[key] ?? ""}
-                      onChange={e => handleChange(field, e.target.value)}>
+                      onChange={e => handleChange(field, e.target.value)}
+                    >
                       <option value="">-- Chọn --</option>
                       {field.options?.map(opt => (
                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                       ))}
                     </select>
-                  )}
-
-                  {field.type === "boolean" && (
-                    <label style={{
-                      display: "flex", alignItems: "center", gap: "10px", padding: "12px",
-                      border: `1px solid ${formData[key] ? "#2563EB" : "#D1D5DB"}`,
-                      borderRadius: "8px", cursor: "pointer",
-                      background: formData[key] ? "#EFF6FF" : "#FFF", transition: "all 0.2s"
-                    }}>
-                      <input type="checkbox" checked={!!formData[key]}
-                        onChange={e => handleChange(field, e.target.checked)}
-                        style={{ width: 18, height: 18 }} />
-                      <span style={{
-                        color: formData[key] ? "#1E40AF" : "#475569", fontSize: 15,
-                        fontWeight: formData[key] ? 600 : 500
-                      }}>
-                        Kích hoạt yếu tố này
-                      </span>
-                    </label>
-                  )}
-
-                  {field.type === "text" && (
-                    <input type="text" className="custom-input"
-                      value={formData[key] ?? ""}
-                      onChange={e => handleChange(field, e.target.value)} />
-                  )}
-
-                  {errors[key] && (
-                    <div style={{ color: "#EF4444", fontSize: "13px", fontWeight: 500 }}>{errors[key]}</div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          <button className="btn-analyze" onClick={handleAnalyzeClick}
-            disabled={isCalculating} style={{ width: "100%", marginTop: "32px" }}>
-            {isCalculating ? "⏳ Đang phân tích chỉ số liên tầng..." : "🩺 Phân tích nguy cơ"}
-          </button>
-        </div>
-      )}
-
-      {/* KẾT QUẢ DUAL-ENGINE */}
-      {riskResult && (
-        <div style={{ marginTop: "32px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-
-          {/* Rule-based */}
-          <div style={{
-            background: "white", padding: "24px", borderRadius: "16px",
-            border: "1px solid #E2E8F0", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)"
-          }}>
-            <h3 style={{ margin: "0 0 16px 0", color: "#334155", display: "flex", justifyContent: "space-between" }}>
-              <span>📋 Rule-based Engine</span>
-              <span style={{ color: "#2563EB", fontWeight: 700 }}>
-                {(riskResult.rule_based?.score ?? 0).toFixed(1)} Điểm
-              </span>
-            </h3>
-            <div style={{ width: "100%", height: 12, background: "#F1F5F9", borderRadius: 6, overflow: "hidden", marginBottom: 16 }}>
-              <div style={{
-                width: `${Math.min(riskResult.rule_based?.score ?? 0, 100)}%`, height: "100%",
-                background: riskColor(riskResult.rule_based?.score ?? 0), transition: "width 1s"
-              }} />
-            </div>
-            <p style={{ margin: "0 0 12px 0", color: "#64748B" }}>
-              Phân tầng nguy cơ:{" "}
-              <strong style={{ color: riskColorByLevel(riskResult.rule_based?.risk_level) }}>
-                {String(riskResult.rule_based?.risk_level ?? "").toUpperCase()}
-              </strong>
-            </p>
-            {riskResult.rule_based?.matched_rules?.length > 0 && (
-              <div style={{ marginTop: 12 }}>
-                <p style={{ margin: "0 0 8px 0", fontSize: 13, fontWeight: 600, color: "#475569" }}>
-                  Yếu tố kích hoạt:
-                </p>
-                {riskResult.rule_based.matched_rules.map((r, i) => (
-                  <div key={i} style={{
-                    fontSize: 13, color: "#64748B", padding: "4px 0",
-                    borderBottom: "1px solid #F1F5F9"
-                  }}>
-                    • {r.description || r.id}
+                    {errors[key] && <span className="ptb-field-error">⚠ {errors[key]}</span>}
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
+                );
 
-          {/* AI Model */}
-          <div style={{
-            background: "white", padding: "24px", borderRadius: "16px",
-            border: "1px solid #E2E8F0", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)"
-          }}>
-            <h3 style={{ margin: "0 0 16px 0", color: "#334155", display: "flex", justifyContent: "space-between" }}>
-              <span>🧠 AI Model</span>
-              {riskResult.ai_based?.status === "READY"
-                ? <span style={{ color: "#10B981", fontWeight: 700 }}>
-                  {((riskResult.ai_based?.probability ?? 0) * 100).toFixed(1)}%
-                </span>
-                : <span style={{ color: "#F59E0B", fontSize: 14 }}>PARTIAL</span>
-              }
-            </h3>
-            {riskResult.ai_based?.status === "READY" ? (
-              <>
-                <div style={{ width: "100%", height: 12, background: "#F1F5F9", borderRadius: 6, overflow: "hidden", marginBottom: 16 }}>
-                  <div style={{
-                    width: `${(riskResult.ai_based?.probability ?? 0) * 100}%`, height: "100%",
-                    background: riskColor((riskResult.ai_based?.probability ?? 0) * 100),
-                    transition: "width 1s"
-                  }} />
-                </div>
-                <p style={{ margin: "0 0 8px 0", color: "#64748B" }}>
-                  Phân tầng:{" "}
-                  <strong style={{ color: riskColorByLevel(riskResult.ai_based?.risk_level) }}>
-                    {String(riskResult.ai_based?.risk_level ?? "").toUpperCase()}
-                  </strong>
-                </p>
-                <p style={{ margin: 0, color: "#64748B" }}>
-                  Độ tin cậy: <strong style={{ color: "#2563EB" }}>{riskResult.ai_based?.confidence ?? 0}%</strong>
-                </p>
-              </>
-            ) : (
-              <p style={{ margin: 0, fontSize: 14, color: "#64748B", lineHeight: 1.6 }}>
-                Cần điền đầy đủ các chỉ số sinh hóa nâng cao trong mục{" "}
-                <strong>Hồ sơ sức khỏe</strong> để kích hoạt phân tích AI.
-              </p>
-            )}
-          </div>
-
-          {/* Khuyến nghị */}
-          {riskResult.recommendations?.length > 0 && (
-            <div style={{
-              gridColumn: "1 / -1", background: "#FFFBEB", padding: "24px",
-              borderRadius: "16px", border: "1px solid #FDE68A"
-            }}>
-              <h3 style={{ margin: "0 0 12px 0", color: "#92400E" }}>💡 Khuyến nghị</h3>
-              {riskResult.recommendations.map((rec, i) => {
-                const text = typeof rec === "string" ? rec : rec.text;
+                // ── Number / Text ──
                 return (
-                  <div key={i} style={{
-                    padding: "8px 0",
-                    borderBottom: i < riskResult.recommendations.length - 1 ? "1px solid #FEF3C7" : "none",
-                    color: "#78350F", fontSize: 14
-                  }}>
-                    {i + 1}. {text}
+                  <div key={key} className="ptb-field">
+                    <label className="ptb-label">
+                      {field.label}
+                      {field.unit && <span className="ptb-label-unit"> ({field.unit})</span>}
+                      {field.required && <span className="ptb-label-required"> *</span>}
+                    </label>
+                    <input
+                      type={field.type === "number" ? "number" : "text"}
+                      className={`ptb-input${errors[key] ? " ptb-input--error" : ""}`}
+                      value={formData[key] ?? ""}
+                      min={field.min}
+                      max={field.max}
+                      step={field.step ?? 1}
+                      onChange={e => handleChange(field, field.type === "number"
+                        ? (e.target.value === "" ? "" : Number(e.target.value))
+                        : e.target.value
+                      )}
+                    />
+                    {errors[key] && <span className="ptb-field-error">⚠ {errors[key]}</span>}
                   </div>
                 );
               })}
             </div>
+
+            <button
+              className="ptb-analyze-btn"
+              onClick={handleAnalyzeClick}
+              disabled={isCalculating}
+            >
+              {isCalculating
+                ? <><span>⏳</span> Đang phân tích chỉ số liên tầng...</>
+                : <><span>🩺</span> Phân tích nguy cơ</>
+              }
+            </button>
+          </div>
+        </div>
+
+        {/* ── RESULTS PANEL (right) ── */}
+        <div className="ptb-results-panel">
+          {!riskResult ? (
+            <EmptyResults />
+          ) : (
+            <>
+              <RuleBasedCard data={riskResult.rule_based} />
+              <AIModelCard data={riskResult.ai_based} />
+              <RecommendationsCard recs={riskResult.recommendations} />
+            </>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

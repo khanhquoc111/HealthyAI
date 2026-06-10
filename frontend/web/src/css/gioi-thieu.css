@@ -1,0 +1,696 @@
+/* =================================================================
+   gioi-thieu.css | Giao diện Giới thiệu Hệ thống Healthy AI
+   Synced with trang-chu.css design tokens (blue-600 palette)
+================================================================= */
+
+:root {
+  /* Đồng bộ token màu với trang-chu.css */
+  --hai-primary: #2563eb;
+  --hai-primary-hover: #1d4ed8;
+  --hai-primary-light: #eff6ff;
+  --hai-accent: #38bdf8;
+  --hai-success: #22c55e;
+  --hai-text-dark: #0f172a;
+  --hai-text-muted: #64748b;
+  --hai-text-light: #94a3b8;
+  --hai-bg-gray: #f8fafc;
+  --hai-bg-subtle: #eff6ff;
+  --hai-border: #e2e8f0;
+  --hai-border-light: #f1f5f9;
+  --hai-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.07);
+  --hai-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.09);
+  --hai-shadow-lg: 0 12px 40px rgba(15, 23, 42, 0.12);
+  --hai-radius-sm: 8px;
+  --hai-radius-md: 12px;
+  --hai-radius-lg: 18px;
+  --hai-transition: 0.18s ease;
+  --hai-navy: #0f172a;
+}
+
+/* ─── Base page ─── */
+.gioi-thieu-page {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  color: var(--hai-text-dark);
+  background-color: var(--hai-bg-gray);
+  line-height: 1.6;
+}
+
+.gioi-thieu-page .container {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 40px;
+  box-sizing: border-box;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PAGE HEADER
+   ═══════════════════════════════════════════════════════════════ */
+.gioi-thieu-page .page-header {
+  background: linear-gradient(160deg, #f0f8ff 0%, #e8f4fd 55%, #f5faff 100%);
+  border-bottom: 1px solid var(--hai-border);
+  padding: 40px 0;
+}
+
+.gioi-thieu-page .page-header-inner {
+  display: block;
+}
+
+.gioi-thieu-page .page-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--hai-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  background-color: var(--hai-primary-light);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  padding: 5px 14px;
+  border-radius: 9999px;
+  margin-bottom: 14px;
+}
+
+.gioi-thieu-page .badge-dot {
+  width: 7px;
+  height: 7px;
+  background-color: var(--hai-primary);
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.gioi-thieu-page .page-title {
+  font-size: clamp(1.6rem, 3vw, 2.25rem);
+  font-weight: 700;
+  color: var(--hai-navy);
+  margin: 0 0 10px 0;
+  letter-spacing: -0.025em;
+}
+
+.gioi-thieu-page .page-desc {
+  font-size: 1rem;
+  color: var(--hai-text-muted);
+  max-width: 660px;
+  margin: 0;
+  line-height: 1.7;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SECTION COMMON
+   ═══════════════════════════════════════════════════════════════ */
+.gioi-thieu-page section {
+  padding: 44px 0;          /* Giảm từ 56px → 44px */
+  border-bottom: 1px solid var(--hai-border);
+}
+
+.gioi-thieu-page .section-header {
+  margin-bottom: 28px;      /* Giảm từ 36px → 28px */
+}
+
+.gioi-thieu-page .section-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--hai-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  background: var(--hai-primary-light);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 20px;
+  padding: 4px 14px;
+  margin-bottom: 8px;
+}
+
+.gioi-thieu-page .section-title {
+  font-size: clamp(1.35rem, 2.5vw, 1.75rem);
+  font-weight: 700;
+  color: var(--hai-navy);
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+/* ───────────────────────────────────────────────────────────────
+   SECTION 1: ABOUT INSTITUTION
+   ─────────────────────────────────────────────────────────────── */
+.gioi-thieu-page .about-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+.gioi-thieu-page .about-card {
+  background: #ffffff;
+  border: 1px solid var(--hai-border-light);
+  border-radius: var(--hai-radius-lg);
+  padding: 28px;
+  box-shadow: var(--hai-shadow-sm);
+  transition: box-shadow var(--hai-transition), transform var(--hai-transition), border-color var(--hai-transition);
+}
+
+.gioi-thieu-page .about-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--hai-shadow-md);
+  border-color: var(--hai-accent);
+}
+
+.gioi-thieu-page .about-icon {
+  width: 60px;
+  height: 60px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gioi-thieu-page .about-logo {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.gioi-thieu-page .about-card-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--hai-navy);
+  margin: 0 0 10px 0;
+}
+
+.gioi-thieu-page .about-card-text {
+  color: var(--hai-text-muted);
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  text-align: justify;
+}
+
+/* ───────────────────────────────────────────────────────────────
+   SECTION 2: ABOUT PROJECT
+   ─────────────────────────────────────────────────────────────── */
+.gioi-thieu-page .project-content {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 36px;
+  align-items: start;
+}
+
+.gioi-thieu-page .project-subtitle {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--hai-navy);
+  margin: 0 0 14px 0;
+}
+
+.gioi-thieu-page .project-para {
+  font-size: 0.95rem;
+  color: var(--hai-text-dark);
+  margin: 0 0 14px 0;
+  line-height: 1.75;
+  text-align: justify;
+}
+
+.gioi-thieu-page .project-highlights {
+  background-color: var(--hai-bg-gray);
+  border: 1px solid var(--hai-border-light);
+  border-radius: var(--hai-radius-md);
+  padding: 18px 20px;
+  margin-top: 20px;
+}
+
+.gioi-thieu-page .highlights-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin: 0 0 12px 0;
+  color: var(--hai-navy);
+}
+
+.gioi-thieu-page .highlights-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.gioi-thieu-page .highlights-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.88rem;
+  color: #475569;
+}
+
+.gioi-thieu-page .highlight-icon {
+  color: var(--hai-success);
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  flex-shrink: 0;
+}
+
+/* Visual Pipeline Card */
+.gioi-thieu-page .project-visual-card {
+  background-color: #0f172a;
+  border-radius: var(--hai-radius-lg);
+  color: #f1f5f9;
+  overflow: hidden;
+  box-shadow: var(--hai-shadow-lg);
+}
+
+.gioi-thieu-page .visual-header {
+  background-color: #1e293b;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid #334155;
+}
+
+.gioi-thieu-page .visual-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.gioi-thieu-page .visual-dots span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #ef4444;
+}
+.gioi-thieu-page .visual-dots span:nth-child(2) { background-color: #eab308; }
+.gioi-thieu-page .visual-dots span:nth-child(3) { background-color: #22c55e; }
+
+.gioi-thieu-page .visual-title {
+  font-size: 0.78rem;
+  font-family: monospace;
+  color: #94a3b8;
+}
+
+.gioi-thieu-page .visual-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gioi-thieu-page .pipeline-item {
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  border-radius: var(--hai-radius-md);
+  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: border-color var(--hai-transition), background-color var(--hai-transition);
+}
+
+.gioi-thieu-page .pipeline-item:hover {
+  border-color: var(--hai-primary);
+  background-color: #1e2f50;
+}
+
+.gioi-thieu-page .pipeline-number {
+  background-color: var(--hai-primary);
+  color: #ffffff;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.gioi-thieu-page .pipeline-text {
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+
+.gioi-thieu-page .pipeline-arrow {
+  text-align: center;
+  color: #475569;
+  font-size: 0.78rem;
+  margin: 1px 0;
+}
+
+.gioi-thieu-page .pipeline-item--final {
+  border-color: #16a34a;
+  background: linear-gradient(135deg, #111827 0%, #14532d 100%);
+}
+
+/* ───────────────────────────────────────────────────────────────
+   SECTION 3: TEAM
+   ─────────────────────────────────────────────────────────────── */
+.gioi-thieu-page .team-group {
+  margin-bottom: 32px;      /* Giảm từ 40px → 32px */
+}
+
+.gioi-thieu-page .team-group:last-child {
+  margin-bottom: 0;
+}
+
+.gioi-thieu-page .team-group-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #475569;
+  border-left: 3px solid var(--hai-primary);
+  padding-left: 12px;
+  margin: 0 0 20px 0;
+}
+
+/* ── Advisor grid ── */
+.gioi-thieu-page .team-grid--advisors {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  max-width: 560px;
+}
+
+/* ── Member grid: 2 thành viên, dùng 2 cột cố định ── */
+.gioi-thieu-page .team-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);   /* Sửa từ repeat(5,1fr) → 2 cột */
+  gap: 20px;
+  max-width: 560px;                         /* Giữ khung gọn, không dàn full-width */
+}
+
+.gioi-thieu-page .team-member {
+  background-color: #ffffff;
+  border: 1px solid var(--hai-border-light);
+  border-radius: var(--hai-radius-md);
+  padding: 24px 20px;
+  text-align: center;
+  box-shadow: var(--hai-shadow-sm);
+  transition: box-shadow var(--hai-transition), transform var(--hai-transition), border-color var(--hai-transition);
+}
+
+.gioi-thieu-page .team-member:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--hai-shadow-md);
+  border-color: var(--hai-accent);
+}
+
+/* ── Avatar mặc định (đội ngũ thực hiện) ── */
+.gioi-thieu-page .member-avatar {
+  width: 96px;              /* Tăng từ 56px → 96px */
+  height: 96px;
+  background-color: var(--hai-bg-gray);
+  color: var(--hai-text-muted);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 14px auto;
+  font-size: 1.5rem;
+  border: 2px solid var(--hai-border);
+  overflow: hidden;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.07);
+}
+
+/* ── Avatar advisor ── */
+.gioi-thieu-page .member-avatar--advisor {
+  width: 104px;             /* Tăng từ 80px → 104px */
+  height: 104px;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+}
+
+.gioi-thieu-page .member-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gioi-thieu-page .member-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--hai-navy);
+  margin: 0 0 4px 0;
+}
+
+.gioi-thieu-page .member-role {
+  font-size: 0.82rem;
+  color: var(--hai-primary);
+  font-weight: 600;
+  margin: 0 0 4px 0;
+}
+
+.gioi-thieu-page .member-id,
+.gioi-thieu-page .member-info {
+  font-size: 0.76rem;
+  color: var(--hai-text-muted);
+  margin: 0;
+}
+
+/* ───────────────────────────────────────────────────────────────
+   SECTION 4: OBJECTIVES
+   ─────────────────────────────────────────────────────────────── */
+.gioi-thieu-page .objectives-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+
+.gioi-thieu-page .objective-card {
+  background-color: #ffffff;
+  border: 1px solid var(--hai-border-light);
+  border-radius: var(--hai-radius-md);
+  padding: 22px;
+  box-shadow: var(--hai-shadow-sm);
+  transition: box-shadow var(--hai-transition), transform var(--hai-transition);
+}
+
+.gioi-thieu-page .objective-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--hai-shadow-md);
+}
+
+.gioi-thieu-page .obj-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: var(--hai-radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  margin-bottom: 14px;
+}
+
+/* Icon colors — đồng bộ tone trang chủ */
+.gioi-thieu-page .obj-icon--1 { background-color: #e0f2fe; color: #2563eb; }
+.gioi-thieu-page .obj-icon--2 { background-color: #e0f2fe; color: #0284c7; }
+.gioi-thieu-page .obj-icon--3 { background-color: #f5f3ff; color: #7c3aed; }
+.gioi-thieu-page .obj-icon--4 { background-color: #f0fdf4; color: #16a34a; }
+.gioi-thieu-page .obj-icon--5 { background-color: #fffbeb; color: #b45309; }
+.gioi-thieu-page .obj-icon--6 { background-color: #fef2f2; color: #dc2626; }
+
+.gioi-thieu-page .obj-title {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--hai-navy);
+  margin: 0 0 8px 0;
+}
+
+.gioi-thieu-page .obj-desc {
+  font-size: 0.87rem;
+  color: var(--hai-text-muted);
+  margin: 0;
+  line-height: 1.65;
+  text-align: justify;
+}
+
+/* ───────────────────────────────────────────────────────────────
+   SECTION 5: TECH STACK
+   ─────────────────────────────────────────────────────────────── */
+.gioi-thieu-page .tech-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px;
+}
+
+.gioi-thieu-page .tech-category {
+  background-color: #ffffff;
+  border: 1px solid var(--hai-border-light);
+  border-radius: var(--hai-radius-md);
+  padding: 20px;
+  box-shadow: var(--hai-shadow-sm);
+}
+
+.gioi-thieu-page .tech-category-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--hai-navy);
+  margin: 0 0 14px 0;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--hai-bg-subtle);
+}
+
+.gioi-thieu-page .tech-items {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.gioi-thieu-page .tech-item {
+  background-color: var(--hai-bg-gray);
+  border: 1px solid var(--hai-border-light);
+  border-radius: 6px;
+  padding: 7px 11px;
+}
+
+.gioi-thieu-page .tech-name {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #334155;
+}
+
+/* ───────────────────────────────────────────────────────────────
+   SECTION 6: CTA
+   ─────────────────────────────────────────────────────────────── */
+.gioi-thieu-page .cta-section {
+  padding: 64px 0;
+  border-bottom: none;
+  background: linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 55%, #2563eb 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+.gioi-thieu-page .cta-section::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 80% 50%, rgba(56, 189, 248, 0.18) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.gioi-thieu-page .cta-content {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  color: #ffffff;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.gioi-thieu-page .cta-title {
+  font-size: clamp(1.4rem, 2.8vw, 2rem);
+  font-weight: 700;
+  margin: 0 0 10px 0;
+  letter-spacing: -0.02em;
+}
+
+.gioi-thieu-page .cta-desc {
+  font-size: 1rem;
+  opacity: 0.85;
+  margin: 0 0 28px 0;
+  line-height: 1.7;
+}
+
+.gioi-thieu-page .cta-actions {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+}
+
+.gioi-thieu-page .cta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 24px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  border-radius: var(--hai-radius-sm);
+  text-decoration: none;
+  transition: all var(--hai-transition);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.gioi-thieu-page .cta-btn--primary {
+  background-color: #ffffff;
+  color: var(--hai-primary);
+  border: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.gioi-thieu-page .cta-btn--primary:hover {
+  background-color: #f8fafc;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.gioi-thieu-page .cta-btn--outline {
+  background-color: transparent;
+  color: #ffffff;
+  border: 1.5px solid rgba(255, 255, 255, 0.5);
+}
+
+.gioi-thieu-page .cta-btn--outline:hover {
+  border-color: rgba(255, 255, 255, 0.9);
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Tablet ≤ 1024px */
+@media (max-width: 1024px) {
+  .gioi-thieu-page .objectives-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .gioi-thieu-page .tech-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Mobile lớn ≤ 768px */
+@media (max-width: 768px) {
+  .gioi-thieu-page .container {
+    padding: 0 20px;
+  }
+  .gioi-thieu-page section {
+    padding: 36px 0;
+  }
+  .gioi-thieu-page .about-grid {
+    grid-template-columns: 1fr;
+  }
+  .gioi-thieu-page .project-content {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+  .gioi-thieu-page .team-grid,
+  .gioi-thieu-page .team-grid--advisors {
+    max-width: 100%;
+  }
+  .gioi-thieu-page .cta-actions {
+    flex-direction: column;
+    align-items: center;
+  }
+  .gioi-thieu-page .cta-btn {
+    width: 100%;
+    max-width: 280px;
+    justify-content: center;
+  }
+}
+
+/* Mobile nhỏ ≤ 480px */
+@media (max-width: 480px) {
+  .gioi-thieu-page .team-grid,
+  .gioi-thieu-page .team-grid--advisors {
+    grid-template-columns: 1fr;
+  }
+  .gioi-thieu-page .objectives-grid {
+    grid-template-columns: 1fr;
+  }
+  .gioi-thieu-page .tech-grid {
+    grid-template-columns: 1fr;
+  }
+  .gioi-thieu-page .about-card {
+    padding: 20px;
+  }
+}
