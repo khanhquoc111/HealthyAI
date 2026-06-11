@@ -99,7 +99,7 @@ export default function GioiThieu({ setCurrentView }) {
           <div className="container">
             <div className="section-header">
               <div className="section-badge">Dự án</div>
-              <h2 className="section-title">Về Healthy AI (LuanVanKTPM)</h2>
+              <h2 className="section-title">Về Healthy AI</h2>
             </div>
 
             <div className="project-content">
@@ -121,7 +121,9 @@ export default function GioiThieu({ setCurrentView }) {
                   , giúp dự đoán chính xác khi có đủ dữ liệu và luôn đảm bảo có
                   kết quả nhờ luật y khoa chuyên gia làm fallback.
                 </p>
+              </div>
 
+              <div className="project-col project-col--visual">
                 <div className="project-highlights">
                   <h4 className="highlights-title">Điểm nổi bật</h4>
                   <ul className="highlights-list">
@@ -158,70 +160,6 @@ export default function GioiThieu({ setCurrentView }) {
                   </ul>
                 </div>
               </div>
-
-              <div className="project-col project-col--visual">
-                <div className="project-visual-card">
-                  <div className="visual-header">
-                    <div className="visual-dots">
-                      <span></span>
-                      <span></span>
-                      <span></span>
-                    </div>
-                    <span className="visual-title">
-                      Quy trình Đánh giá Nguy cơ
-                    </span>
-                  </div>
-                  <div className="visual-body">
-                    <div className="pipeline-item">
-                      <span className="pipeline-number">1</span>
-                      <span className="pipeline-text">
-                        Thu thập Hồ sơ Sức khỏe
-                      </span>
-                    </div>
-                    <div className="pipeline-arrow">
-                      <i className="fa-solid fa-arrow-down"></i>
-                    </div>
-                    <div className="pipeline-item">
-                      <span className="pipeline-number">2</span>
-                      <span className="pipeline-text">
-                        Tải Plugin Bệnh (Metadata)
-                      </span>
-                    </div>
-                    <div className="pipeline-arrow">
-                      <i className="fa-solid fa-arrow-down"></i>
-                    </div>
-                    <div className="pipeline-item">
-                      <span className="pipeline-number">3</span>
-                      <span className="pipeline-text">
-                        Hợp nhất & Chuẩn hóa Dữ liệu
-                      </span>
-                    </div>
-                    <div className="pipeline-arrow">
-                      <i className="fa-solid fa-arrow-down"></i>
-                    </div>
-                    <div className="pipeline-item">
-                      <span className="pipeline-number">4</span>
-                      <span className="pipeline-text">
-                        Dual Engine (Rule + Machine Learning)
-                      </span>
-                    </div>
-                    <div className="pipeline-arrow">
-                      <i className="fa-solid fa-arrow-down"></i>
-                    </div>
-                    <div className="pipeline-item pipeline-item--final">
-                      <span
-                        className="pipeline-number"
-                        style={{ background: "#22c55e" }}
-                      >
-                        ✓
-                      </span>
-                      <span className="pipeline-text">
-                        Sinh Giải thích & Khuyến nghị
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </section>
@@ -230,7 +168,7 @@ export default function GioiThieu({ setCurrentView }) {
              SECTION 3: TEAM
         ───────────────────────────────────── */}
         <section className="team-section">
-          <div className="container">
+          <div className="container team-container">
             <div className="section-header">
               <div className="section-badge">Đội ngũ</div>
               <h2 className="section-title">Những người đứng sau dự án</h2>
@@ -238,10 +176,12 @@ export default function GioiThieu({ setCurrentView }) {
 
             {/* Advisors */}
             <div className="team-group">
-              <h3 className="team-group-title">Giảng viên hướng dẫn</h3>
-              <div className="team-grid team-grid--advisors">
+              <h3 className="team-group-title">
+                <i className="fa-solid fa-graduation-cap"></i> Giảng viên hướng dẫn
+              </h3>
+              <div className="team-grid">
                 <div className="team-member">
-                  <div className="member-avatar member-avatar--advisor">
+                  <div className="member-avatar">
                     <img
                       src="https://drive.google.com/thumbnail?id=1ezRKzGVCVNobRF0kEJeWUUtchSdPu_rP&sz=w1000"
                       alt="TS. Trương Minh Thái"
@@ -249,14 +189,15 @@ export default function GioiThieu({ setCurrentView }) {
                     />
                   </div>
                   <h4 className="member-name">TS. Trương Minh Thái</h4>
-                  <p className="member-role">Hướng dẫn khoa học</p>
-                  <p className="member-info">
-                    <small>Lĩnh vực: Công Nghệ Phần Mềm</small>
+                  <span className="member-role-pill">Hướng dẫn khoa học</span>
+                  <p className="member-info">Lĩnh vực: Công Nghệ Phần Mềm</p>
+                  <p className="member-desc">
+                    Định hướng nghiên cứu tổng thể, tư vấn thiết kế kiến trúc phần mềm và đảm bảo tính chuẩn xác của các thuật toán lõi.
                   </p>
                 </div>
 
                 <div className="team-member">
-                  <div className="member-avatar member-avatar--advisor">
+                  <div className="member-avatar">
                     <img
                       src="https://drive.google.com/thumbnail?id=1bM76xY1C0jYUyKYBiO68C7YFt0-j1R8-&sz=w1000"
                       alt="TS. Mã Trường Thành"
@@ -264,18 +205,20 @@ export default function GioiThieu({ setCurrentView }) {
                     />
                   </div>
                   <h4 className="member-name">TS. Mã Trường Thành</h4>
-                  <p className="member-role">Hướng dẫn kỹ thuật</p>
-                  <p className="member-info">
-                    <small>Lĩnh vực: Khoa Học Máy Tính</small>
+                  <span className="member-role-pill">Hướng dẫn kỹ thuật</span>
+                  <p className="member-info">Lĩnh vực: Khoa Học Máy Tính</p>
+                  <p className="member-desc">
+                    Hỗ trợ chuyên sâu về xây dựng, huấn luyện mô hình Machine Learning và tối ưu hóa hiệu suất dự đoán AI.
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Team Members - Giữ nguyên layout nhóm nhưng điều chỉnh Role cho phù hợp KTPM */}
+            {/* Team Members */}
             <div className="team-group">
-              <h3 className="team-group-title">Đội ngũ thực hiện</h3>
-
+              <h3 className="team-group-title">
+                <i className="fa-solid fa-users"></i> Đội ngũ thực hiện
+              </h3>
               <div className="team-grid">
                 <div className="team-member">
                   <div className="member-avatar">
@@ -285,24 +228,28 @@ export default function GioiThieu({ setCurrentView }) {
                       className="member-image"
                     />
                   </div>
-
                   <h4 className="member-name">T. Lê Gia Linh</h4>
-                  <p className="member-role">Lập Trình Viên</p>
-                  <p className="member-id">B2203561 - DI2296F1</p>
+                  <span className="member-role-pill">Lập Trình Viên</span>
+                  <p className="member-info">MSSV: B2203561 - DI2296F1</p>
+                  <p className="member-desc">
+                    Phát triển Data Pipeline, huấn luyện các mô hình Machine Learning và xây dựng hệ thống Rule Engine.
+                  </p>
                 </div>
 
                 <div className="team-member">
                   <div className="member-avatar">
                     <img
-                      src="https://drive.google.com/thumbnail?id=146qa8yRMF_cE44wmgafREtJA9KYYsvip&sz=w1000"
+                      src="https://drive.google.com/thumbnail?id=10D0bqovpPyguHq2gMIdQQSF124c7VCGM&sz=w1000"
                       alt="Tr. Ng Khánh Quốc"
                       className="member-image"
                     />
                   </div>
-
                   <h4 className="member-name">Tr. Ng Khánh Quốc</h4>
-                  <p className="member-role">Lập Trình Viên</p>
-                  <p className="member-id">B2203576 - DI2296F2</p>
+                  <span className="member-role-pill">Lập Trình Viên</span>
+                  <p className="member-info">MSSV: B2203576 - DI2296F2</p>
+                  <p className="member-desc">
+                    Thiết kế UI/UX, phát triển ứng dụng Frontend và xây dựng kiến trúc Plugin-based API trên FastAPI.
+                  </p>
                 </div>
               </div>
             </div>
@@ -313,80 +260,82 @@ export default function GioiThieu({ setCurrentView }) {
              SECTION 4: OBJECTIVES
         ───────────────────────────────────── */}
         <section className="objectives-section">
-          <div className="container">
-            <div className="section-header">
-              <div className="section-badge">Mục tiêu</div>
-              <h2 className="section-title">
-                Những gì chúng tôi muốn đạt được
-              </h2>
+          <div className="container objectives-container">
+            <div className="section-header text-center">
+              <div className="section-badge section-badge--eyebrow">MỤC TIÊU CHIẾN LƯỢC</div>
+              <h2 className="section-title">Những gì chúng tôi muốn đạt được</h2>
             </div>
 
             <div className="objectives-grid">
-              <div className="objective-card">
-                <div className="obj-icon obj-icon--1">
+              {/* Nhóm 1: Trải nghiệm người dùng & Cá nhân hóa (Tông màu xanh dương / Indigo) */}
+              <div className="objective-card obj-group--ux">
+                <div className="obj-icon-wrapper">
                   <i className="fa-solid fa-notes-medical"></i>
                 </div>
-                <h3 className="obj-title">Hồ sơ sức khỏe dùng chung</h3>
+                <h3 className="obj-card-title">Hồ sơ sức khỏe dùng chung</h3>
                 <p className="obj-desc">
-                  Giải quyết vấn đề nhập liệu lặp lại. Người dùng chỉ cần cung
-                  cấp chỉ số một lần để đánh giá cho mọi loại bệnh.
+                  Giải quyết vấn đề nhập liệu lặp lại. Người dùng chỉ cần cung cấp chỉ số lâm sàng một lần duy nhất để sàng lọc toàn diện cho mọi loại bệnh.
                 </p>
               </div>
 
-              <div className="objective-card">
-                <div className="obj-icon obj-icon--2">
-                  <i className="fa-solid fa-puzzle-piece"></i>
-                </div>
-                <h3 className="obj-title">Kiến trúc Plugin linh hoạt</h3>
-                <p className="obj-desc">
-                  Cho phép thêm bệnh lý mới vào hệ thống thông qua file JSON mà
-                  không cần chỉnh sửa mã nguồn cốt lõi.
-                </p>
-              </div>
-
-              <div className="objective-card">
-                <div className="obj-icon obj-icon--3">
-                  <i className="fa-solid fa-scale-balanced"></i>
-                </div>
-                <h3 className="obj-title">Đánh giá minh bạch</h3>
-                <p className="obj-desc">
-                  Kết hợp Rule Engine chuẩn y tế với Machine Learning, đảm bảo
-                  kết quả có thể giải thích chi tiết, không phải "hộp đen".
-                </p>
-              </div>
-
-              <div className="objective-card">
-                <div className="obj-icon obj-icon--4">
-                  <i className="fa-solid fa-brain"></i>
-                </div>
-                <h3 className="obj-title">AI Fallback thông minh</h3>
-                <p className="obj-desc">
-                  Mô hình ML dự đoán khi đủ dữ liệu, tự động lui về hệ thống
-                  Luật chuyên gia khi thiếu thông số để luôn có kết quả.
-                </p>
-              </div>
-
-              <div className="objective-card">
-                <div className="obj-icon obj-icon--5">
+              <div className="objective-card obj-group--ux">
+                <div className="obj-icon-wrapper">
                   <i className="fa-solid fa-comment-medical"></i>
                 </div>
-                <h3 className="obj-title">Khuyến nghị cá nhân hóa</h3>
+                <h3 className="obj-card-title">Khuyến nghị cá nhân hóa</h3>
                 <p className="obj-desc">
-                  Explanation Engine tự động sinh ra lời giải thích chi tiết và
-                  các khuyến nghị theo dõi, thay đổi lối sống.
+                  Explanation Engine tự động phân tích kết quả, sinh ra lời giải thích chi tiết cùng các lời khuyên thiết thực về lối sống và y tế.
                 </p>
               </div>
 
-              <div className="objective-card">
-                <div className="obj-icon obj-icon--6">
-                  <i className="fa-solid fa-shield-halved"></i>
+              <div className="objective-card obj-group--ux">
+                <div className="obj-icon-wrapper">
+                  <i className="fa-solid fa-sliders"></i>
                 </div>
-                <h3 className="obj-title">Giao diện Metadata-Driven</h3>
+                <h3 className="obj-card-title">Giao diện Metadata-Driven</h3>
                 <p className="obj-desc">
-                  UI được tự động tạo hình dựa trên cấu hình của từng plugin
-                  bệnh, đảm bảo đồng bộ hoàn hảo với backend.
+                  Hệ thống UI tự động tạo hình dựa trên cấu hình của từng plugin bệnh lý, đảm bảo sự đồng bộ hoàn hảo, liền mạch tuyệt đối với backend.
                 </p>
               </div>
+
+              {/* Nhóm 2: Kỹ thuật số & Cơ chế Backend (Tông màu xanh lá / Teal) */}
+              <div className="objective-card obj-group--tech">
+                <div className="obj-icon-wrapper">
+                  <i className="fa-solid fa-puzzle-piece"></i>
+                </div>
+                <h3 className="obj-card-title">Kiến trúc Plugin linh hoạt</h3>
+                <p className="obj-desc">
+                  Cho phép mở rộng mô hình bệnh lý mới vào hệ thống một cách dễ dàng thông qua tệp JSON cấu hình mà không cần sửa đổi mã nguồn cốt lõi.
+                </p>
+              </div>
+
+              <div className="objective-card obj-group--tech">
+                <div className="obj-icon-wrapper">
+                  <i className="fa-solid fa-scale-balanced"></i>
+                </div>
+                <h3 className="obj-card-title">Đánh giá minh bạch</h3>
+                <p className="obj-desc">
+                  Kết hợp chặt chẽ giữa Rule Engine chuẩn y khoa với Machine Learning, đảm bảo mọi kết quả trả về đều tường minh, loại bỏ hoàn toàn cơ chế "hộp đen".
+                </p>
+              </div>
+
+              <div className="objective-card obj-group--tech">
+                <div className="obj-icon-wrapper">
+                  <i className="fa-solid fa-brain"></i>
+                </div>
+                <h3 className="obj-card-title">AI Fallback thông minh</h3>
+                <p className="obj-desc">
+                  Mô hình ML đảm nhận dự đoán chính xác khi có đủ dữ liệu, tự động lui về hệ thống Luật chuyên gia khi thiếu thông số để luôn luôn trả ra kết quả.
+                </p>
+              </div>
+            </div>
+
+            {/* Bổ sung CTA Section cuối trang để xóa bỏ khoảng trắng thừa */}
+            <div className="objectives-cta">
+              <p className="cta-inline-text">Bạn đã sẵn sàng trải nghiệm giải pháp công nghệ y tế số toàn diện chưa?</p>
+              <button className="cta-inline-btn" onClick={() => setCurrentView("risk")}>
+                Bắt đầu phân tích ngay <i className="fa-solid fa-arrow-right"></i>
+              </button>
             </div>
           </div>
         </section>
@@ -395,74 +344,112 @@ export default function GioiThieu({ setCurrentView }) {
              SECTION 5: TECH STACK
         ───────────────────────────────────── */}
         <section className="tech-section">
-          <div className="container">
-            <div className="section-header">
-              <div className="section-badge">Công nghệ</div>
+          <div className="container tech-container">
+            <div className="section-header text-center" style={{ marginBottom: "40px" }}>
+              <div className="section-badge section-badge--eyebrow">CÔNG NGHỆ CỐT LÕI</div>
               <h2 className="section-title">Các công nghệ được sử dụng</h2>
             </div>
 
+            {/* Sử dụng lưới 4 cột (Desktop) hoặc 2 cột (Tablet) để cân bằng tuyệt đối */}
             <div className="tech-grid">
+
+              {/* Cột 1: Frontend (Giữ nguyên) */}
               <div className="tech-category">
-                <h3 className="tech-category-title">Frontend</h3>
-                <div className="tech-items">
-                  <div className="tech-item">
-                    <span className="tech-name">React 18 & Vite</span>
-                  </div>
-                  <div className="tech-item">
-                    <span className="tech-name">Metadata-Driven UI</span>
-                  </div>
-                  <div className="tech-item">
-                    <span className="tech-name">Axios (API Integration)</span>
-                  </div>
+                <div className="tech-cat-header">
+                  <h3 className="tech-category-title">Frontend</h3>
                 </div>
+                <ul className="tech-items-list">
+                  <li className="tech-list-item">
+                    <div className="tech-svg-group">
+                      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/react/react-original.svg" alt="React" className="tech-svg" />
+                      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/vitejs/vitejs-original.svg" alt="Vite" className="tech-svg" />
+                    </div>
+                    <span className="tech-text">React 18 & Vite</span>
+                  </li>
+                  <li className="tech-list-item">
+                    <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/tailwindcss/tailwindcss-original.svg" alt="UI" className="tech-svg" />
+                    <span className="tech-text">Metadata-Driven UI</span>
+                  </li>
+                  <li className="tech-list-item">
+                    <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/axios/axios-plain.svg" alt="Axios" className="tech-svg" />
+                    <span className="tech-text">Axios Integration</span>
+                  </li>
+                </ul>
               </div>
 
+              {/* Cột 2: Backend (Đã fix Pydantic và Plugin) */}
               <div className="tech-category">
-                <h3 className="tech-category-title">Backend</h3>
-                <div className="tech-items">
-                  <div className="tech-item">
-                    <span className="tech-name">Python & FastAPI</span>
-                  </div>
-                  <div className="tech-item">
-                    <span className="tech-name">Pydantic Validation</span>
-                  </div>
-                  <div className="tech-item">
-                    <span className="tech-name">
-                      Plugin Loader Architecture
-                    </span>
-                  </div>
+                <div className="tech-cat-header">
+                  <h3 className="tech-category-title">Backend</h3>
                 </div>
+                <ul className="tech-items-list">
+                  <li className="tech-list-item">
+                    <div className="tech-svg-group">
+                      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/python/python-original.svg" alt="Python" className="tech-svg" />
+                      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/fastapi/fastapi-original.svg" alt="FastAPI" className="tech-svg" />
+                    </div>
+                    <span className="tech-text">Python & FastAPI</span>
+                  </li>
+                  <li className="tech-list-item">
+                    {/* Dùng SimpleIcons cho Pydantic với mã màu chuẩn hồng/đỏ của hãng */}
+                    <img src="https://cdn.simpleicons.org/pydantic/E92063" alt="Pydantic" className="tech-svg" />
+                    <span className="tech-text">Pydantic Validation</span>
+                  </li>
+                  <li className="tech-list-item">
+                    {/* Dùng Iconify (Phosphor Icons) dạng mảnh ghép (puzzle) cho Plugin */}
+                    <img src="https://api.iconify.design/ph:puzzle-piece-fill.svg?color=%23475569" alt="Plugin" className="tech-svg" />
+                    <span className="tech-text">Plugin Architecture</span>
+                  </li>
+                </ul>
               </div>
 
+              {/* Cột 3: AI & ML (Đã fix icon cho NHANES Dataset) */}
               <div className="tech-category">
-                <h3 className="tech-category-title">AI & ML</h3>
-                <div className="tech-items">
-                  <div className="tech-item">
-                    <span className="tech-name">Scikit-learn & Pandas</span>
-                  </div>
-                  <div className="tech-item">
-                    <span className="tech-name">XGBoost & Random Forest</span>
-                  </div>
-                  <div className="tech-item">
-                    <span className="tech-name">Dataset từ NHANES</span>
-                  </div>
+                <div className="tech-cat-header">
+                  <h3 className="tech-category-title">AI & ML</h3>
                 </div>
+                <ul className="tech-items-list">
+                  <li className="tech-list-item">
+                    <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/scikitlearn/scikitlearn-original.svg" alt="Scikit" className="tech-svg" />
+                    <span className="tech-text">Scikit-learn & Pandas</span>
+                  </li>
+                  <li className="tech-list-item">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/6/69/XGBoost_logo.png" alt="XGBoost" className="tech-svg" style={{ objectFit: 'contain' }} />
+                    <span className="tech-text">XGBoost & RF Models</span>
+                  </li>
+                  <li className="tech-list-item">
+                    {/* Dùng Iconify dạng Database cho tập dữ liệu */}
+                    <img src="https://api.iconify.design/ph:database-fill.svg?color=%23475569" alt="Dataset" className="tech-svg" />
+                    <span className="tech-text">Dataset</span>
+                  </li>
+                </ul>
               </div>
 
+              {/* Cột 4: Database & Auth (Đã fix icon cho Bcrypt) */}
               <div className="tech-category">
-                <h3 className="tech-category-title">Database & Auth</h3>
-                <div className="tech-items">
-                  <div className="tech-item">
-                    <span className="tech-name">SQLite / MySQL</span>
-                  </div>
-                  <div className="tech-item">
-                    <span className="tech-name">SQLAlchemy ORM</span>
-                  </div>
-                  <div className="tech-item">
-                    <span className="tech-name">Bcrypt Password Hashing</span>
-                  </div>
+                <div className="tech-cat-header">
+                  <h3 className="tech-category-title">Database & Auth</h3>
                 </div>
+                <ul className="tech-items-list">
+                  <li className="tech-list-item">
+                    <div className="tech-svg-group">
+                      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/mysql/mysql-original.svg" alt="MySQL" className="tech-svg" />
+                      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/sqlite/sqlite-original.svg" alt="SQLite" className="tech-svg" />
+                    </div>
+                    <span className="tech-text">MySQL / SQLite</span>
+                  </li>
+                  <li className="tech-list-item">
+                    <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/sqlalchemy/sqlalchemy-original.svg" alt="SQLAlchemy" className="tech-svg" />
+                    <span className="tech-text">SQLAlchemy ORM</span>
+                  </li>
+                  <li className="tech-list-item">
+                    {/* Dùng Iconify dạng khiên bảo mật cho Hashing */}
+                    <img src="https://api.iconify.design/ph:shield-check-fill.svg?color=%23475569" alt="Security" className="tech-svg" />
+                    <span className="tech-text">Bcrypt Hashing</span>
+                  </li>
+                </ul>
               </div>
+
             </div>
           </div>
         </section>

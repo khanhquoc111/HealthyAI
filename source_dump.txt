@@ -1,12 +1,14 @@
 # ==================================================
-# Path: D:\CodeProject\LuanVanKTPM
+# Path: C:\Users\trann\CODE\ProjectMachineLearning\HealthyAI
 # Detected tech: c, cpp, javascript, python, react, typescript
 # ==================================================
 
 ## DIRECTORY STRUCTURE
 ```
-LuanVanKTPM/
+HealthyAI/
 ├── .git/
+├── .venv/
+├── __pycache__/
 ├── backend/
 │   ├── __pycache__/
 │   ├── app/
@@ -39,7 +41,6 @@ LuanVanKTPM/
 │   │   ├── cn_hs_suckhoe.py
 │   │   └── cn_tra_thuoc.py
 │   ├── ml/
-│   │   ├── __pycache__/
 │   │   ├── models/
 │   │   │   ├── cardiovascular_feature_cols.pkl
 │   │   │   ├── cardiovascular_model.pkl
@@ -72,12 +73,12 @@ LuanVanKTPM/
 │   │   │   └── metadata.json
 │   │   └── stroke/
 │   │       └── metadata.json
-│   ├── venv/
 │   ├── main.py
 │   ├── requirements.txt
 │   └── test_db.py
+├── core/
+│   └── __pycache__/
 ├── frontend/
-│   ├── mobile/
 │   ├── node_modules/
 │   └── web/
 │       ├── node_modules/
@@ -117,6 +118,13 @@ LuanVanKTPM/
 │       ├── package-lock.json
 │       ├── package.json
 │       └── vite.config.js
+├── modules/
+│   └── __pycache__/
+├── plugins/
+│   └── kidney/
+│       └── __pycache__/
+├── venv/
+├── .env
 ├── .gitignore
 ├── README.md
 ├── api_server_8001.err.log
@@ -4147,11 +4155,12 @@ export default function App() {
         );
       case "gioi-thieu":
         return <GioiThieu setCurrentView={setCurrentView} />;
+      case "tra-thuoc":
+        return <TraThuoc />;
       // 2. Các đường dẫn từ Header đang chờ phát triển (Placeholder)
       case "tu-van-ai":
       case "y-te":
       case "thuc-don":
-      case "tra-thuoc":
       case "quan-ly-thong-tin":
       case "history":
       case "cai-dat":
@@ -4604,7 +4613,7 @@ export default function GioiThieu({ setCurrentView }) {
           <div className="container">
             <div className="section-header">
               <div className="section-badge">Dự án</div>
-              <h2 className="section-title">Về Healthy AI (LuanVanKTPM)</h2>
+              <h2 className="section-title">Về Healthy AI</h2>
             </div>
 
             <div className="project-content">
@@ -4626,7 +4635,9 @@ export default function GioiThieu({ setCurrentView }) {
                   , giúp dự đoán chính xác khi có đủ dữ liệu và luôn đảm bảo có
                   kết quả nhờ luật y khoa chuyên gia làm fallback.
                 </p>
+              </div>
 
+              <div className="project-col project-col--visual">
                 <div className="project-highlights">
                   <h4 className="highlights-title">Điểm nổi bật</h4>
                   <ul className="highlights-list">
@@ -4661,70 +4672,6 @@ export default function GioiThieu({ setCurrentView }) {
                       Xây dựng form UI động (Metadata-Driven Design)
                     </li>
                   </ul>
-                </div>
-              </div>
-
-              <div className="project-col project-col--visual">
-                <div className="project-visual-card">
-                  <div className="visual-header">
-                    <div className="visual-dots">
-                      <span></span>
-                      <span></span>
-                      <span></span>
-                    </div>
-                    <span className="visual-title">
-                      Quy trình Đánh giá Nguy cơ
-                    </span>
-                  </div>
-                  <div className="visual-body">
-                    <div className="pipeline-item">
-                      <span className="pipeline-number">1</span>
-                      <span className="pipeline-text">
-                        Thu thập Hồ sơ Sức khỏe
-                      </span>
-                    </div>
-                    <div className="pipeline-arrow">
-                      <i className="fa-solid fa-arrow-down"></i>
-                    </div>
-                    <div className="pipeline-item">
-                      <span className="pipeline-number">2</span>
-                      <span className="pipeline-text">
-                        Tải Plugin Bệnh (Metadata)
-                      </span>
-                    </div>
-                    <div className="pipeline-arrow">
-                      <i className="fa-solid fa-arrow-down"></i>
-                    </div>
-                    <div className="pipeline-item">
-                      <span className="pipeline-number">3</span>
-                      <span className="pipeline-text">
-                        Hợp nhất & Chuẩn hóa Dữ liệu
-                      </span>
-                    </div>
-                    <div className="pipeline-arrow">
-                      <i className="fa-solid fa-arrow-down"></i>
-                    </div>
-                    <div className="pipeline-item">
-                      <span className="pipeline-number">4</span>
-                      <span className="pipeline-text">
-                        Dual Engine (Rule + Machine Learning)
-                      </span>
-                    </div>
-                    <div className="pipeline-arrow">
-                      <i className="fa-solid fa-arrow-down"></i>
-                    </div>
-                    <div className="pipeline-item pipeline-item--final">
-                      <span
-                        className="pipeline-number"
-                        style={{ background: "#22c55e" }}
-                      >
-                        ✓
-                      </span>
-                      <span className="pipeline-text">
-                        Sinh Giải thích & Khuyến nghị
-                      </span>
-                    </div>
-                  </div>
                 </div>
               </div>
             </div>
@@ -4799,7 +4746,7 @@ export default function GioiThieu({ setCurrentView }) {
                 <div className="team-member">
                   <div className="member-avatar">
                     <img
-                      src="https://drive.google.com/thumbnail?id=146qa8yRMF_cE44wmgafREtJA9KYYsvip&sz=w1000"
+                      src="https://drive.google.com/thumbnail?id=10D0bqovpPyguHq2gMIdQQSF124c7VCGM&sz=w1000"
                       alt="Tr. Ng Khánh Quốc"
                       className="member-image"
                     />
@@ -7232,7 +7179,6 @@ export default function Header({ currentView, setCurrentView, userName, onLogout
     { icon: "👤", label: "Quản Lý Thông Tin", key: "quan-ly-thong-tin" },
     { icon: "🫀", label: "Hồ Sơ Sức Khỏe", key: "profile" },
     { icon: "📈", label: "Lịch Sử Đánh Giá", key: "history" },
-    { icon: "🧠", label: "Phân Tích Bệnh AI", key: "risk" },
     { icon: "⚙️", label: "Cài Đặt Tài Khoản", key: "cai-dat" },
     { icon: "🔔", label: "Thông Báo", key: "thong-bao" },
   ];
@@ -7310,7 +7256,7 @@ export default function Header({ currentView, setCurrentView, userName, onLogout
 
               <button className="dropdown-logout" onClick={onLogout}>
                 <span>🚪</span>
-                <span>Dang Xuat</span>
+                <span>Đăng Xuất</span>
               </button>
             </div>
           )}

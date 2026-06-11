@@ -92,8 +92,9 @@
   font-size: 1rem;
   color: var(--hai-text-muted);
   max-width: 660px;
-  margin: 0;
+  margin: 0 auto;
   line-height: 1.7;
+  text-align: center;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -210,18 +211,21 @@
 }
 
 .gioi-thieu-page .project-highlights {
-  background-color: var(--hai-bg-gray);
-  border: 1px solid var(--hai-border-light);
-  border-radius: var(--hai-radius-md);
-  padding: 18px 20px;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border: 2px solid #0284c7;
+  border-radius: var(--hai-radius-lg);
+  padding: 28px 24px;
   margin-top: 20px;
+  box-shadow: 0 8px 24px rgba(2, 132, 199, 0.12);
 }
 
 .gioi-thieu-page .highlights-title {
-  font-size: 0.9rem;
+  font-size: 1.15rem;
   font-weight: 700;
-  margin: 0 0 12px 0;
-  color: var(--hai-navy);
+  margin: 0 0 20px 0;
+  color: #0c4a6e;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .gioi-thieu-page .highlights-list {
@@ -230,25 +234,41 @@
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 14px;
 }
 
 .gioi-thieu-page .highlights-list li {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 0.88rem;
-  color: #475569;
+  gap: 12px;
+  font-size: 0.95rem;
+  color: #164e63;
+  background-color: rgba(255, 255, 255, 0.8);
+  padding: 12px 14px;
+  border-radius: 8px;
+  border-left: 4px solid #0284c7;
+  font-weight: 500;
+  transition: all var(--hai-transition);
+}
+
+.gioi-thieu-page .highlights-list li:hover {
+  background-color: #ffffff;
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.15);
+  transform: translateX(4px);
 }
 
 .gioi-thieu-page .highlight-icon {
-  color: var(--hai-success);
+  background-color: #0284c7;
+  color: #ffffff;
   font-weight: bold;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
   flex-shrink: 0;
+  font-size: 0.75rem;
 }
 
 /* Visual Pipeline Card */
@@ -346,208 +366,407 @@
 /* ───────────────────────────────────────────────────────────────
    SECTION 3: TEAM
    ─────────────────────────────────────────────────────────────── */
-.gioi-thieu-page .team-group {
-  margin-bottom: 32px;      /* Giảm từ 40px → 32px */
+.team-section {
+  padding: 64px 0;
+  background-color: #F8FAFC; /* Nền xám rất nhạt để làm nổi bật card trắng */
 }
 
-.gioi-thieu-page .team-group:last-child {
+/* 1. Giới hạn max-width container để grid không bị trống trải */
+.team-container {
+  max-width: 1000px !important; 
+  margin: 0 auto;
+}
+
+/* 4. Giảm margin giữa 2 section */
+.team-group {
+  margin-bottom: 56px;
+}
+
+.team-group:last-child {
   margin-bottom: 0;
 }
 
-.gioi-thieu-page .team-group-title {
-  font-size: 1rem;
-  font-weight: 700;
-  color: #475569;
-  border-left: 3px solid var(--hai-primary);
-  padding-left: 12px;
-  margin: 0 0 20px 0;
-}
-
-/* ── Advisor grid ── */
-.gioi-thieu-page .team-grid--advisors {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 20px;
-  max-width: 560px;
-}
-
-/* ── Member grid: 2 thành viên, dùng 2 cột cố định ── */
-.gioi-thieu-page .team-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);   /* Sửa từ repeat(5,1fr) → 2 cột */
-  gap: 20px;
-  max-width: 560px;                         /* Giữ khung gọn, không dàn full-width */
-}
-
-.gioi-thieu-page .team-member {
-  background-color: #ffffff;
-  border: 1px solid var(--hai-border-light);
-  border-radius: var(--hai-radius-md);
-  padding: 24px 20px;
-  text-align: center;
-  box-shadow: var(--hai-shadow-sm);
-  transition: box-shadow var(--hai-transition), transform var(--hai-transition), border-color var(--hai-transition);
-}
-
-.gioi-thieu-page .team-member:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--hai-shadow-md);
-  border-color: var(--hai-accent);
-}
-
-/* ── Avatar mặc định (đội ngũ thực hiện) ── */
-.gioi-thieu-page .member-avatar {
-  width: 96px;              /* Tăng từ 56px → 96px */
-  height: 96px;
-  background-color: var(--hai-bg-gray);
-  color: var(--hai-text-muted);
-  border-radius: 50%;
-  display: flex;
+/* 5. Thiết kế lại tiêu đề section (Background pill, có icon) */
+.team-group-title {
+  background-color: #EFF6FF;
+  color: #1E3A8A;
+  padding: 10px 20px;
+  border-radius: 99px;
+  display: inline-flex;
   align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 32px;
+  border: none; /* Bỏ viền dọc mảnh cũ nếu có */
+}
+
+/* Thiết lập Grid cân đối */
+.team-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 32px;
   justify-content: center;
-  margin: 0 auto 14px auto;
-  font-size: 1.5rem;
-  border: 2px solid var(--hai-border);
+}
+
+/* 2 & 7. Card: Đồng nhất kích thước, thêm padding, shadow và hover effect */
+.team-member {
+  background: #FFFFFF;
+  border-radius: 12px;
+  padding: 32px 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  height: 100%;
+  border: 1px solid #F1F5F9; /* Xóa bỏ highlight ngẫu nhiên */
+}
+
+.team-member:hover {
+  transform: translateY(-4px) scale(1.01);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+}
+
+/* 3. Avatar: Cùng tỷ lệ, kích thước 100x100px, nền trung tính */
+.member-avatar {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  margin-bottom: 20px;
+  background-color: #F3F4F6;
+  padding: 4px; /* Tạo viền trắng/xám nhẹ bọc ngoài ảnh */
+  border: 1px solid #E5E7EB;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   overflow: hidden;
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.07);
 }
 
-/* ── Avatar advisor ── */
-.gioi-thieu-page .member-avatar--advisor {
-  width: 104px;             /* Tăng từ 80px → 104px */
-  height: 104px;
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
-}
-
-.gioi-thieu-page .member-image {
+.member-image {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: cover; /* Đảm bảo crop chân dung không bị méo */
+  border-radius: 50%;
 }
 
-.gioi-thieu-page .member-name {
-  font-size: 0.95rem;
+.member-name {
+  font-size: 18px;
+  color: #111827;
   font-weight: 700;
-  color: var(--hai-navy);
-  margin: 0 0 4px 0;
+  margin-bottom: 12px;
 }
 
-.gioi-thieu-page .member-role {
-  font-size: 0.82rem;
-  color: var(--hai-primary);
+/* 8. Đổi màu nhãn vai trò sang dạng Pill trung tính đậm */
+.member-role-pill {
+  background-color: #F1F5F9;
+  color: #1E3A5F;
+  font-size: 13px;
   font-weight: 600;
-  margin: 0 0 4px 0;
+  padding: 6px 16px;
+  border-radius: 99px;
+  margin-bottom: 16px;
+  display: inline-block;
 }
 
-.gioi-thieu-page .member-id,
-.gioi-thieu-page .member-info {
-  font-size: 0.76rem;
-  color: var(--hai-text-muted);
-  margin: 0;
+/* 6. Tăng cỡ chữ phụ và đổi màu để đảm bảo contrast ratio */
+.member-info {
+  font-size: 14px;
+  color: #6B7280;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+/* 9. Style cho phần mô tả ngắn */
+.member-desc {
+  font-size: 14px;
+  color: #4B5563;
+  line-height: 1.6;
+  margin-top: auto; /* Đẩy text xuống dưới cùng để cân bằng chiều cao card */
+  padding-top: 16px;
 }
 
 /* ───────────────────────────────────────────────────────────────
    SECTION 4: OBJECTIVES
    ─────────────────────────────────────────────────────────────── */
-.gioi-thieu-page .objectives-grid {
+.objectives-section {
+  padding: 80px 0;
+  background-color: #FFFFFF;
+}
+
+/* Giới hạn container chuyên nghiệp */
+.objectives-container {
+  max-width: 1100px !important;
+  margin: 0 auto;
+}
+
+/* Nâng cấp badge eyebrowlabel */
+.section-badge--eyebrow {
+  padding: 8px 18px !important;
+  font-size: 13px !important;
+  letter-spacing: 1.5px !important;
+  font-weight: 700 !important;
+  color: #2563EB !important;
+  background-color: #EFF6FF !important;
+  border-radius: 6px !important;
+  display: inline-block;
+  margin-bottom: 16px;
+}
+
+/* Cấu hình Grid 3 cột vuông vắn */
+.objectives-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 28px;
+  margin-top: 48px;
 }
 
-.gioi-thieu-page .objective-card {
-  background-color: #ffffff;
-  border: 1px solid var(--hai-border-light);
-  border-radius: var(--hai-radius-md);
-  padding: 22px;
-  box-shadow: var(--hai-shadow-sm);
-  transition: box-shadow var(--hai-transition), transform var(--hai-transition);
-}
-
-.gioi-thieu-page .objective-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--hai-shadow-md);
-}
-
-.gioi-thieu-page .obj-icon {
-  width: 42px;
-  height: 42px;
-  border-radius: var(--hai-radius-sm);
+/* Nền tảng card: Căn trái hoàn toàn, padding 24px, min-height đồng đều */
+.objective-card {
+  background: #FFFFFF;
+  border: 1px solid #E5E7EB;
+  border-radius: 12px;
+  padding: 28px 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start; /* Ép toàn bộ element về căn trái */
+  text-align: left; /* Căn lề trái văn bản */
+  min-height: 240px; /* Đảm bảo các hàng luôn bằng nhau về mặt thị giác */
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+/* Hiệu ứng tương tác chiều sâu */
+.objective-card:hover {
+  transform: translateY(-4px);
+  border-color: #D1D5DB;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.06);
+}
+
+/* Thiết kế khối chứa Icon đồng bộ, đẩy icon ra chính giữa tâm */
+.obj-icon-wrapper {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  display: flex;
   justify-content: center;
-  font-size: 1.1rem;
-  margin-bottom: 14px;
+  align-items: center;
+  margin-bottom: 20px;
 }
 
-/* Icon colors — đồng bộ tone trang chủ */
-.gioi-thieu-page .obj-icon--1 { background-color: #e0f2fe; color: #2563eb; }
-.gioi-thieu-page .obj-icon--2 { background-color: #e0f2fe; color: #0284c7; }
-.gioi-thieu-page .obj-icon--3 { background-color: #f5f3ff; color: #7c3aed; }
-.gioi-thieu-page .obj-icon--4 { background-color: #f0fdf4; color: #16a34a; }
-.gioi-thieu-page .obj-icon--5 { background-color: #fffbeb; color: #b45309; }
-.gioi-thieu-page .obj-icon--6 { background-color: #fef2f2; color: #dc2626; }
-
-.gioi-thieu-page .obj-title {
-  font-size: 0.98rem;
-  font-weight: 700;
-  color: var(--hai-navy);
-  margin: 0 0 8px 0;
+.obj-icon-wrapper i {
+  font-size: 20px; /* Định kích thước chuẩn 24x24px proxy */
 }
 
-.gioi-thieu-page .obj-desc {
-  font-size: 0.87rem;
-  color: var(--hai-text-muted);
+/* Hệ thống phân loại nhóm màu sắc có ý nghĩa thiết kế */
+/* Nhóm UX/UI: Tông màu xanh dương/Indigo tinh tế */
+.obj-group--ux .obj-icon-wrapper {
+  background-color: #EEF2FF;
+  color: #4338CA;
+}
+.obj-group--ux:hover {
+  border-top: 3px solid #4338CA;
+}
+
+/* Nhóm Kỹ thuật số/Backend: Tông màu Teal/Xanh lá công nghệ */
+.obj-group--tech .obj-icon-wrapper {
+  background-color: #E6FFFA;
+  color: #0D9488;
+}
+.obj-group--tech:hover {
+  border-top: 3px solid #0D9488;
+}
+
+/* Tiêu đề card tạo phân cấp thị giác rõ ràng với H2 */
+.obj-card-title {
+  font-size: 18px;
+  color: #1F2937;
+  font-weight: 600;
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+/* Nội dung mô tả chuẩn contrast ratio WCAG >= 4.5:1 */
+.obj-desc {
+  font-size: 14.5px;
+  color: #4B5563; /* Màu xám đậm chuẩn đọc */
+  line-height: 1.6;
   margin: 0;
-  line-height: 1.65;
-  text-align: justify;
+}
+
+/* Khối CTA Section ở cuối trang loại bỏ khoảng trống thừa */
+.objectives-cta {
+  margin-top: 64px;
+  padding: 32px;
+  background: linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%);
+  border-radius: 12px;
+  border: 1px solid #E2E8F0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.cta-inline-text {
+  font-size: 16px;
+  color: #334155;
+  font-weight: 600;
+  margin: 0;
+}
+
+.cta-inline-btn {
+  background-color: #2563EB;
+  color: #FFFFFF;
+  border: none;
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.2s ease;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
+}
+
+.cta-inline-btn:hover {
+  background-color: #1D4ED8;
+}
+
+@media (max-width: 768px) {
+  .objectives-cta {
+    flex-direction: column;
+    text-align: center;
+  }
 }
 
 /* ───────────────────────────────────────────────────────────────
    SECTION 5: TECH STACK
    ─────────────────────────────────────────────────────────────── */
-.gioi-thieu-page .tech-grid {
+.tech-section {
+  padding: 80px 0;
+  background-color: #F8FAFC; 
+}
+
+.tech-container {
+  max-width: 1200px !important; /* Mở rộng container một chút để chứa đủ 4 cột */
+  margin: 0 auto;
+}
+
+/* 1. Xử lý layout: 4 cột trên Desktop, 2 cột Tablet để tránh "mồ côi" */
+.tech-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 18px;
+  gap: 24px;
+  align-items: stretch; /* Đảm bảo các card trong hàng luôn cao bằng nhau */
 }
 
-.gioi-thieu-page .tech-category {
-  background-color: #ffffff;
-  border: 1px solid var(--hai-border-light);
-  border-radius: var(--hai-radius-md);
-  padding: 20px;
-  box-shadow: var(--hai-shadow-sm);
+@media (max-width: 1024px) {
+  .tech-grid {
+    grid-template-columns: repeat(2, 1fr); /* Tablet: 2x2 */
+  }
 }
 
-.gioi-thieu-page .tech-category-title {
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--hai-navy);
-  margin: 0 0 14px 0;
-  padding-bottom: 8px;
-  border-bottom: 2px solid var(--hai-bg-subtle);
+@media (max-width: 640px) {
+  .tech-grid {
+    grid-template-columns: 1fr; /* Mobile: 1 cột dọc */
+  }
 }
 
-.gioi-thieu-page .tech-items {
+/* Card danh mục công nghệ */
+.tech-category {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  padding: 28px 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  height: 100%; 
 }
 
-.gioi-thieu-page .tech-item {
-  background-color: var(--hai-bg-gray);
-  border: 1px solid var(--hai-border-light);
-  border-radius: 6px;
-  padding: 7px 11px;
+/* 2. Sửa Underline: Ngắn lại, thanh thoát hơn */
+.tech-cat-header {
+  position: relative;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
 }
 
-.gioi-thieu-page .tech-name {
-  font-size: 0.85rem;
-  font-weight: 500;
+.tech-cat-header::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 48px; /* Đường gạch chỉ dài 48px tạo điểm nhấn */
+  height: 3px;
+  background-color: #2563EB;
+  border-radius: 4px;
+}
+
+.tech-category-title {
+  font-size: 18px;
+  color: #0F172A;
+  font-weight: 700;
+  margin: 0;
+}
+
+/* 3. Làm phẳng Pill -> Dạng List mộc mạc, chuyên nghiệp */
+.tech-items-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex-grow: 1; /* Đẩy nội dung chiếm hết không gian trống nếu card cao lên */
+}
+
+.tech-list-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0; /* Bỏ viền, bỏ nền, chỉ còn là text phẳng */
+}
+
+/* 4. Định dạng SVG Icons */
+.tech-svg {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.tech-svg-group {
+  display: flex;
+  align-items: center;
+  gap: -4px; /* Chồng nhẹ icon lên nhau nếu 1 tool có 2 icon */
+}
+
+.tech-svg-group .tech-svg {
+  width: 22px;
+  height: 22px;
+}
+
+.tech-svg-group .tech-svg:nth-child(2) {
+  margin-left: 4px;
+}
+
+/* Fallback cho những công nghệ không có icon SVG cụ thể */
+.tech-icon-fallback {
+  font-size: 18px;
+  color: #64748B;
+  width: 24px;
+  text-align: center;
+}
+
+.tech-text {
+  font-size: 14.5px;
   color: #334155;
+  font-weight: 500;
 }
-
 /* ───────────────────────────────────────────────────────────────
    SECTION 6: CTA
    ─────────────────────────────────────────────────────────────── */

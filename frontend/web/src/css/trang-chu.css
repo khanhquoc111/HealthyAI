@@ -155,575 +155,834 @@ body {
 ---------------------------------------------------------------- */
 .hero {
   position: relative;
+  padding: 64px 0 80px;
+  background: #FFFFFF;
+  /* Base trắng tinh khôi */
   overflow: hidden;
-  padding: 88px 0 80px;
-  background: linear-gradient(160deg, #f0f8ff 0%, #e8f4fd 55%, #f5faff 100%);
-  width: 100%;
+  /* Ngăn blob tràn tạo thanh cuộn ngang */
 }
 
-.hero-bg-mesh {
+/* Blob trang trí mờ - Tạo độ sâu cho không gian thiết kế */
+.hero-decoration-blob {
   position: absolute;
-  inset: 0;
+  top: -150px;
+  left: -100px;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.12) 0%, rgba(255, 255, 255, 0) 70%);
+  filter: blur(40px);
+  z-index: 0;
   pointer-events: none;
+  /* Không cản trở click */
 }
 
-.mesh-circle {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(90px);
-  opacity: 0.45;
-}
-
-.mesh-circle--1 {
-  width: 560px;
-  height: 560px;
-  background: radial-gradient(circle, #5cc8ff 0%, transparent 70%);
-  top: -200px;
-  right: -120px;
-}
-
-.mesh-circle--2 {
-  width: 360px;
-  height: 360px;
-  background: radial-gradient(circle, #0099e5 0%, transparent 70%);
-  bottom: -120px;
-  left: -80px;
-  opacity: 0.2;
-}
-
-.mesh-circle--3 {
-  width: 260px;
-  height: 260px;
-  background: radial-gradient(circle, #7c3aed 0%, transparent 70%);
-  top: 40%;
-  left: 38%;
-  opacity: 0.1;
+.relative-z1 {
+  position: relative;
+  z-index: 1;
 }
 
 .hero-container {
-  position: relative;
-  z-index: 1;
   display: grid;
-  grid-template-columns: 1.2fr 1fr;
-  gap: 40px;
+  grid-template-columns: 1.15fr 0.85fr;
+  /* Tỉ lệ vàng để cột text có nhiều không gian đọc hơn */
+  gap: 48px;
   align-items: center;
+  /* Giúp khóa chặt 2 cột cân bằng theo trục dọc */
 }
 
-/* Hero text wrapper - left alignment */
-.hero-text {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  text-align: left;
-  width: 100%;
-}
-
-/* Hero text */
+/* 1. Badge gọn gàng, sát tiêu đề */
 .hero-badge {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.8rem;
-  font-weight: 500;
-  color: var(--secondary);
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid var(--border);
-  border-radius: 40px;
-  padding: 5px 14px;
-  margin-bottom: 24px;
-  box-shadow: var(--shadow-sm);
-  line-height: 1.4;
-}
-
-.badge-dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--primary);
-  flex-shrink: 0;
-  animation: pulse-dot 2.2s ease infinite;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.6; transform: scale(0.8); }
-}
-
-.hero-heading {
-  font-family: var(--font-display);
-  font-size: clamp(1.7rem, 3.4vw, 3rem);
-  font-weight: 700;
-  line-height: 1.16;
-  color: var(--navy);
+  padding: 6px 16px;
+  background-color: #EFF6FF;
+  /* Nền xanh rất nhạt */
+  color: #1D4ED8;
+  /* Chữ xanh đậm */
+  border: 1px solid #BFDBFE;
+  /* Viền xanh mờ tạo ranh giới */
+  border-radius: 99px;
+  font-size: 14px;
+  font-weight: 600;
   margin-bottom: 20px;
-  letter-spacing: -0.025em;
-  text-align: left;
 }
 
-.hero-heading em {
-  font-style: italic;
-  color: var(--primary);
+/* 2. Tiêu đề không bị vỡ nhịp ngữ pháp */
+.hero-title {
+  font-size: 44px;
+  line-height: 1.3;
+  color: #0F172A;
+  font-weight: 800;
+  margin-bottom: 20px;
+}
+
+.text-gradient {
+  background: linear-gradient(90deg, #2563EB, #38BDF8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .hero-desc {
-  font-size: 1.02rem;
-  color: var(--text-muted);
-  line-height: 1.78;
-  margin-bottom: 34px;
-  max-width: 100%;
-  text-align: left;
-  width: 100%;
+  font-size: 17px;
+  color: #475569;
+  line-height: 1.6;
+  margin-bottom: 32px;
+  max-width: 90%;
 }
 
+/* 3. Tăng contrast cho Secondary Button */
 .hero-cta {
   display: flex;
-  gap: 12px;
-  margin-bottom: 44px;
+  gap: 16px;
+  margin-bottom: 48px;
+  align-items: center;
+  justify-content: center;
   flex-wrap: wrap;
+  /* Tránh việc nút bị ép nhỏ vỡ layout trên màn hình hẹp */
 }
 
-/* Trust strip */
-.hero-trust {
-  display: flex;
+/* Reset base chung cho cả 2 nút để đồng bộ kích thước */
+.hero-btn-primary,
+.hero-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 28px;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 8px;
+  height: 52px;
+  /* Ép cứng chiều cao đồng đều */
+  cursor: pointer;
+  transition: all 0.25s ease;
+  font-family: inherit;
+}
+
+/* Primary Button: Gradient, Bóng đổ, Trọng lượng lớn nhất */
+.hero-btn-primary {
+  background: linear-gradient(to right, #3B82F6, #06B6D4);
+  color: #FFFFFF;
+  border: none;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+.hero-btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.45);
+  background: linear-gradient(to right, #2563EB, #0891B2);
+}
+
+/* Secondary Button: Viền mảnh, Nền trong suốt, Trọng lượng vừa phải */
+.hero-btn-secondary {
+  background: transparent;
+  color: #2563EB;
+  border: 1.5px solid #2563EB;
+}
+
+.hero-btn-secondary:hover {
+  background-color: #EFF6FF;
+  color: #1D4ED8;
+  border-color: #1D4ED8;
+}
+
+/* 4. Block thống kê có khung bọc rõ ràng */
+.hero-stats-block {
+  display: inline-flex;
   align-items: center;
   gap: 24px;
+  padding: 16px 28px;
+  background-color: #F0F7FF;
+  /* Màu xanh siêu nhạt tạo khối */
+  border: 1px solid #BFDBFE;
+  /* Viền bao bọc tinh tế */
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.04);
 }
 
-.trust-item {
+.stat-item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
 }
 
-.trust-num {
-  font-family: var(--font-display);
-  font-size: 1.45rem;
-  font-weight: 700;
-  color: var(--navy);
-  line-height: 1;
+.stat-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: #2563EB;
 }
 
-.trust-label {
-  font-size: 0.73rem;
-  color: var(--text-muted);
+.stat-label {
+  font-size: 13px;
+  color: #64748B;
   font-weight: 500;
+  margin-top: 2px;
 }
 
-.trust-divider {
+.stat-divider {
   width: 1px;
-  height: 34px;
-  background: var(--border);
+  height: 36px;
+  background-color: #BFDBFE;
 }
 
-/* Hero Visual Card */
-.hero-visual {
-  position: relative;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
+/* ==========================================
+   PLUGIN OVERVIEW CARD (RIGHT COLUMN)
+   ========================================== */
 
-.visual-card--main {
-  background: #fff;
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  border: 1px solid var(--border-light);
-  width: 100%;
-  max-width: 420px;
-  animation: float-card 6s ease-in-out infinite;
-}
-
-@keyframes float-card {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
-}
-
-.vc-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-light);
-}
-
-.vc-dots {
-  display: flex;
-  gap: 6px;
-}
-
-.vc-dots span {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-
-.vc-dots span:nth-child(1) { background: #ff5f57; }
-.vc-dots span:nth-child(2) { background: #febc2e; }
-.vc-dots span:nth-child(3) { background: #28c840; }
-
-.vc-title {
-  font-size: 0.73rem;
-  font-weight: 600;
-  color: var(--text-muted);
-}
-
-.vc-body {
-  padding: 20px 18px;
+.plugin-overview-card {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 16px;
+  box-shadow: 0 16px 40px rgba(37, 99, 235, 0.1);
+  /* Tăng bóng đổ màu xanh nhẹ */
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 14px;
 }
 
-/* Risk gauge inside card */
-.vc-patient-row {
+/* Badge trạng thái thay cho macOS dot */
+.poc-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid #BAE6FD;
+  /* Đổi viền xanh nhạt */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(135deg, #F0F7FF 0%, #E0F2FE 100%);
+  /* Nền gradient xanh dương */
+}
+
+.poc-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0F172A;
+  margin: 0;
+}
+
+.poc-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #DCFCE7;
+  color: #166534;
+  padding: 6px 12px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  background-color: #22C55E;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
+}
+
+/* Lưới Plugin 2 cột x 3 hàng */
+.poc-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  padding: 24px;
+}
+
+.poc-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  background: var(--bg);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-light);
+  gap: 14px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid #F1F5F9;
+  border-left: 4px solid #CBD5E1;
+  /* Viền trái mặc định */
+  background-color: #FFFFFF;
+  transition: all 0.3s ease;
+  /* Làm mượt mọi hiệu ứng */
+  cursor: pointer;
 }
 
-.vc-patient-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
-  color: #fff;
-  font-size: 0.75rem;
-  font-weight: 700;
+.poc-item:hover {
+  transform: translateY(-3px) scale(1.02);
+  /* Scale nhẹ tạo cảm giác bấm */
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.06);
+}
+
+/* Bảng màu chuẩn y khoa & ý nghĩa rõ ràng */
+.poc-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 18px;
   flex-shrink: 0;
 }
 
-.vc-patient-info {
-  flex: 1;
+/* ──────────────────────────────────────────────────────────
+   ĐỔ MÀU GRADIENT VÀ SHADOW CHO TỪNG Ô BỆNH LÝ
+   ────────────────────────────────────────────────────────── */
+
+/* Tiểu đường (Xanh dương) */
+.poc-item--diabetes {
+  border-left-color: #3B82F6;
 }
 
-.vc-patient-name {
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: var(--navy);
-  display: block;
+.poc-item--diabetes:hover {
+  border-color: #3B82F6;
 }
 
-.vc-patient-meta {
-  font-size: 0.72rem;
-  color: var(--text-muted);
+.poc-item--diabetes .poc-icon {
+  background: linear-gradient(135deg, #DBEAFE, #EFF6FF);
+  color: #2563EB;
+  box-shadow: 0 4px 10px rgba(59, 130, 246, 0.2);
 }
 
-.vc-risk-list {
+/* Tim mạch (Đỏ) */
+.poc-item--cardio {
+  border-left-color: #EF4444;
+}
+
+.poc-item--cardio:hover {
+  border-color: #EF4444;
+}
+
+.poc-item--cardio .poc-icon {
+  background: linear-gradient(135deg, #FEE2E2, #FEF2F2);
+  color: #DC2626;
+  box-shadow: 0 4px 10px rgba(239, 68, 68, 0.2);
+}
+
+/* Cao huyết áp (Cam/Vàng) */
+.poc-item--hypertension {
+  border-left-color: #F59E0B;
+}
+
+.poc-item--hypertension:hover {
+  border-color: #F59E0B;
+}
+
+.poc-item--hypertension .poc-icon {
+  background: linear-gradient(135deg, #FEF3C7, #FFFBEB);
+  color: #D97706;
+  box-shadow: 0 4px 10px rgba(245, 158, 11, 0.2);
+}
+
+/* Bệnh thận (Xanh lơ - Cyan) */
+.poc-item--kidney {
+  border-left-color: #0EA5E9;
+}
+
+.poc-item--kidney:hover {
+  border-color: #0EA5E9;
+}
+
+.poc-item--kidney .poc-icon {
+  background: linear-gradient(135deg, #E0F2FE, #F0F9FF);
+  color: #0284C7;
+  box-shadow: 0 4px 10px rgba(14, 165, 233, 0.2);
+}
+
+/* Đột quỵ (Hồng đỏ - Rose) */
+.poc-item--stroke {
+  border-left-color: #F43F5E;
+}
+
+.poc-item--stroke:hover {
+  border-color: #F43F5E;
+}
+
+.poc-item--stroke .poc-icon {
+  background: linear-gradient(135deg, #FFE4E6, #FFF1F2);
+  color: #E11D48;
+  box-shadow: 0 4px 10px rgba(244, 63, 94, 0.2);
+}
+
+/* Ô Mở rộng (Nét đứt - Xám) */
+.poc-item--dashed {
+  border: 1.5px dashed #94A3B8;
+  border-left: 1.5px dashed #94A3B8;
+  /* Xóa viền trái đặc */
+  background-color: #F8FAFC;
+}
+
+.poc-item--dashed:hover {
+  border-color: #64748B;
+}
+
+.poc-item--dashed .poc-icon {
+  background: #F1F5F9;
+  color: #475569;
+}
+
+.poc-info {
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
 
-.vc-risk-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.vc-risk-label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 0.78rem;
+.poc-name {
+  font-size: 14.5px;
   font-weight: 600;
-  color: var(--secondary);
+  color: #1E293B;
 }
 
-.vc-risk-pct {
-  font-size: 0.72rem;
-  font-weight: 700;
+.poc-tech {
+  font-size: 12px;
+  color: #64748B;
+  margin-top: 2px;
 }
 
-.vc-risk-bar-track {
-  height: 6px;
-  background: var(--border-light);
-  border-radius: 4px;
-  overflow: hidden;
+.poc-footer {
+  padding: 16px 24px;
+  background-color: #F8FAFC;
+  border-top: 1px solid #E2E8F0;
+  text-align: center;
 }
 
-.vc-risk-bar-fill {
-  height: 100%;
-  border-radius: 4px;
-  transition: width 0.6s ease;
+.poc-footer-text {
+  font-size: 13.5px;
+  color: #475569;
+  font-weight: 500;
 }
 
-.vc-risk-bar-fill--low    { background: #22c55e; }
-.vc-risk-bar-fill--mid    { background: #f59e0b; }
-.vc-risk-bar-fill--high   { background: #ef4444; }
+/* Responsive Tablet */
+@media (max-width: 1024px) {
+  .hero-container {
+    grid-template-columns: 1fr;
+  }
 
-.vc-footer-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-top: 14px;
-  border-top: 1px solid var(--border-light);
+  .hero-content {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .disease-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .disease-card {
+    width: calc(50% - 12px);
+  }
 }
 
-.vc-meta-chip {
-  padding: 3px 10px;
-  border-radius: 16px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  background: var(--bg-subtle);
-  border: 1px solid rgba(37, 99, 235, 0.2);
-  color: var(--primary);
-}
+/* Responsive Mobile */
+@media (max-width: 640px) {
+  .poc-grid {
+    grid-template-columns: 1fr;
+    /* Xuống 1 cột trên mobile */
+  }
 
-.vc-meta-status {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: #16a34a;
-}
+  .hero-stats-block {
+    flex-direction: column;
+    width: 100%;
+    align-items: stretch;
+    text-align: center;
+  }
 
-.vc-meta-dot {
-  width: 7px;
-  height: 7px;
-  background: #22c55e;
-  border-radius: 50%;
-  animation: pulse-dot 1.8s ease infinite;
+  .stat-divider {
+    width: 100%;
+    height: 1px;
+    margin: 12px 0;
+  }
+
+  .hero-cta {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .hero-btn-primary,
+  .hero-btn-secondary {
+    width: 100%;
+    /* Kéo giãn full màn hình trên điện thoại */
+  }
+
+  .disease-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ----------------------------------------------------------------
    DISEASE CARDS STRIP
 ---------------------------------------------------------------- */
-.diseases {
-  padding: 72px 0;
-  background: #fff;
-  width: 100%;
+.diseases-section {
+  padding: 80px 0;
+  background-color: #F8FAFC;
 }
 
+.section-desc {
+  font-size: 16px;
+  color: #475569;
+  max-width: 600px;
+  margin: 0 auto;
+  line-height: 1.5;
+}
+
+/* Lưới 3 cột đồng đều */
 .disease-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  /* Cho phép rớt dòng */
+  justify-content: center;
+  /* Quan trọng: Căn giữa các item mồ côi */
+  gap: 24px;
+  margin-bottom: 40px;
 }
 
+/* Cấu trúc Card: Sử dụng Flex để ép badge xuống đáy */
 .disease-card {
-  background: var(--bg);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  padding: 22px 18px;
-  text-align: center;
-  cursor: default;
-  transition: box-shadow var(--transition), transform var(--transition), border-color var(--transition);
+  width: calc(33.333% - 16px);
+
+  /* Các thuộc tính cũ giữ nguyên */
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 16px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
 }
 
 .disease-card:hover {
-  background: linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-3px);
-  border-color: var(--accent);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
 }
 
-.disease-card--featured {
-  /* Dùng viền giống các bệnh khác - xóa border-color custom */
+/* Thêm vạch chỉ thị màu trên đầu mỗi card khi hover */
+.disease-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background: transparent;
+  transition: background 0.3s ease;
 }
 
-.disease-card--featured:hover {
-  background: linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-3px);
-  border-color: var(--accent);
-}
-
-.dc-icon {
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
+/* Hệ thống Icon bo tròn */
+.dc-icon-wrapper {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 0 auto 14px;
-  font-size: 1.5rem;
+  margin-bottom: 20px;
 }
 
-.dc-icon--red    { background: #fef2f2; }
-.dc-icon--blue   { background: #eff6ff; }
-.dc-icon--amber  { background: #fffbeb; }
-.dc-icon--purple { background: #f5f3ff; }
-.dc-icon--teal   { background: #f0fdfa; }
+.dc-icon {
+  width: 26px;
+  height: 26px;
+}
 
-.dc-name {
-  font-size: 0.88rem;
+/* Text Content */
+.dc-title {
+  font-size: 18px;
   font-weight: 700;
-  color: var(--navy);
-  margin-bottom: 6px;
+  color: #0F172A;
+  margin-bottom: 12px;
 }
 
 .dc-desc {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  line-height: 1.55;
+  font-size: 14.5px;
+  color: #475569;
+  line-height: 1.5;
+  margin-bottom: 24px;
+  /* Giới hạn hiển thị 2 dòng (line-clamp) để an toàn tuyệt đối trên mọi màn hình */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.dc-tag {
-  display: inline-block;
-  margin-top: 10px;
-  font-size: 0.68rem;
+/* Đẩy phần Footer (chứa badge) xuống sát đáy bất kể text dài hay ngắn */
+.dc-footer {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+}
+
+/* Style cơ bản cho các loại Badge */
+.dc-badge {
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--primary);
-  background: rgba(37, 99, 235, 0.08);
-  border: 1px solid rgba(37, 99, 235, 0.18);
-  border-radius: 10px;
-  padding: 2px 9px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  letter-spacing: 0.5px;
+}
+
+/* ────────────────────────────────────────────────────────
+   PHÂN LOẠI SEMANTIC COLOR CHO TỪNG NHÓM BỆNH & ENGINE
+   ──────────────────────────────────────────────────────── */
+
+/* Nhóm Chuyển hóa (Xanh dương) */
+.disease-card--metabolic:hover {
+  border-color: #BFDBFE;
+}
+
+.disease-card--metabolic:hover::before {
+  background: #3B82F6;
+}
+
+.disease-card--metabolic .dc-icon-wrapper {
+  background: #EFF6FF;
+}
+
+/* Nhóm Thận (Xanh lơ) */
+.disease-card--renal:hover {
+  border-color: #BAE6FD;
+}
+
+.disease-card--renal:hover::before {
+  background: #0EA5E9;
+}
+
+.disease-card--renal .dc-icon-wrapper {
+  background: #F0F9FF;
+}
+
+/* Nhóm Huyết áp (Cam) */
+.disease-card--cardio:hover {
+  border-color: #FED7AA;
+}
+
+.disease-card--cardio:hover::before {
+  background: #EA580C;
+}
+
+.disease-card--cardio .dc-icon-wrapper {
+  background: #FFF7ED;
+}
+
+/* Nhóm Tim mạch (Đỏ) */
+.disease-card--cardio-red:hover {
+  border-color: #FECACA;
+}
+
+.disease-card--cardio-red:hover::before {
+  background: #EF4444;
+}
+
+.disease-card--cardio-red .dc-icon-wrapper {
+  background: #FEF2F2;
+}
+
+/* Nhóm Đột quỵ (Hồng đỏ) */
+.disease-card--stroke:hover {
+  border-color: #FECDD3;
+}
+
+.disease-card--stroke:hover::before {
+  background: #E11D48;
+}
+
+.disease-card--stroke .dc-icon-wrapper {
+  background: #FFF1F2;
+}
+
+/* ────────────────────────────────────────────────────────
+   PHÂN BIỆT BADGE THEO LOẠI ENGINE (Rất quan trọng)
+   ──────────────────────────────────────────────────────── */
+
+/* Hybrid: Nền xanh nhạt, Chữ xanh đậm */
+.dc-badge--hybrid {
+  background-color: #EFF6FF;
+  color: #1D4ED8;
+  border: 1px solid #BFDBFE;
+}
+
+/* Chỉ có Rule Engine: Nền Cam nhạt, Chữ Cam đậm -> Phân biệt lập tức! */
+.dc-badge--rule {
+  background-color: #FFF7ED;
+  color: #C2410C;
+  border: 1px solid #FED7AA;
+}
+
+/* ────────────────────────────────────────────────────────
+   CARD MỞ RỘNG (Dashed)
+   ──────────────────────────────────────────────────────── */
+.disease-card--dashed {
+  border: 2px dashed #CBD5E1;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+.disease-card--dashed:hover {
+  border-color: #94A3B8;
+  transform: none;
+  box-shadow: none;
+  background-color: #FFFFFF;
+}
+
+.disease-card--dashed .dc-icon-wrapper {
+  background: #F1F5F9;
+}
+
+.dc-badge--json {
+  background-color: #F1F5F9;
+  color: #475569;
+  border: 1px solid #E2E8F0;
+}
+
+/* ────────────────────────────────────────────────────────
+   CTA DƯỚI CÙNG & RESPONSIVE
+   ──────────────────────────────────────────────────────── */
+.diseases-cta {
+  margin-top: 32px;
+}
+
+.btn-outline-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 24px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #2563EB;
+  background: transparent;
+  border: 1.5px solid #2563EB;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.btn-outline-primary:hover {
+  background: #EFF6FF;
+  transform: translateY(-2px);
 }
 
 /* ----------------------------------------------------------------
    WORKFLOW SECTION
 ---------------------------------------------------------------- */
-.workflow {
-  padding: 88px 0;
-  background: var(--bg);
-  width: 100%;
+.process-section {
+  padding: 80px 0;
+  background-color: #FFFFFF;
+  /* Đổi xen kẽ nền trắng để tách biệt với khối trên */
 }
 
-.workflow-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  max-width: 820px;
+/* 1. Lưới 2 cột cho Desktop/Tablet */
+.process-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 32px;
+  max-width: 1000px;
+  /* Ép độ rộng để form 2 cột không bị quá bè ngang */
   margin: 0 auto;
 }
 
-.workflow-step {
-  display: grid;
-  grid-template-columns: 56px 1fr;
-  gap: 22px;
-  align-items: flex-start;
-}
-
-.ws-icon-wrap {
+/* 2. Cấu trúc Card đồng nhất */
+.process-card {
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 16px;
+  padding: 28px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+  transition: all 0.25s ease;
+  height: 100%;
+  /* Giúp các card trên cùng 1 hàng bằng nhau */
 }
 
-.ws-icon {
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  background: #fff;
-  border: 2px solid var(--border);
+.process-card:hover {
+  background: #FFFFFF;
+  border-color: #CBD5E1;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  transform: translateY(-2px);
+}
+
+/* 3. Header chứa Badge Bước và Icon ngay trong Card */
+.proc-header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-  flex-shrink: 0;
-  z-index: 1;
-  box-shadow: var(--shadow-sm);
-  transition: all var(--transition);
-}
-
-.ws-icon--highlight {
-  border-color: var(--primary);
-  color: var(--primary);
-  background: var(--bg-subtle);
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
-}
-
-.ws-icon--success {
-  border-color: #22c55e;
-  color: #22c55e;
-  background: #f0fff4;
-  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12);
-}
-
-.ws-icon svg {
-  width: 22px;
-  height: 22px;
-}
-
-.ws-connector {
-  width: 2px;
-  flex: 1;
-  min-height: 48px;
-  background: linear-gradient(to bottom, var(--border), var(--border-light));
-  margin: 6px 0;
-}
-
-.ws-card {
-  background: #fff;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  padding: 22px 26px;
   margin-bottom: 20px;
-  transition: box-shadow var(--transition), transform var(--transition);
+  padding-bottom: 16px;
+  border-bottom: 1px solid #E2E8F0;
 }
 
-.ws-card:hover {
-  box-shadow: var(--shadow-md);
-  transform: translateX(3px);
-}
-
-.ws-card--highlight {
-  border-color: rgba(37, 99, 235, 0.25);
-  background: linear-gradient(135deg, #fff 0%, #f0f9ff 100%);
-}
-
-.ws-card--success {
-  border-color: rgba(34, 197, 94, 0.25);
-  background: linear-gradient(135deg, #fff 0%, #f0fff6 100%);
-}
-
-.ws-step-num {
-  font-size: 0.68rem;
+/* Nâng cấp diện mạo chữ BƯỚC 0X */
+.proc-step-badge {
+  background-color: #1E293B;
+  /* Xám than đậm */
+  color: #FFFFFF;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--text-light);
-  text-transform: uppercase;
-  margin-bottom: 6px;
-  display: block;
+  padding: 6px 14px;
+  border-radius: 99px;
+  letter-spacing: 1px;
 }
 
-.ws-title {
-  font-size: 1.05rem;
+/* Bước 6 đổi màu badge để nhấn mạnh kết quả */
+.proc-step-badge--final {
+  background-color: #16A34A;
+  /* Xanh lá */
+}
+
+.proc-icon {
+  width: 28px;
+  height: 28px;
+}
+
+/* 4. Nội dung Text */
+.proc-title {
+  font-size: 18px;
   font-weight: 700;
-  color: var(--navy);
-  margin-bottom: 8px;
+  color: #0F172A;
+  margin-bottom: 12px;
 }
 
-.ws-desc {
-  font-size: 0.9rem;
-  color: var(--text-muted);
-  line-height: 1.68;
-  margin-bottom: 14px;
+.proc-desc {
+  font-size: 14.5px;
+  color: #475569;
+  line-height: 1.6;
+  margin-bottom: 24px;
+  flex-grow: 1;
+  /* Ép phần tag bên dưới luôn nằm sát đáy nếu text ngắn dài khác nhau */
 }
 
-.ws-tags {
+/* 5. Nhóm Tag Semantic */
+.proc-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
+  margin-top: auto;
+  /* Kéo tag xuống đáy */
 }
 
-.ws-tag {
-  font-size: 0.72rem;
+.proc-tag {
+  font-size: 12px;
   font-weight: 600;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
+  padding: 6px 12px;
   border-radius: 6px;
-  padding: 3px 10px;
-  color: var(--text-muted);
 }
 
-.ws-tag--blue  { background: #e0f2ff; border-color: rgba(37, 99, 235, 0.22); color: var(--primary); }
-.ws-tag--green { background: #e8fff0; border-color: rgba(34, 197, 94, 0.25); color: #16a34a; }
-.ws-tag--amber { background: #fffbeb; border-color: rgba(245, 158, 11, 0.3); color: #b45309; }
+/* Semantic Colors - Bí quyết UI chuyên nghiệp */
+/* Input (Xám nhạt) */
+.tag-input {
+  background-color: #F1F5F9;
+  color: #475569;
+  border: 1px solid #E2E8F0;
+}
 
-.workflow-step--last .ws-card {
-  margin-bottom: 0;
+/* Tech/Processing (Teal/Xanh ngọc bích) */
+.tag-tech {
+  background-color: #F0FDFA;
+  color: #0D9488;
+  border: 1px solid #CCFBF1;
+}
+
+/* Output (Xanh lá) */
+.tag-output {
+  background-color: #F0FDF4;
+  color: #16A34A;
+  border: 1px solid #BBF7D0;
 }
 
 /* ----------------------------------------------------------------
@@ -771,14 +1030,40 @@ body {
   margin-bottom: 18px;
 }
 
-.fc-icon svg { width: 26px; height: 26px; }
+.fc-icon svg {
+  width: 26px;
+  height: 26px;
+}
 
-.fc-icon--1 { background: #e0f2ff; color: var(--primary); }
-.fc-icon--2 { background: #e8f0ff; color: var(--secondary); }
-.fc-icon--3 { background: #f5f3ff; color: #7c3aed; }
-.fc-icon--4 { background: #f0fdf4; color: #16a34a; }
-.fc-icon--5 { background: #fffbeb; color: #b45309; }
-.fc-icon--6 { background: #fef2f2; color: #dc2626; }
+.fc-icon--1 {
+  background: #e0f2ff;
+  color: var(--primary);
+}
+
+.fc-icon--2 {
+  background: #e8f0ff;
+  color: var(--secondary);
+}
+
+.fc-icon--3 {
+  background: #f5f3ff;
+  color: #7c3aed;
+}
+
+.fc-icon--4 {
+  background: #f0fdf4;
+  color: #16a34a;
+}
+
+.fc-icon--5 {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.fc-icon--6 {
+  background: #fef2f2;
+  color: #dc2626;
+}
 
 .fc-title {
   font-size: 1rem;
@@ -909,40 +1194,104 @@ body {
     text-align: center;
   }
 
-  .hero-badge { justify-content: center; }
-  .hero-desc { margin-left: auto; margin-right: auto; }
-  .hero-cta { justify-content: center; }
-  .hero-trust { justify-content: center; }
-  .hero-visual { justify-content: center; margin-top: 40px; }
-  .visual-card--main { max-width: 380px; }
+  .hero-badge {
+    justify-content: center;
+  }
 
-  .disease-grid { grid-template-columns: repeat(3, 1fr); }
-  .features-grid { grid-template-columns: repeat(2, 1fr); }
+  .hero-desc {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .hero-cta {
+    justify-content: center;
+  }
+
+  .hero-trust {
+    justify-content: center;
+  }
+
+  .hero-visual {
+    justify-content: center;
+    margin-top: 40px;
+  }
+
+  .visual-card--main {
+    max-width: 380px;
+  }
+
+  .disease-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .features-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 
   .cta-inner {
     flex-direction: column;
     text-align: center;
   }
 
-  .cta-text .cta-desc { margin: 0 auto; }
-  .cta-actions { justify-content: center; }
+  .cta-text .cta-desc {
+    margin: 0 auto;
+  }
+
+  .cta-actions {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 768px) {
+  .process-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
 }
 
 /* ----------------------------------------------------------------
    RESPONSIVE – MOBILE (≤ 640px)
 ---------------------------------------------------------------- */
 @media (max-width: 640px) {
-  .hero { padding: 56px 0 52px; }
-  .hero-heading { font-size: 1.85rem; }
-  .hero-trust { flex-direction: column; gap: 16px; }
-  .trust-divider { width: 40px; height: 1px; }
+  .hero {
+    padding: 56px 0 52px;
+  }
 
-  .diseases { padding: 56px 0; }
-  .disease-grid { grid-template-columns: repeat(2, 1fr); }
+  .hero-heading {
+    font-size: 1.85rem;
+  }
 
-  .workflow { padding: 64px 0; }
-  .features { padding: 64px 0; }
-  .features-grid { grid-template-columns: 1fr; }
+  .hero-trust {
+    flex-direction: column;
+    gap: 16px;
+  }
 
-  .cta-section { padding: 60px 0; }
+  .trust-divider {
+    width: 40px;
+    height: 1px;
+  }
+
+  .diseases {
+    padding: 56px 0;
+  }
+
+  .disease-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .workflow {
+    padding: 64px 0;
+  }
+
+  .features {
+    padding: 64px 0;
+  }
+
+  .features-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cta-section {
+    padding: 60px 0;
+  }
 }
