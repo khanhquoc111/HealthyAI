@@ -30,7 +30,7 @@ export default function Header({ currentView, setCurrentView, userName, onLogout
   ];
 
   const menuItems = [
-    { icon: "👤", label: "Quản Lý Thông Tin", key: "quan-ly-thong-tin" },
+    { icon: "👤", label: "Quản Lý Thông Tin", key: "thong-tin-nd" },
     { icon: "🫀", label: "Hồ Sơ Sức Khỏe", key: "profile" },
     { icon: "📈", label: "Lịch Sử Đánh Giá", key: "history" },
     { icon: "⚙️", label: "Cài Đặt Tài Khoản", key: "cai-dat" },

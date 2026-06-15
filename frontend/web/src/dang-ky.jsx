@@ -1,18 +1,20 @@
 // frontend/src/dang_ky.jsx
 import { useState } from "react";
 import axios from "axios";
+import "./css/auth.css";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 
 export default function DangKy({ onSwitchToLogin }) {
-  const [formData, setFormData] = useState({ 
-    tenDangNhap: "", 
-    email: "", 
-    password: "", 
-    hoTen: "" 
+  const [formData, setFormData] = useState({
+    tenDangNhap: "",
+    email: "",
+    password: "",
+    hoTen: "",
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -35,70 +37,172 @@ export default function DangKy({ onSwitchToLogin }) {
   };
 
   return (
-    <div style={{ background: "white", padding: "40px", borderRadius: "12px", boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)", width: "100%", maxWidth: "400px" }}>
-      <h2 style={{ textAlign: "center", color: "#0f172a", marginBottom: "24px", fontSize: "24px" }}>
-        Tạo Tài Khoản Mới
-      </h2>
-
-      {error && (
-        <div style={{ color: "#b91c1c", backgroundColor: "#fef2f2", padding: "12px", borderRadius: "6px", marginBottom: "20px", textAlign: "center", border: "1px solid #f87171" }}>
-          {error}
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-        
-        <div>
-          <label style={{ fontWeight: "600", display: "block", marginBottom: "6px", color: "#334155" }}>Tên đăng nhập *</label>
-          <input 
-            type="text" name="tenDangNhap" required
-            value={formData.tenDangNhap} onChange={handleChange}
-            style={{ width: "100%", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }} 
-          />
-        </div>
-
-        <div>
-          <label style={{ fontWeight: "600", display: "block", marginBottom: "6px", color: "#334155" }}>Họ và tên</label>
-          <input 
-            type="text" name="hoTen" 
-            value={formData.hoTen} onChange={handleChange}
-            style={{ width: "100%", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }} 
-          />
-        </div>
-
-        <div>
-          <label style={{ fontWeight: "600", display: "block", marginBottom: "6px", color: "#334155" }}>Email *</label>
-          <input 
-            type="email" name="email" required
-            value={formData.email} onChange={handleChange}
-            style={{ width: "100%", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }} 
-          />
-        </div>
-        
-        <div>
-          <label style={{ fontWeight: "600", display: "block", marginBottom: "6px", color: "#334155" }}>Mật khẩu *</label>
-          <input 
-            type="password" name="password" required
-            value={formData.password} onChange={handleChange}
-            style={{ width: "100%", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }} 
-          />
-        </div>
-
-        <button 
-          type="submit" disabled={loading}
-          style={{ padding: "12px", backgroundColor: "#2563eb", color: "white", border: "none", borderRadius: "6px", fontSize: "16px", fontWeight: "bold", cursor: loading ? "not-allowed" : "pointer", marginTop: "8px" }}>
-          {loading ? "Đang xử lý..." : "Đăng Ký"}
-        </button>
-      </form>
-
-      <div style={{ textAlign: "center", marginTop: "20px", color: "#64748b", fontSize: "14px" }}>
-        Đã có tài khoản?{" "}
-        <button 
-          onClick={onSwitchToLogin} 
-          style={{ background: "none", border: "none", color: "#2563eb", cursor: "pointer", fontWeight: "600", padding: "0", fontSize: "14px" }}>
-          Đăng nhập tại đây
-        </button>
+    <div className="auth-page">
+      {/* Background mesh */}
+      <div className="auth-bg-mesh" aria-hidden="true">
+        <div className="auth-mesh-blob auth-mesh-blob--1" />
+        <div className="auth-mesh-blob auth-mesh-blob--2" />
+        <div className="auth-mesh-blob auth-mesh-blob--3" />
       </div>
+
+      {/* Brand */}
+      <div className="auth-brand">
+        <div className="auth-brand-logo">
+          <div className="auth-brand-icon">🩺</div>
+          <span className="auth-brand-name">Healthy<span>AI</span></span>
+        </div>
+        <span className="auth-brand-tagline">Hệ thống đánh giá nguy cơ bệnh mãn tính</span>
+      </div>
+
+      {/* Card */}
+      <div className="auth-card">
+        <div className="auth-card-header">
+          <div className="auth-badge">
+            <span className="auth-badge-dot" />
+            Miễn phí &amp; An toàn
+          </div>
+          <h2 className="auth-card-title">Tạo tài khoản <em>mới</em></h2>
+          <p className="auth-card-desc">Điền thông tin bên dưới để bắt đầu sử dụng hệ thống</p>
+        </div>
+
+        <div className="auth-card-body">
+          {/* Error banner */}
+          {error && (
+            <div className="auth-error">
+              <span className="auth-error-icon">⚠️</span>
+              {error}
+            </div>
+          )}
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} style={{ display: "contents" }}>
+            {/* Tên đăng nhập & Họ tên – 2 cột */}
+            <div className="auth-fields-row">
+              <div className="auth-field">
+                <label className="auth-label" htmlFor="reg-username">
+                  Tên đăng nhập
+                  <span className="auth-label-required">*</span>
+                </label>
+                <div className="auth-input-wrap">
+                  <span className="auth-input-icon">👤</span>
+                  <input
+                    id="reg-username"
+                    className="auth-input"
+                    type="text"
+                    name="tenDangNhap"
+                    required
+                    autoComplete="username"
+                    placeholder="vd: nguyen_van_a"
+                    value={formData.tenDangNhap}
+                    onChange={handleChange}
+                  />
+                </div>
+              </div>
+
+              <div className="auth-field">
+                <label className="auth-label" htmlFor="reg-hoten">
+                  Họ và tên
+                  <span className="auth-label-optional">&nbsp;(tuỳ chọn)</span>
+                </label>
+                <div className="auth-input-wrap">
+                  <span className="auth-input-icon">🪪</span>
+                  <input
+                    id="reg-hoten"
+                    className="auth-input"
+                    type="text"
+                    name="hoTen"
+                    autoComplete="name"
+                    placeholder="Nguyễn Văn A"
+                    value={formData.hoTen}
+                    onChange={handleChange}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Email */}
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="reg-email">
+                Email
+                <span className="auth-label-required">*</span>
+              </label>
+              <div className="auth-input-wrap">
+                <span className="auth-input-icon">✉️</span>
+                <input
+                  id="reg-email"
+                  className="auth-input"
+                  type="email"
+                  name="email"
+                  required
+                  autoComplete="email"
+                  placeholder="email@example.com"
+                  value={formData.email}
+                  onChange={handleChange}
+                />
+              </div>
+            </div>
+
+            {/* Mật khẩu */}
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="reg-password">
+                Mật khẩu
+                <span className="auth-label-required">*</span>
+              </label>
+              <div className="auth-input-wrap">
+                <span className="auth-input-icon">🔒</span>
+                <input
+                  id="reg-password"
+                  className="auth-input"
+                  type={showPassword ? "text" : "password"}
+                  name="password"
+                  required
+                  autoComplete="new-password"
+                  placeholder="Tối thiểu 8 ký tự"
+                  value={formData.password}
+                  onChange={handleChange}
+                />
+                <button
+                  type="button"
+                  className="auth-pw-toggle"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                >
+                  {showPassword ? "🙈" : "👁️"}
+                </button>
+              </div>
+            </div>
+
+            {/* Submit */}
+            <button
+              type="submit"
+              className="auth-submit-btn"
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <span className="auth-spinner" />
+                  Đang xử lý...
+                </>
+              ) : (
+                <>✅ Tạo Tài Khoản</>
+              )}
+            </button>
+          </form>
+
+          {/* Switch */}
+          <div className="auth-divider">hoặc</div>
+          <div className="auth-switch">
+            Đã có tài khoản?{" "}
+            <button className="auth-switch-btn" onClick={onSwitchToLogin}>
+              Đăng nhập tại đây
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <p className="auth-footer-note">
+        © {new Date().getFullYear()} HealthyAI · Hệ thống đánh giá nguy cơ bệnh mãn tính
+      </p>
     </div>
   );
 }

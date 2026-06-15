@@ -37,6 +37,7 @@ LuanVanKTPM/
 │   ├── function/
 │   │   ├── __pycache__/
 │   │   ├── cn_hs_suckhoe.py
+│   │   ├── cn_thongtin_nguoidung.py
 │   │   └── cn_tra_thuoc.py
 │   ├── ml/
 │   │   ├── __pycache__/
@@ -97,6 +98,7 @@ LuanVanKTPM/
 │       │   ├── css/
 │       │   │   ├── gioi-thieu.css
 │       │   │   ├── phan-tich-benh.css
+│       │   │   ├── thongtin-nd.css
 │       │   │   ├── tra-thuoc.css
 │       │   │   └── trang-chu.css
 │       │   ├── App.css
@@ -108,6 +110,7 @@ LuanVanKTPM/
 │       │   ├── index.css
 │       │   ├── main.jsx
 │       │   ├── phan-tich-benh.jsx
+│       │   ├── thongtin-nd.jsx
 │       │   ├── tra-thuoc.jsx
 │       │   └── trang-chu.jsx
 │       ├── .gitignore
@@ -143,7 +146,9 @@ from app.plugin_api import router as plugin_router
 from auth.dang_ky import router as register_router
 from auth.dang_nhap import router as login_router
 from function.cn_hs_suckhoe import router as health_router
-from function.cn_tra_thuoc import router as medicine_router  # <-- [THÊM DÒNG NÀY] Import API Trả Thuốc
+from function.cn_tra_thuoc import router as medicine_router
+from function.cn_thongtin_nguoidung import router as user_info_router  # <-- [THÊM DÒNG NÀY] Import API Thông Tin Người Dùng
+  # <-- [THÊM DÒNG NÀY] Import API Trả Thuốc
   # <-- [THÊM DÒNG NÀY] Import API Chỉ Số Sức Khỏe
 
 app = FastAPI(title="LuanVanKTPM - Disease Risk Engine")
@@ -162,6 +167,7 @@ app.include_router(register_router)
 app.include_router(login_router)
 app.include_router(health_router)  # <-- [THÊM DÒNG NÀY] Khai báo để FastAPI nhận diện router mới
 app.include_router(medicine_router)  # <-- [THÊM DÒNG NÀY] Khai báo để FastAPI nhận diện router mới
+app.include_router(user_info_router)  # <-- [THÊM DÒNG NÀY] Khai báo để FastAPI nhận diện router mới
 
 @app.get("/")
 def root():
@@ -2860,6 +2866,195 @@ def upsert_health_profile(profile_data: HealthProfileSchema, db: Session = Depen
         raise HTTPException(status_code=500, detail=f"Lỗi lưu hồ sơ: {str(e)}")
 ```
 
+### backend\function\cn_thongtin_nguoidung.py
+```py
+# backend/function/cn_thongtin_nguoidung.py
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel, EmailStr
+from sqlalchemy.orm import Session
+from passlib.context import CryptContext
+from typing import Optional
+
+from database.database import SessionLocal
+from database.nguoi_dung import NguoiDung
+from database.thongtin_nd import ThongTinNguoiDung
+
+router = APIRouter(prefix="/user-info", tags=["User Info"])
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Pydantic Schemas
+# ---------------------------------------------------------------------------
+
+class UserInfoResponse(BaseModel):
+    # From nguoiDung
+    tenDangNhap: str
+    email: str
+    hoTen: Optional[str] = None
+
+    # From thongTinNguoiDung
+    soDienThoai: Optional[str] = None
+    diaChi: Optional[str] = None
+    tinhThanh: Optional[str] = None
+    quanHuyen: Optional[str] = None
+    ngheNghiep: Optional[str] = None
+    anhDaiDien: Optional[str] = None
+
+
+class UpdateProfileSchema(BaseModel):
+    """Fields that can be freely updated (no password, no username)."""
+    hoTen: Optional[str] = None
+    email: Optional[EmailStr] = None
+    soDienThoai: Optional[str] = None
+    diaChi: Optional[str] = None
+    tinhThanh: Optional[str] = None
+    quanHuyen: Optional[str] = None
+    ngheNghiep: Optional[str] = None
+    anhDaiDien: Optional[str] = None
+
+
+class ChangePasswordSchema(BaseModel):
+    currentPassword: str
+    newPassword: str
+
+
+# ---------------------------------------------------------------------------
+# GET  /user-info/{ten_dang_nhap}
+# Returns merged data from nguoiDung + thongTinNguoiDung
+# ---------------------------------------------------------------------------
+
+@router.get("/{ten_dang_nhap}", response_model=UserInfoResponse)
+def get_user_info(ten_dang_nhap: str, db: Session = Depends(get_db)):
+    user = db.query(NguoiDung).filter(
+        NguoiDung.tenDangNhap == ten_dang_nhap
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="Khong tim thay nguoi dung")
+
+    extra = db.query(ThongTinNguoiDung).filter(
+        ThongTinNguoiDung.idNguoiDung == user.idNguoiDung
+    ).first()
+
+    return UserInfoResponse(
+        tenDangNhap=user.tenDangNhap,
+        email=user.email,
+        hoTen=user.hoTen,
+        soDienThoai=extra.soDienThoai if extra else None,
+        diaChi=extra.diaChi if extra else None,
+        tinhThanh=extra.tinhThanh if extra else None,
+        quanHuyen=extra.quanHuyen if extra else None,
+        ngheNghiep=extra.ngheNghiep if extra else None,
+        anhDaiDien=extra.anhDaiDien if extra else None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# PUT  /user-info/{ten_dang_nhap}
+# Upserts nguoiDung (hoTen, email) and thongTinNguoiDung (all extra fields)
+# ---------------------------------------------------------------------------
+
+@router.put("/{ten_dang_nhap}")
+def update_user_info(
+    ten_dang_nhap: str,
+    payload: UpdateProfileSchema,
+    db: Session = Depends(get_db),
+):
+    user = db.query(NguoiDung).filter(
+        NguoiDung.tenDangNhap == ten_dang_nhap
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="Khong tim thay nguoi dung")
+
+    update_data = payload.dict(exclude_unset=True)
+
+    # ── 1. Fields that belong to nguoiDung ──────────────────────────────────
+    nguoi_dung_fields = {"hoTen", "email"}
+
+    for field in nguoi_dung_fields:
+        if field in update_data:
+            value = update_data.pop(field)
+
+            # Check email uniqueness before writing
+            if field == "email" and value != user.email:
+                conflict = db.query(NguoiDung).filter(
+                    NguoiDung.email == value,
+                    NguoiDung.idNguoiDung != user.idNguoiDung,
+                ).first()
+                if conflict:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Email da duoc su dung boi tai khoan khac",
+                    )
+
+            setattr(user, field, value)
+
+    # ── 2. Remaining fields → thongTinNguoiDung (upsert) ────────────────────
+    if update_data:
+        extra = db.query(ThongTinNguoiDung).filter(
+            ThongTinNguoiDung.idNguoiDung == user.idNguoiDung
+        ).first()
+
+        if extra:
+            for k, v in update_data.items():
+                setattr(extra, k, v)
+        else:
+            db.add(ThongTinNguoiDung(idNguoiDung=user.idNguoiDung, **update_data))
+
+    try:
+        db.commit()
+        return {"message": "Cap nhat thong tin thanh cong", "status": "success"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Loi luu du lieu: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# POST /user-info/{ten_dang_nhap}/change-password
+# Verifies current password then sets new hash
+# ---------------------------------------------------------------------------
+
+@router.post("/{ten_dang_nhap}/change-password")
+def change_password(
+    ten_dang_nhap: str,
+    payload: ChangePasswordSchema,
+    db: Session = Depends(get_db),
+):
+    user = db.query(NguoiDung).filter(
+        NguoiDung.tenDangNhap == ten_dang_nhap
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="Khong tim thay nguoi dung")
+
+    if not pwd_context.verify(payload.currentPassword, user.matKhauHash):
+        raise HTTPException(status_code=400, detail="Mat khau hien tai khong chinh xac")
+
+    safe_new = payload.newPassword
+    if len(safe_new.encode("utf-8")) > 72:
+        safe_new = safe_new[:72]
+
+    user.matKhauHash = pwd_context.hash(safe_new)
+
+    try:
+        db.commit()
+        return {"message": "Doi mat khau thanh cong", "status": "success"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Loi luu mat khau: {str(e)}")
+```
+
 ### backend\function\cn_tra_thuoc.py
 ```py
 # backend/function/cn_tra_thuoc.py
@@ -4084,6 +4279,8 @@ import ChiSoSucKhoe from "./hs-suckhoe";
 import TrangChu from "./trang-chu";
 import GioiThieu from "./gioi-thieu";
 import TraThuoc from "./tra-thuoc";
+import ThongTinND from "./thongtin-nd.jsx";
+
 
 import Header from "./components/header.jsx";
 import Footer from "./components/footer.jsx"; // <-- ĐÃ THÊM IMPORT FOOTER
@@ -4136,6 +4333,8 @@ export default function App() {
         return <PhanTichBenh />;
       case "profile":
         return <ChiSoSucKhoe />;
+      case "thong-tin-nd":
+        return <ThongTinND />;
       case "trang-chu":
         return (
           <TrangChu
@@ -4147,12 +4346,12 @@ export default function App() {
         );
       case "gioi-thieu":
         return <GioiThieu setCurrentView={setCurrentView} />;
+      case "tra-thuoc":
+        return <TraThuoc />;
       // 2. Các đường dẫn từ Header đang chờ phát triển (Placeholder)
       case "tu-van-ai":
       case "y-te":
       case "thuc-don":
-      case "tra-thuoc":
-      case "quan-ly-thong-tin":
       case "history":
       case "cai-dat":
       case "thong-bao":
@@ -4799,7 +4998,7 @@ export default function GioiThieu({ setCurrentView }) {
                 <div className="team-member">
                   <div className="member-avatar">
                     <img
-                      src="https://drive.google.com/thumbnail?id=146qa8yRMF_cE44wmgafREtJA9KYYsvip&sz=w1000"
+                      src="https://drive.google.com/thumbnail?id=10D0bqovpPyguHq2gMIdQQSF124c7VCGM&sz=w1000"
                       alt="Tr. Ng Khánh Quốc"
                       className="member-image"
                     />
@@ -5952,6 +6151,545 @@ export default function MainRiskPage() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+```
+
+### frontend\web\src\thongtin-nd.jsx
+```jsx
+// frontend/src/thongtin-nd.jsx
+import { useState, useEffect } from "react";
+import axios from "axios";
+import "../src/css/thongtin-nd.css";
+
+const API_BASE_URL = "http://127.0.0.1:8000";
+
+// ---------------------------------------------------------------------------
+// Password strength helper
+// ---------------------------------------------------------------------------
+function getPasswordStrength(password) {
+  if (!password) return { score: 0, label: "", color: "#E2E8F0" };
+  let score = 0;
+  if (password.length >= 8) score++;
+  if (password.length >= 12) score++;
+  if (/[A-Z]/.test(password)) score++;
+  if (/[0-9]/.test(password)) score++;
+  if (/[^A-Za-z0-9]/.test(password)) score++;
+
+  const levels = [
+    { label: "", color: "#E2E8F0" },
+    { label: "Yeu", color: "#EF4444" },
+    { label: "Trung binh", color: "#F59E0B" },
+    { label: "Kha", color: "#3B82F6" },
+    { label: "Manh", color: "#10B981" },
+    { label: "Rat manh", color: "#059669" },
+  ];
+  return { score, ...levels[Math.min(score, 5)] };
+}
+
+// ---------------------------------------------------------------------------
+// Sub-component: Profile tab
+// ---------------------------------------------------------------------------
+function ProfileTab({ tenDangNhap, onSaveSuccess }) {
+  const [formData, setFormData] = useState({
+    hoTen: "",
+    email: "",
+    soDienThoai: "",
+    ngheNghiep: "",
+    diaChi: "",
+    tinhThanh: "",
+    quanHuyen: "",
+    anhDaiDien: "",
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    if (!tenDangNhap) return;
+    setLoading(true);
+    axios
+      .get(`${API_BASE_URL}/user-info/${tenDangNhap}`)
+      .then((res) => {
+        const d = res.data;
+        setFormData({
+          hoTen: d.hoTen || "",
+          email: d.email || "",
+          soDienThoai: d.soDienThoai || "",
+          ngheNghiep: d.ngheNghiep || "",
+          diaChi: d.diaChi || "",
+          tinhThanh: d.tinhThanh || "",
+          quanHuyen: d.quanHuyen || "",
+          anhDaiDien: d.anhDaiDien || "",
+        });
+      })
+      .catch(() => showToast("error", "Khong tai duoc thong tin tai khoan"))
+      .finally(() => setLoading(false));
+  }, [tenDangNhap]);
+
+  function showToast(type, message) {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 3500);
+  }
+
+  function handleChange(e) {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!tenDangNhap) return;
+    setSaving(true);
+    try {
+      // Only send non-empty fields to avoid clearing existing data
+      const payload = Object.fromEntries(
+        Object.entries(formData).filter(([, v]) => v !== "")
+      );
+      await axios.put(`${API_BASE_URL}/user-info/${tenDangNhap}`, payload);
+      showToast("success", "Cap nhat thong tin thanh cong!");
+      if (onSaveSuccess) onSaveSuccess(formData.hoTen);
+    } catch (err) {
+      const detail = err.response?.data?.detail || "Loi cap nhat thong tin";
+      showToast("error", detail);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleReset() {
+    // Re-fetch to discard edits
+    if (!tenDangNhap) return;
+    setLoading(true);
+    axios
+      .get(`${API_BASE_URL}/user-info/${tenDangNhap}`)
+      .then((res) => {
+        const d = res.data;
+        setFormData({
+          hoTen: d.hoTen || "",
+          email: d.email || "",
+          soDienThoai: d.soDienThoai || "",
+          ngheNghiep: d.ngheNghiep || "",
+          diaChi: d.diaChi || "",
+          tinhThanh: d.tinhThanh || "",
+          quanHuyen: d.quanHuyen || "",
+          anhDaiDien: d.anhDaiDien || "",
+        });
+      })
+      .finally(() => setLoading(false));
+  }
+
+  if (loading) {
+    return (
+      <div className="tn-card">
+        {[...Array(4)].map((_, i) => (
+          <div
+            key={i}
+            className="tn-skeleton"
+            style={{ height: 42, marginBottom: 16 }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  const initials = formData.hoTen
+    ? formData.hoTen.trim().split(" ").slice(-1)[0].slice(0, 2).toUpperCase()
+    : tenDangNhap?.slice(0, 2).toUpperCase();
+
+  return (
+    <>
+      {/* Avatar block */}
+      <div className="tn-avatar-block">
+        {formData.anhDaiDien ? (
+          <img
+            src={formData.anhDaiDien}
+            alt="avatar"
+            className="tn-avatar-img"
+            onError={(e) => (e.currentTarget.style.display = "none")}
+          />
+        ) : (
+          <div className="tn-avatar-circle">{initials}</div>
+        )}
+        <div className="tn-avatar-meta">
+          <p className="tn-avatar-name">
+            {formData.hoTen || tenDangNhap}
+          </p>
+          <p className="tn-avatar-username">@{tenDangNhap}</p>
+        </div>
+      </div>
+
+      {toast && (
+        <div className={`tn-toast tn-toast--${toast.type}`}>
+          {toast.type === "success" ? "Luu thanh cong!" : "Loi: "}
+          {toast.message}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit}>
+        {/* Account info */}
+        <div className="tn-card">
+          <p className="tn-card-title">Thong tin tai khoan</p>
+          <div className="tn-grid">
+            <div className="tn-field">
+              <label className="tn-label">Ten dang nhap</label>
+              <input
+                className="tn-input tn-input--readonly"
+                value={tenDangNhap}
+                readOnly
+              />
+            </div>
+            <div className="tn-field">
+              <label className="tn-label">Ho va ten</label>
+              <input
+                className="tn-input"
+                name="hoTen"
+                value={formData.hoTen}
+                onChange={handleChange}
+                placeholder="Nguyen Van A"
+              />
+            </div>
+            <div className="tn-field tn-field--full">
+              <label className="tn-label">Dia chi email</label>
+              <input
+                className="tn-input"
+                type="email"
+                name="email"
+                value={formData.email}
+                onChange={handleChange}
+                placeholder="example@email.com"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Contact info */}
+        <div className="tn-card">
+          <p className="tn-card-title">Thong tin lien he</p>
+          <div className="tn-grid">
+            <div className="tn-field">
+              <label className="tn-label">So dien thoai</label>
+              <input
+                className="tn-input"
+                name="soDienThoai"
+                value={formData.soDienThoai}
+                onChange={handleChange}
+                placeholder="0900 000 000"
+              />
+            </div>
+            <div className="tn-field">
+              <label className="tn-label">Nghe nghiep</label>
+              <input
+                className="tn-input"
+                name="ngheNghiep"
+                value={formData.ngheNghiep}
+                onChange={handleChange}
+                placeholder="Sinh vien, Nhan vien van phong, ..."
+              />
+            </div>
+            <div className="tn-field">
+              <label className="tn-label">Tinh / Thanh pho</label>
+              <input
+                className="tn-input"
+                name="tinhThanh"
+                value={formData.tinhThanh}
+                onChange={handleChange}
+                placeholder="Can Tho"
+              />
+            </div>
+            <div className="tn-field">
+              <label className="tn-label">Quan / Huyen</label>
+              <input
+                className="tn-input"
+                name="quanHuyen"
+                value={formData.quanHuyen}
+                onChange={handleChange}
+                placeholder="Ninh Kieu"
+              />
+            </div>
+            <div className="tn-field tn-field--full">
+              <label className="tn-label">Dia chi cu the</label>
+              <input
+                className="tn-input"
+                name="diaChi"
+                value={formData.diaChi}
+                onChange={handleChange}
+                placeholder="So nha, duong, phuong / xa"
+              />
+            </div>
+            <div className="tn-field tn-field--full">
+              <label className="tn-label">URL anh dai dien</label>
+              <input
+                className="tn-input"
+                name="anhDaiDien"
+                value={formData.anhDaiDien}
+                onChange={handleChange}
+                placeholder="https://example.com/avatar.jpg"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="tn-actions">
+          <button
+            type="button"
+            className="tn-btn tn-btn--ghost"
+            onClick={handleReset}
+            disabled={saving}
+          >
+            Huy thay doi
+          </button>
+          <button
+            type="submit"
+            className="tn-btn tn-btn--primary"
+            disabled={saving}
+          >
+            {saving ? "Dang luu..." : "Luu thong tin"}
+          </button>
+        </div>
+      </form>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-component: Password tab
+// ---------------------------------------------------------------------------
+function PasswordTab({ tenDangNhap }) {
+  const [formData, setFormData] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(null);
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+
+  const strength = getPasswordStrength(formData.newPassword);
+
+  function showToast(type, message) {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 3500);
+  }
+
+  function handleChange(e) {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!formData.currentPassword || !formData.newPassword) {
+      return showToast("error", "Vui long dien day du thong tin");
+    }
+    if (formData.newPassword !== formData.confirmPassword) {
+      return showToast("error", "Mat khau xac nhan khong khop");
+    }
+    if (formData.newPassword.length < 6) {
+      return showToast("error", "Mat khau moi phai co it nhat 6 ky tu");
+    }
+    setSaving(true);
+    try {
+      await axios.post(
+        `${API_BASE_URL}/user-info/${tenDangNhap}/change-password`,
+        {
+          currentPassword: formData.currentPassword,
+          newPassword: formData.newPassword,
+        }
+      );
+      showToast("success", "Doi mat khau thanh cong!");
+      setFormData({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    } catch (err) {
+      const detail = err.response?.data?.detail || "Loi doi mat khau";
+      showToast("error", detail);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      {toast && (
+        <div className={`tn-toast tn-toast--${toast.type}`}>
+          {toast.message}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit}>
+        <div className="tn-card">
+          <p className="tn-card-title">Doi mat khau</p>
+          <div className="tn-grid tn-grid--full">
+            <div className="tn-field">
+              <label className="tn-label">Mat khau hien tai</label>
+              <div style={{ position: "relative" }}>
+                <input
+                  className="tn-input"
+                  type={showCurrent ? "text" : "password"}
+                  name="currentPassword"
+                  value={formData.currentPassword}
+                  onChange={handleChange}
+                  placeholder="Nhap mat khau hien tai"
+                  style={{ paddingRight: 44 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCurrent((p) => !p)}
+                  style={{
+                    position: "absolute",
+                    right: 12,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#94A3B8",
+                    fontSize: 16,
+                    padding: 0,
+                  }}
+                >
+                  {showCurrent ? "Hide" : "Show"}
+                </button>
+              </div>
+            </div>
+
+            <div className="tn-field">
+              <label className="tn-label">Mat khau moi</label>
+              <div style={{ position: "relative" }}>
+                <input
+                  className="tn-input"
+                  type={showNew ? "text" : "password"}
+                  name="newPassword"
+                  value={formData.newPassword}
+                  onChange={handleChange}
+                  placeholder="It nhat 6 ky tu"
+                  style={{ paddingRight: 44 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNew((p) => !p)}
+                  style={{
+                    position: "absolute",
+                    right: 12,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#94A3B8",
+                    fontSize: 16,
+                    padding: 0,
+                  }}
+                >
+                  {showNew ? "Hide" : "Show"}
+                </button>
+              </div>
+
+              {formData.newPassword && (
+                <>
+                  <div className="tn-strength-bar">
+                    <div
+                      className="tn-strength-fill"
+                      style={{
+                        width: `${(strength.score / 5) * 100}%`,
+                        backgroundColor: strength.color,
+                      }}
+                    />
+                  </div>
+                  {strength.label && (
+                    <span
+                      className="tn-strength-label"
+                      style={{ color: strength.color }}
+                    >
+                      {strength.label}
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="tn-field">
+              <label className="tn-label">Xac nhan mat khau moi</label>
+              <input
+                className="tn-input"
+                type="password"
+                name="confirmPassword"
+                value={formData.confirmPassword}
+                onChange={handleChange}
+                placeholder="Nhap lai mat khau moi"
+                style={{
+                  borderColor:
+                    formData.confirmPassword &&
+                    formData.confirmPassword !== formData.newPassword
+                      ? "#EF4444"
+                      : undefined,
+                }}
+              />
+              {formData.confirmPassword &&
+                formData.confirmPassword !== formData.newPassword && (
+                  <span style={{ fontSize: 12, color: "#EF4444", marginTop: 2 }}>
+                    Mat khau xac nhan chua khop
+                  </span>
+                )}
+            </div>
+          </div>
+        </div>
+
+        <div className="tn-actions">
+          <button
+            type="submit"
+            className="tn-btn tn-btn--primary"
+            disabled={saving}
+          >
+            {saving ? "Dang cap nhat..." : "Cap nhat mat khau"}
+          </button>
+        </div>
+      </form>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Root component
+// ---------------------------------------------------------------------------
+export default function ThongTinNguoiDung({ onProfileUpdate }) {
+  const [activeTab, setActiveTab] = useState("profile");
+
+  const tenDangNhap = localStorage.getItem("userName");
+
+  const tabs = [
+    { key: "profile", label: "Thong tin ca nhan" },
+    { key: "password", label: "Doi mat khau" },
+  ];
+
+  return (
+    <div className="tn-page">
+      {/* Tab bar */}
+      <div className="tn-tabs">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            className={`tn-tab${activeTab === tab.key ? " active" : ""}`}
+            onClick={() => setActiveTab(tab.key)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "profile" && (
+        <ProfileTab
+          tenDangNhap={tenDangNhap}
+          onSaveSuccess={(hoTen) => {
+            if (onProfileUpdate) onProfileUpdate(hoTen);
+          }}
+        />
+      )}
+
+      {activeTab === "password" && (
+        <PasswordTab tenDangNhap={tenDangNhap} />
+      )}
     </div>
   );
 }
@@ -7229,10 +7967,9 @@ export default function Header({ currentView, setCurrentView, userName, onLogout
   ];
 
   const menuItems = [
-    { icon: "👤", label: "Quản Lý Thông Tin", key: "quan-ly-thong-tin" },
+    { icon: "👤", label: "Quản Lý Thông Tin", key: "thong-tin-nd" },
     { icon: "🫀", label: "Hồ Sơ Sức Khỏe", key: "profile" },
     { icon: "📈", label: "Lịch Sử Đánh Giá", key: "history" },
-    { icon: "🧠", label: "Phân Tích Bệnh AI", key: "risk" },
     { icon: "⚙️", label: "Cài Đặt Tài Khoản", key: "cai-dat" },
     { icon: "🔔", label: "Thông Báo", key: "thong-bao" },
   ];
@@ -7310,7 +8047,7 @@ export default function Header({ currentView, setCurrentView, userName, onLogout
 
               <button className="dropdown-logout" onClick={onLogout}>
                 <span>🚪</span>
-                <span>Dang Xuat</span>
+                <span>Đăng Xuất</span>
               </button>
             </div>
           )}

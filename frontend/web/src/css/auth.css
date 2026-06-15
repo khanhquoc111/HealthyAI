@@ -1,0 +1,485 @@
+/* =================================================================
+   auth.css  |  Healthy AI – Login & Register Pages
+   Design tokens khớp với phan-tich-benh.css / trang-chu.css
+================================================================= */
+
+/* ----------------------------------------------------------------
+   CSS Variable fallbacks
+---------------------------------------------------------------- */
+:root {
+  --primary:      #2563eb;
+  --secondary:    #0f172a;
+  --accent:       #38bdf8;
+  --text-muted:   #64748b;
+  --text-light:   #94a3b8;
+  --border:       #e2e8f0;
+  --border-light: #f1f5f9;
+  --bg-subtle:    #eff6ff;
+  --bg:           #f8fafc;
+  --radius-sm:    8px;
+  --radius-md:    12px;
+  --radius-lg:    18px;
+  --shadow-sm:    0 1px 3px rgba(0, 0, 0, 0.07);
+  --shadow-md:    0 4px 16px rgba(0, 0, 0, 0.09);
+  --shadow-lg:    0 12px 40px rgba(15, 23, 42, 0.12);
+  --transition:   0.18s ease;
+  --font-display: "Segoe UI", system-ui, sans-serif;
+  --navy:         #0f172a;
+  --risk-high:    #ef4444;
+}
+
+/* ----------------------------------------------------------------
+   Page wrapper – full screen centered layout
+---------------------------------------------------------------- */
+.auth-page {
+  width: 100%;
+  min-height: 100vh;
+  background: var(--bg);
+  font-family: var(--font-display);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  box-sizing: border-box;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ----------------------------------------------------------------
+   Background mesh blobs (giống ptb-header)
+---------------------------------------------------------------- */
+.auth-bg-mesh {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.auth-mesh-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.3;
+}
+
+.auth-mesh-blob--1 {
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, #5cc8ff 0%, transparent 70%);
+  top: -200px;
+  right: -100px;
+}
+
+.auth-mesh-blob--2 {
+  width: 350px;
+  height: 350px;
+  background: radial-gradient(circle, #7c3aed 0%, transparent 70%);
+  bottom: -120px;
+  left: 5%;
+  opacity: 0.12;
+}
+
+.auth-mesh-blob--3 {
+  width: 280px;
+  height: 280px;
+  background: radial-gradient(circle, #38bdf8 0%, transparent 70%);
+  top: 40%;
+  left: -80px;
+  opacity: 0.18;
+}
+
+/* ----------------------------------------------------------------
+   Brand header (logo + tagline trên card)
+---------------------------------------------------------------- */
+.auth-brand {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 28px;
+}
+
+.auth-brand-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.auth-brand-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+}
+
+.auth-brand-name {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--navy);
+  letter-spacing: -0.03em;
+}
+
+.auth-brand-name span {
+  color: var(--primary);
+}
+
+.auth-brand-tagline {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* ----------------------------------------------------------------
+   Card container
+---------------------------------------------------------------- */
+.auth-card {
+  position: relative;
+  z-index: 1;
+  background: #fff;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  width: 100%;
+  max-width: 440px;
+  overflow: hidden;
+}
+
+/* Card header strip */
+.auth-card-header {
+  background: linear-gradient(135deg, #fafcff 0%, #f0f9ff 100%);
+  border-bottom: 1px solid var(--border-light);
+  padding: 24px 32px 20px;
+  text-align: center;
+}
+
+.auth-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: var(--bg-subtle);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 20px;
+  padding: 4px 14px;
+  margin-bottom: 12px;
+}
+
+.auth-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  flex-shrink: 0;
+  animation: auth-pulse 2.2s ease infinite;
+}
+
+@keyframes auth-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.75); }
+}
+
+.auth-card-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--navy);
+  letter-spacing: -0.02em;
+  margin: 0 0 6px 0;
+  line-height: 1.2;
+}
+
+.auth-card-title em {
+  font-style: italic;
+  color: var(--primary);
+}
+
+.auth-card-desc {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* ----------------------------------------------------------------
+   Card body – form
+---------------------------------------------------------------- */
+.auth-card-body {
+  padding: 28px 32px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* ----------------------------------------------------------------
+   Error banner
+---------------------------------------------------------------- */
+.auth-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fef2f2;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  color: #dc2626;
+  font-weight: 500;
+  animation: auth-slide-in 0.22s ease;
+}
+
+.auth-error-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+@keyframes auth-slide-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ----------------------------------------------------------------
+   Field
+---------------------------------------------------------------- */
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auth-fields-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.auth-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #475569;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.auth-label-required {
+  color: var(--risk-high);
+}
+
+.auth-label-optional {
+  color: var(--text-light);
+  font-weight: 400;
+  font-size: 0.75rem;
+}
+
+/* Input wrapper (for icon prefix) */
+.auth-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.auth-input-icon {
+  position: absolute;
+  left: 12px;
+  font-size: 0.95rem;
+  color: var(--text-light);
+  pointer-events: none;
+  line-height: 1;
+}
+
+.auth-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #fff;
+  color: #1e293b;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px 10px 38px;
+  font-size: 0.9rem;
+  font-family: var(--font-display);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.auth-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.auth-input::placeholder {
+  color: var(--text-light);
+}
+
+/* Password toggle */
+.auth-input-wrap .auth-pw-toggle {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  color: var(--text-light);
+  padding: 4px;
+  line-height: 1;
+  transition: color var(--transition);
+}
+
+.auth-input-wrap .auth-pw-toggle:hover {
+  color: var(--text-muted);
+}
+
+/* ----------------------------------------------------------------
+   Submit button
+---------------------------------------------------------------- */
+.auth-submit-btn {
+  width: 100%;
+  height: 50px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-family: var(--font-display);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.28);
+  transition: all var(--transition);
+  letter-spacing: 0.01em;
+  margin-top: 4px;
+}
+
+.auth-submit-btn:hover:not(:disabled) {
+  background: #1d4ed8;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.35);
+}
+
+.auth-submit-btn:disabled {
+  background: var(--text-light);
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Spinner inside button */
+.auth-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: auth-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes auth-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ----------------------------------------------------------------
+   Divider
+---------------------------------------------------------------- */
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-light);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ----------------------------------------------------------------
+   Switch link (đăng nhập / đăng ký)
+---------------------------------------------------------------- */
+.auth-switch {
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.auth-switch-btn {
+  background: none;
+  border: none;
+  color: var(--primary);
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0;
+  font-size: inherit;
+  font-family: var(--font-display);
+  transition: color var(--transition);
+}
+
+.auth-switch-btn:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+/* ----------------------------------------------------------------
+   Footer note
+---------------------------------------------------------------- */
+.auth-footer-note {
+  position: relative;
+  z-index: 1;
+  margin-top: 20px;
+  font-size: 0.75rem;
+  color: var(--text-light);
+  text-align: center;
+}
+
+/* ----------------------------------------------------------------
+   Responsive – Mobile (≤ 480px)
+---------------------------------------------------------------- */
+@media (max-width: 480px) {
+  .auth-page {
+    padding: 24px 16px;
+    justify-content: flex-start;
+    padding-top: 48px;
+  }
+
+  .auth-card {
+    border-radius: var(--radius-md);
+  }
+
+  .auth-card-header {
+    padding: 20px 24px 16px;
+  }
+
+  .auth-card-body {
+    padding: 22px 24px 28px;
+    gap: 14px;
+  }
+
+  .auth-fields-row {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .auth-brand {
+    margin-bottom: 20px;
+  }
+}

@@ -7,6 +7,8 @@ import ChiSoSucKhoe from "./hs-suckhoe";
 import TrangChu from "./trang-chu";
 import GioiThieu from "./gioi-thieu";
 import TraThuoc from "./tra-thuoc";
+import ThongTinND from "./thongtin-nd.jsx";
+
 
 import Header from "./components/header.jsx";
 import Footer from "./components/footer.jsx"; // <-- ĐÃ THÊM IMPORT FOOTER
@@ -59,6 +61,8 @@ export default function App() {
         return <PhanTichBenh />;
       case "profile":
         return <ChiSoSucKhoe />;
+      case "thong-tin-nd":
+        return <ThongTinND />;
       case "trang-chu":
         return (
           <TrangChu
@@ -76,7 +80,6 @@ export default function App() {
       case "tu-van-ai":
       case "y-te":
       case "thuc-don":
-      case "quan-ly-thong-tin":
       case "history":
       case "cai-dat":
       case "thong-bao":

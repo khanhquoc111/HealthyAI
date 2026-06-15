@@ -294,7 +294,7 @@ export default function GioiThieu({ setCurrentView }) {
                 <div className="team-member">
                   <div className="member-avatar">
                     <img
-                      src="https://drive.google.com/thumbnail?id=146qa8yRMF_cE44wmgafREtJA9KYYsvip&sz=w1000"
+                      src="https://drive.google.com/thumbnail?id=10D0bqovpPyguHq2gMIdQQSF124c7VCGM&sz=w1000"
                       alt="Tr. Ng Khánh Quốc"
                       className="member-image"
                     />

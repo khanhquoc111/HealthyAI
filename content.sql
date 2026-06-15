@@ -1,4 +1,4 @@
-DROP DATABASE IF EXISTS HealthyAI;
+-- DROP DATABASE IF EXISTS HealthyAI;
 CREATE DATABASE HealthyAI;
 USE HealthyAI;
 
@@ -11,6 +11,33 @@ CREATE TABLE nguoiDung (
     hoTen VARCHAR(255),
     ngayTao DATETIME DEFAULT CURRENT_TIMESTAMP,
     ngayCapNhat DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE thongTinNguoiDung (
+    idThongTin BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    idNguoiDung BIGINT NOT NULL UNIQUE,
+
+    soDienThoai VARCHAR(20),
+
+    diaChi TEXT,
+
+    tinhThanh VARCHAR(100),
+
+    quanHuyen VARCHAR(100),
+
+    ngheNghiep VARCHAR(255),
+
+    anhDaiDien TEXT,
+
+    ngayTao DATETIME DEFAULT CURRENT_TIMESTAMP,
+    ngayCapNhat DATETIME DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_thongTinNguoiDung_nguoiDung
+        FOREIGN KEY (idNguoiDung)
+        REFERENCES nguoiDung(idNguoiDung)
+        ON DELETE CASCADE
 );
 
 -- 2. Bảng Hồ Sơ Sức Khỏe (anMan đã được đặt đúng vị trí)
