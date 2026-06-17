@@ -85,10 +85,16 @@ HealthyAI/
 │   │   ├── .expo/
 │   │   ├── .vscode/
 │   │   ├── app/
+│   │   │   ├── (auth)/
+│   │   │   │   ├── dang-ky.tsx
+│   │   │   │   └── dang-nhap.tsx
 │   │   │   ├── (tabs)/
 │   │   │   │   ├── _layout.tsx
-│   │   │   │   ├── explore.tsx
-│   │   │   │   └── index.tsx
+│   │   │   │   ├── ho-so-suc-khoe.tsx
+│   │   │   │   ├── index.tsx
+│   │   │   │   ├── phan-tich-benh.tsx
+│   │   │   │   └── tra-thuoc.tsx
+│   │   │   ├── screens/
 │   │   │   ├── _layout.tsx
 │   │   │   └── modal.tsx
 │   │   ├── assets/
@@ -115,6 +121,7 @@ HealthyAI/
 │   │   │   ├── themed-text.tsx
 │   │   │   └── themed-view.tsx
 │   │   ├── constants/
+│   │   │   ├── appTheme.ts
 │   │   │   └── theme.ts
 │   │   ├── hooks/
 │   │   │   ├── use-color-scheme.ts
@@ -123,6 +130,20 @@ HealthyAI/
 │   │   ├── node_modules/
 │   │   ├── scripts/
 │   │   │   └── reset-project.js
+│   │   ├── src/
+│   │   │   ├── api/
+│   │   │   │   ├── authApi.ts
+│   │   │   │   ├── config.ts
+│   │   │   │   └── healthApi.ts
+│   │   │   ├── context/
+│   │   │   │   └── AuthContext.tsx
+│   │   │   └── screens/
+│   │   │       ├── DangKyScreen.tsx
+│   │   │       ├── DangNhapScreen.tsx
+│   │   │       ├── HoSoSucKhoeScreen.tsx
+│   │   │       ├── PhanTichBenhScreen.tsx
+│   │   │       ├── TraThuocScreen.tsx
+│   │   │       └── TrangChuScreen.tsx
 │   │   ├── .gitignore
 │   │   ├── AGENTS.md
 │   │   ├── CLAUDE.md
@@ -4157,148 +4178,57 @@ const styles = StyleSheet.create({
 
 ### frontend\mobile\app\_layout.tsx
 ```tsx
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { ThemeProvider, DefaultTheme } from '@react-navigation/native';
+import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
+import { useEffect } from 'react';
+import { AuthProvider, useAuth } from '@/src/context/AuthContext';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
+function RootLayoutNav() {
+  const { user, loading } = useAuth();
 
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
+  useEffect(() => {
+    if (loading) return;
+    if (!user) router.replace('/(auth)/dang-nhap');
+    else        router.replace('/(tabs)');
+  }, [user, loading]);
+
+  return (
+    <Stack>
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+    </Stack>
+  );
+}
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    <AuthProvider>
+      <ThemeProvider value={DefaultTheme}>
+        <RootLayoutNav />
+        <StatusBar style="auto" />
+      </ThemeProvider>
+    </AuthProvider>
   );
 }
-
 ```
 
-### frontend\mobile\app\(tabs)\explore.tsx
+### frontend\mobile\app\(auth)\dang-ky.tsx
 ```tsx
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import DangKyScreen from '@/src/screens/DangKyScreen';
+export default DangKyScreen;
+```
 
-import { Collapsible } from '@/components/ui/collapsible';
-import { ExternalLink } from '@/components/external-link';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Fonts } from '@/constants/theme';
+### frontend\mobile\app\(auth)\dang-nhap.tsx
+```tsx
+import DangNhapScreen from '@/src/screens/DangNhapScreen';
+export default DangNhapScreen;
+```
 
-export default function TabTwoScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#D0D0D0', dark: '#353636' }}
-      headerImage={
-        <IconSymbol
-          size={310}
-          color="#808080"
-          name="chevron.left.forwardslash.chevron.right"
-          style={styles.headerImage}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText
-          type="title"
-          style={{
-            fontFamily: Fonts.rounded,
-          }}>
-          Explore
-        </ThemedText>
-      </ThemedView>
-      <ThemedText>This app includes example code to help you get started.</ThemedText>
-      <Collapsible title="File-based routing">
-        <ThemedText>
-          This app has two screens:{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/explore.tsx</ThemedText>
-        </ThemedText>
-        <ThemedText>
-          The layout file in <ThemedText type="defaultSemiBold">app/(tabs)/_layout.tsx</ThemedText>{' '}
-          sets up the tab navigator.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/router/introduction">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Android, iOS, and web support">
-        <ThemedText>
-          You can open this project on Android, iOS, and the web. To open the web version, press{' '}
-          <ThemedText type="defaultSemiBold">w</ThemedText> in the terminal running this project.
-        </ThemedText>
-      </Collapsible>
-      <Collapsible title="Images">
-        <ThemedText>
-          For static images, you can use the <ThemedText type="defaultSemiBold">@2x</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">@3x</ThemedText> suffixes to provide files for
-          different screen densities
-        </ThemedText>
-        <Image
-          source={require('@/assets/images/react-logo.png')}
-          style={{ width: 100, height: 100, alignSelf: 'center' }}
-        />
-        <ExternalLink href="https://reactnative.dev/docs/images">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Light and dark mode components">
-        <ThemedText>
-          This template has light and dark mode support. The{' '}
-          <ThemedText type="defaultSemiBold">useColorScheme()</ThemedText> hook lets you inspect
-          what the user&apos;s current color scheme is, and so you can adjust UI colors accordingly.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/develop/user-interface/color-themes/">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Animations">
-        <ThemedText>
-          This template includes an example of an animated component. The{' '}
-          <ThemedText type="defaultSemiBold">components/HelloWave.tsx</ThemedText> component uses
-          the powerful{' '}
-          <ThemedText type="defaultSemiBold" style={{ fontFamily: Fonts.mono }}>
-            react-native-reanimated
-          </ThemedText>{' '}
-          library to create a waving hand animation.
-        </ThemedText>
-        {Platform.select({
-          ios: (
-            <ThemedText>
-              The <ThemedText type="defaultSemiBold">components/ParallaxScrollView.tsx</ThemedText>{' '}
-              component provides a parallax effect for the header image.
-            </ThemedText>
-          ),
-        })}
-      </Collapsible>
-    </ParallaxScrollView>
-  );
-}
-
-const styles = StyleSheet.create({
-  headerImage: {
-    color: '#808080',
-    bottom: -90,
-    left: -35,
-    position: 'absolute',
-  },
-  titleContainer: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-});
-
+### frontend\mobile\app\(tabs)\ho-so-suc-khoe.tsx
+```tsx
+import HoSoSucKhoeScreen from '@/src/screens/HoSoSucKhoeScreen';
+export default HoSoSucKhoeScreen;
 ```
 
 ### frontend\mobile\app\(tabs)\index.tsx
@@ -4404,44 +4334,41 @@ const styles = StyleSheet.create({
 
 ```
 
+### frontend\mobile\app\(tabs)\phan-tich-benh.tsx
+```tsx
+import PhanTichBenhScreen from '@/src/screens/PhanTichBenhScreen';
+export default PhanTichBenhScreen;
+```
+
+### frontend\mobile\app\(tabs)\tra-thuoc.tsx
+```tsx
+import TraThuocScreen from '@/src/screens/TraThuocScreen';
+export default TraThuocScreen;
+```
+
 ### frontend\mobile\app\(tabs)\_layout.tsx
 ```tsx
 import { Tabs } from 'expo-router';
-import React from 'react';
-
-import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-
   return (
-    <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        headerShown: false,
-        tabBarButton: HapticTab,
-      }}>
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="explore"
-        options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
-        }}
-      />
+    <Tabs screenOptions={{
+      tabBarActiveTintColor: '#2563eb',
+      headerStyle: { backgroundColor: '#2563eb' },
+      headerTintColor: '#fff',
+      headerTitleStyle: { fontWeight: '700' },
+    }}>
+      <Tabs.Screen name="index"
+        options={{ title: 'Trang chủ',  tabBarLabel: '🏠 Trang chủ' }} />
+      <Tabs.Screen name="phan-tich-benh"
+        options={{ title: 'Phân tích',  tabBarLabel: '🩺 Phân tích' }} />
+      <Tabs.Screen name="ho-so-suc-khoe"
+        options={{ title: 'Hồ sơ',      tabBarLabel: '📋 Hồ sơ' }} />
+      <Tabs.Screen name="tra-thuoc"
+        options={{ title: 'Tra thuốc',  tabBarLabel: '💊 Tra thuốc' }} />
     </Tabs>
   );
 }
-
 ```
 
 ### frontend\mobile\components\external-link.tsx
@@ -4822,6 +4749,55 @@ export function IconSymbol({
 
 ```
 
+### frontend\mobile\constants\appTheme.ts
+```ts
+// src/constants/theme.js
+export const COLORS = {
+  primary:    "#2563eb",
+  primaryDark:"#1d4ed8",
+  secondary:  "#0f172a",
+  success:    "#22c55e",
+  warning:    "#f59e0b",
+  danger:     "#ef4444",
+  background: "#f1f5f9",
+  card:       "#ffffff",
+  border:     "#e2e8f0",
+  textMain:   "#0f172a",
+  textSub:    "#64748b",
+  textLight:  "#94a3b8",
+};
+
+export const FONTS = {
+  sm:   13,
+  base: 15,
+  md:   17,
+  lg:   20,
+  xl:   24,
+  xxl:  28,
+};
+
+export const RADIUS = {
+  sm:  6,
+  md:  10,
+  lg:  14,
+  xl:  20,
+};
+
+export const riskColor = (score) => {
+  if (score > 60) return COLORS.danger;
+  if (score > 30) return COLORS.warning;
+  return COLORS.success;
+};
+
+export const riskColorByLevel = (level = "") => {
+  const l = level.toLowerCase();
+  if (l.includes("high") || l.includes("cao")) return COLORS.danger;
+  if (l.includes("medium") || l.includes("trung")) return COLORS.warning;
+  return COLORS.success;
+};
+
+```
+
 ### frontend\mobile\constants\theme.ts
 ```ts
 /**
@@ -5052,6 +5028,1309 @@ rl.question(
     }
   }
 );
+
+```
+
+### frontend\mobile\src\api\authApi.ts
+```ts
+// src/api/authApi.js
+import api from "./config";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+export const login = async (tenDangNhap, password) => {
+  const res = await api.post("/auth/login", { tenDangNhap, password });
+  await AsyncStorage.setItem("token", res.data.access_token);
+  await AsyncStorage.setItem("userName", res.data.tenDangNhap);
+  return res.data;
+};
+
+export const register = async (formData) => {
+  const res = await api.post("/auth/register", formData);
+  return res.data;
+};
+
+export const logout = async () => {
+  await AsyncStorage.removeItem("token");
+  await AsyncStorage.removeItem("userName");
+};
+
+export const getStoredUser = async () => {
+  return await AsyncStorage.getItem("userName");
+};
+
+```
+
+### frontend\mobile\src\api\config.ts
+```ts
+// src/api/config.js
+import axios from "axios";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+// Đổi IP này thành IP máy chạy backend khi test trên thiết bị thật
+// Giữ nguyên 127.0.0.1 nếu test trên emulator Android (dùng 10.0.2.2)
+export const API_BASE_URL = "http://10.0.2.2:8000"; // Android emulator
+// export const API_BASE_URL = "http://localhost:8000"; // iOS simulator
+// export const API_BASE_URL = "http://192.168.x.x:8000"; // Thiết bị thật
+
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 15000,
+  headers: { "Content-Type": "application/json" },
+});
+
+// Tự động đính kèm token vào mọi request
+api.interceptors.request.use(async (config) => {
+  const token = await AsyncStorage.getItem("token");
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+export default api;
+
+```
+
+### frontend\mobile\src\api\healthApi.ts
+```ts
+// src/api/healthApi.js
+import api from "./config";
+
+// ── Hồ sơ sức khỏe ──────────────────────────────────────────────
+export const getHealthProfile = async (tenDangNhap) => {
+  const res = await api.get(`/health-profile/${tenDangNhap}`);
+  return res.data;
+};
+
+export const saveHealthProfile = async (tenDangNhap, formData) => {
+  const numericFields = [
+    "tuoi", "chieuCao", "canNang", "bmi", "vongEo",
+    "huyetApTamThu", "huyetApTamTruong", "duongHuyet", "hba1c",
+    "cholesterol", "ldl", "hdl", "triglyceride", "creatinine",
+    "acidUric", "soPhutVanDongMoiTuan",
+  ];
+  const payload = { tenDangNhap, ...formData };
+  numericFields.forEach((k) => {
+    payload[k] = formData[k] ? Number(formData[k]) : null;
+  });
+  const res = await api.post("/health-profile/", payload);
+  return res.data;
+};
+
+// ── Plugin / Phân tích bệnh ──────────────────────────────────────
+export const getPlugins = async () => {
+  const res = await api.get("/plugins");
+  return res.data;
+};
+
+export const getPluginMetadata = async (pluginId) => {
+  const res = await api.get(`/plugins/${pluginId}`);
+  return res.data;
+};
+
+export const scorePlugin = async (pluginId, tenDangNhap, formData) => {
+  const res = await api.post(
+    `/plugins/${pluginId}/score?ten_dang_nhap=${tenDangNhap}`,
+    formData
+  );
+  return res.data;
+};
+
+export const validateField = async (pluginId, fieldKey, value) => {
+  const res = await api.post(
+    `/plugins/${pluginId}/validate-field/${fieldKey}`,
+    { value }
+  );
+  return res.data;
+};
+
+// ── Tra cứu thuốc ───────────────────────────────────────────────
+export const searchMedicine = async (keyword) => {
+  const res = await api.get(`/medicines/search?q=${encodeURIComponent(keyword)}`);
+  return res.data;
+};
+
+```
+
+### frontend\mobile\src\context\AuthContext.tsx
+```tsx
+// src/hooks/useAuth.js
+import { createContext, useContext, useState, useEffect } from "react";
+import { getStoredUser, logout as apiLogout } from "../api/authApi";
+
+const AuthContext = createContext(null);
+
+export function AuthProvider({ children }) {
+  const [user, setUser] = useState(null);   // tenDangNhap string
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getStoredUser().then((u) => {
+      setUser(u);
+      setLoading(false);
+    });
+  }, []);
+
+  const logout = async () => {
+    await apiLogout();
+    setUser(null);
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, setUser, logout, loading }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export const useAuth = () => useContext(AuthContext);
+
+```
+
+### frontend\mobile\src\screens\DangKyScreen.tsx
+```tsx
+// src/screens/DangKyScreen.jsx
+import { useState } from "react";
+import {
+  View, Text, TextInput, TouchableOpacity,
+  StyleSheet, ActivityIndicator, KeyboardAvoidingView,
+  Platform, ScrollView,
+} from "react-native";
+import { register } from "../api/authApi";
+import { router } from 'expo-router';
+import { COLORS, FONTS, RADIUS } from "../../constants/appTheme";
+
+export default function DangKyScreen({ navigation }) {
+  const [form, setForm] = useState({
+    tenDangNhap: "", hoTen: "", email: "", password: "", confirmPassword: "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError]   = useState("");
+  const [success, setSuccess] = useState("");
+
+  const handleRegister = async () => {
+    if (!form.tenDangNhap || !form.password || !form.hoTen) {
+      setError("Vui lòng điền đầy đủ các trường bắt buộc.");
+      return;
+    }
+    if (form.password !== form.confirmPassword) {
+      setError("Mật khẩu xác nhận không khớp.");
+      return;
+    }
+    setError("");
+    setLoading(true);
+    try {
+      await register(form);
+      setSuccess("✅ Đăng ký thành công! Đang chuyển đến trang đăng nhập...");
+      setTimeout(() => router.replace("/(auth)/dang-nhap"), 1500);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Đã xảy ra lỗi khi đăng ký!");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fields = [
+    { key: "tenDangNhap", label: "Tên đăng nhập *", placeholder: "Nhập tên đăng nhập" },
+    { key: "hoTen",       label: "Họ và tên *",      placeholder: "Nhập họ và tên" },
+    { key: "email",       label: "Email",             placeholder: "Nhập email (tuỳ chọn)" },
+    { key: "password",    label: "Mật khẩu *",        placeholder: "Nhập mật khẩu", secure: true },
+    { key: "confirmPassword", label: "Xác nhận mật khẩu *", placeholder: "Nhập lại mật khẩu", secure: true },
+  ];
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        <View style={styles.card}>
+          <Text style={styles.title}>Tạo Tài Khoản</Text>
+
+          {error   ? <Text style={styles.error}>{error}</Text>   : null}
+          {success ? <Text style={styles.success}>{success}</Text> : null}
+
+          {fields.map(({ key, label, placeholder, secure }) => (
+            <View key={key}>
+              <Text style={styles.label}>{label}</Text>
+              <TextInput
+                style={styles.input}
+                placeholder={placeholder}
+                placeholderTextColor={COLORS.textLight}
+                secureTextEntry={!!secure}
+                autoCapitalize="none"
+                value={form[key]}
+                onChangeText={(v) => setForm({ ...form, [key]: v })}
+              />
+            </View>
+          ))}
+
+          <TouchableOpacity
+            style={[styles.btn, loading && styles.btnDisabled]}
+            onPress={handleRegister}
+            disabled={loading}
+          >
+            {loading
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={styles.btnText}>Đăng Ký</Text>
+            }
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => router.back()}>
+            <Text style={styles.switchText}>
+              Đã có tài khoản?{" "}
+              <Text style={styles.switchLink}>Đăng nhập</Text>
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  flex:        { flex: 1, backgroundColor: COLORS.background },
+  container:   { flexGrow: 1, justifyContent: "center", padding: 24, paddingVertical: 40 },
+  card:        { backgroundColor: COLORS.card, borderRadius: RADIUS.lg, padding: 24, elevation: 4, shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
+  title:       { fontSize: FONTS.xl, fontWeight: "700", color: COLORS.secondary, marginBottom: 20, textAlign: "center" },
+  error:       { backgroundColor: "#fef2f2", color: "#b91c1c", padding: 10, borderRadius: RADIUS.sm, marginBottom: 14, textAlign: "center", fontSize: FONTS.sm },
+  success:     { backgroundColor: "#f0fdf4", color: "#15803d", padding: 10, borderRadius: RADIUS.sm, marginBottom: 14, textAlign: "center", fontSize: FONTS.sm },
+  label:       { fontSize: FONTS.sm, fontWeight: "600", color: COLORS.secondary, marginBottom: 6, marginTop: 12 },
+  input:       { borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.sm, padding: 12, fontSize: FONTS.base, color: COLORS.textMain },
+  btn:         { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, padding: 14, alignItems: "center", marginTop: 20 },
+  btnDisabled: { opacity: 0.6 },
+  btnText:     { color: "#fff", fontSize: FONTS.md, fontWeight: "700" },
+  switchText:  { textAlign: "center", marginTop: 18, color: COLORS.textSub, fontSize: FONTS.sm },
+  switchLink:  { color: COLORS.primary, fontWeight: "600" },
+});
+
+```
+
+### frontend\mobile\src\screens\DangNhapScreen.tsx
+```tsx
+// src/screens/DangNhapScreen.jsx
+import { useState } from "react";
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Alert,
+} from "react-native";
+import { login } from "../api/authApi";
+import { router } from "expo-router";
+import { useAuth } from "../context/AuthContext";
+import { COLORS, FONTS, RADIUS } from "../../constants/appTheme";
+
+export default function DangNhapScreen({ navigation }) {
+  const { setUser } = useAuth();
+  const [form, setForm] = useState({ tenDangNhap: "", password: "" });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleLogin = async () => {
+    if (!form.tenDangNhap || !form.password) {
+      setError("Vui lòng điền đầy đủ thông tin.");
+      return;
+    }
+    setError("");
+    setLoading(true);
+    try {
+      const data = await login(form.tenDangNhap, form.password);
+      setUser(data.tenDangNhap);
+    } catch (err: any) {
+      console.log("LOGIN ERROR:", JSON.stringify(err?.response?.data));
+      console.log("LOGIN MESSAGE:", err?.message);
+      console.log("LOGIN CODE:", err?.code);
+      setError(
+        err?.response?.data?.detail ||
+          err?.message ||
+          "Đã xảy ra lỗi kết nối với máy chủ!",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.logo}>🏥 HealthyAI</Text>
+          <Text style={styles.subtitle}>
+            Hệ thống đánh giá nguy cơ bệnh mạn tính
+          </Text>
+        </View>
+
+        {/* Card */}
+        <View style={styles.card}>
+          <Text style={styles.title}>Đăng Nhập</Text>
+
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+
+          <Text style={styles.label}>Tên đăng nhập</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Nhập tên đăng nhập"
+            placeholderTextColor={COLORS.textLight}
+            autoCapitalize="none"
+            value={form.tenDangNhap}
+            onChangeText={(v) => setForm({ ...form, tenDangNhap: v })}
+          />
+
+          <Text style={styles.label}>Mật khẩu</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Nhập mật khẩu"
+            placeholderTextColor={COLORS.textLight}
+            secureTextEntry
+            value={form.password}
+            onChangeText={(v) => setForm({ ...form, password: v })}
+          />
+
+          <TouchableOpacity
+            style={[styles.btn, loading && styles.btnDisabled]}
+            onPress={handleLogin}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.btnText}>Đăng Nhập</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => router.push("/(auth)/dang-ky")}>
+            <Text style={styles.switchText}>
+              Chưa có tài khoản?{" "}
+              <Text style={styles.switchLink}>Đăng ký ngay</Text>
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  flex: { flex: 1, backgroundColor: COLORS.background },
+  container: { flexGrow: 1, justifyContent: "center", padding: 24 },
+  header: { alignItems: "center", marginBottom: 32 },
+  logo: { fontSize: FONTS.xxl, fontWeight: "800", color: COLORS.primary },
+  subtitle: {
+    fontSize: FONTS.sm,
+    color: COLORS.textSub,
+    marginTop: 6,
+    textAlign: "center",
+  },
+  card: {
+    backgroundColor: COLORS.card,
+    borderRadius: RADIUS.lg,
+    padding: 24,
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  title: {
+    fontSize: FONTS.xl,
+    fontWeight: "700",
+    color: COLORS.secondary,
+    marginBottom: 20,
+    textAlign: "center",
+  },
+  error: {
+    backgroundColor: "#fef2f2",
+    color: "#b91c1c",
+    padding: 10,
+    borderRadius: RADIUS.sm,
+    marginBottom: 14,
+    textAlign: "center",
+    fontSize: FONTS.sm,
+  },
+  label: {
+    fontSize: FONTS.sm,
+    fontWeight: "600",
+    color: COLORS.secondary,
+    marginBottom: 6,
+    marginTop: 12,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.sm,
+    padding: 12,
+    fontSize: FONTS.base,
+    color: COLORS.textMain,
+  },
+  btn: {
+    backgroundColor: COLORS.primary,
+    borderRadius: RADIUS.sm,
+    padding: 14,
+    alignItems: "center",
+    marginTop: 20,
+  },
+  btnDisabled: { opacity: 0.6 },
+  btnText: { color: "#fff", fontSize: FONTS.md, fontWeight: "700" },
+  switchText: {
+    textAlign: "center",
+    marginTop: 18,
+    color: COLORS.textSub,
+    fontSize: FONTS.sm,
+  },
+  switchLink: { color: COLORS.primary, fontWeight: "600" },
+});
+
+```
+
+### frontend\mobile\src\screens\HoSoSucKhoeScreen.tsx
+```tsx
+// src/screens/HoSoSucKhoeScreen.jsx
+import { useState, useEffect } from "react";
+import {
+  View, Text, TextInput, TouchableOpacity, ScrollView,
+  StyleSheet, Switch, ActivityIndicator,
+} from "react-native";
+import { getHealthProfile, saveHealthProfile } from "../api/healthApi";
+import { useAuth } from '../context/AuthContext';
+import { COLORS, FONTS, RADIUS } from "../../constants/appTheme";
+
+const SECTIONS = [
+  {
+    id: 1, title: "🧍 Thông tin cơ bản",
+    fields: [
+      { key: "tuoi",     label: "Tuổi",       unit: "tuổi",  keyboardType: "numeric" },
+      { key: "chieuCao", label: "Chiều cao",   unit: "cm",    keyboardType: "numeric" },
+      { key: "canNang",  label: "Cân nặng",    unit: "kg",    keyboardType: "numeric" },
+      { key: "bmi",      label: "BMI",         unit: "kg/m²", readOnly: true },
+      { key: "vongEo",   label: "Vòng eo",     unit: "cm",    keyboardType: "numeric" },
+    ],
+  },
+  {
+    id: 2, title: "💓 Huyết áp & Tim mạch",
+    fields: [
+      { key: "huyetApTamThu",     label: "Huyết áp tâm thu",   unit: "mmHg", keyboardType: "numeric" },
+      { key: "huyetApTamTruong",  label: "Huyết áp tâm trương",unit: "mmHg", keyboardType: "numeric" },
+    ],
+  },
+  {
+    id: 3, title: "🧪 Xét nghiệm sinh hóa",
+    fields: [
+      { key: "duongHuyet",  label: "Đường huyết đói",     unit: "mg/dL",  keyboardType: "numeric" },
+      { key: "hba1c",       label: "HbA1c",               unit: "%",      keyboardType: "decimal-pad" },
+      { key: "cholesterol", label: "Cholesterol toàn phần",unit: "mg/dL",  keyboardType: "numeric" },
+      { key: "ldl",         label: "LDL Cholesterol",      unit: "mg/dL",  keyboardType: "numeric" },
+      { key: "hdl",         label: "HDL Cholesterol",      unit: "mg/dL",  keyboardType: "numeric" },
+      { key: "creatinine",  label: "Creatinine",           unit: "mg/dL",  keyboardType: "decimal-pad" },
+    ],
+  },
+  {
+    id: 4, title: "🚬 Lối sống",
+    fields: [
+      { key: "soPhutVanDongMoiTuan", label: "Phút vận động/tuần", unit: "phút", keyboardType: "numeric" },
+    ],
+    selects: [
+      { key: "hutThuoc",   label: "Hút thuốc",   options: ["Không", "Đã bỏ", "Đang hút"] },
+      { key: "uongRuouBia",label: "Uống rượu bia",options: ["Không", "Thỉnh thoảng", "Thường xuyên", "Nhiều"] },
+      { key: "anMan",      label: "Ăn mặn",       options: ["Nhạt", "Vừa", "Mặn"] },
+    ],
+  },
+  {
+    id: 5, title: "🏥 Bệnh lý hiện tại",
+    booleans: [
+      { key: "caoHuyetAp",   label: "Cao huyết áp" },
+      { key: "tieuDuong",    label: "Tiểu đường" },
+      { key: "benhTimMach",  label: "Bệnh tim mạch" },
+      { key: "gout",         label: "Gout" },
+    ],
+  },
+  {
+    id: 6, title: "👨‍👩‍👧 Tiền sử gia đình",
+    booleans: [
+      { key: "giaDinhCaoHuyetAp",label: "Cao huyết áp" },
+      { key: "giaDinhTieuDuong", label: "Tiểu đường" },
+      { key: "giaDinhTimMach",   label: "Tim mạch" },
+    ],
+  },
+];
+
+const DEFAULT_FORM = {
+  tuoi: "", gioiTinh: "Nam", chieuCao: "", canNang: "", bmi: "", vongEo: "",
+  huyetApTamThu: "", huyetApTamTruong: "",
+  duongHuyet: "", hba1c: "", cholesterol: "", ldl: "", hdl: "", creatinine: "",
+  hutThuoc: "Không", uongRuouBia: "Không", soPhutVanDongMoiTuan: "", anMan: "Vừa",
+  caoHuyetAp: false, tieuDuong: false, benhTimMach: false, gout: false,
+  giaDinhCaoHuyetAp: false, giaDinhTieuDuong: false, giaDinhTimMach: false,
+};
+
+export default function HoSoSucKhoeScreen() {
+  const { user } = useAuth();
+  const [form, setForm]         = useState(DEFAULT_FORM);
+  const [activeSection, setActiveSection] = useState(1);
+  const [saving, setSaving]     = useState(false);
+  const [message, setMessage]   = useState("");
+
+  // Auto-calc BMI
+  useEffect(() => {
+    if (form.chieuCao && form.canNang) {
+      const h = Number(form.chieuCao) / 100;
+      setForm((p) => ({ ...p, bmi: (Number(form.canNang) / (h * h)).toFixed(1) }));
+    }
+  }, [form.chieuCao, form.canNang]);
+
+  // Load profile
+  useEffect(() => {
+    if (!user) return;
+    getHealthProfile(user).then((res) => {
+      if (res.data) setForm((p) => ({ ...p, ...res.data }));
+    }).catch(() => {});
+  }, [user]);
+
+  const set = (key, val) => setForm((p) => ({ ...p, [key]: val }));
+
+  const handleSave = async () => {
+    if (!user) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      await saveHealthProfile(user, form);
+      setMessage("✅ Lưu thành công!");
+      setTimeout(() => setMessage(""), 3000);
+    } catch {
+      setMessage("❌ Lỗi khi lưu dữ liệu!");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
+      <Text style={styles.pageTitle}>Hồ Sơ Sức Khỏe</Text>
+
+      {SECTIONS.map((sec) => (
+        <View key={sec.id} style={styles.section}>
+          {/* Section header */}
+          <TouchableOpacity
+            style={styles.secHeader}
+            onPress={() => setActiveSection(activeSection === sec.id ? 0 : sec.id)}
+          >
+            <Text style={styles.secTitle}>{sec.title}</Text>
+            <Text style={styles.secArrow}>{activeSection === sec.id ? "▲" : "▼"}</Text>
+          </TouchableOpacity>
+
+          {activeSection === sec.id && (
+            <View style={styles.secBody}>
+              {/* Number/text inputs */}
+              {sec.fields?.map(({ key, label, unit, keyboardType, readOnly }) => (
+                <View key={key} style={styles.fieldRow}>
+                  <Text style={styles.fieldLabel}>{label}</Text>
+                  <View style={styles.inputWrap}>
+                    <TextInput
+                      style={[styles.input, readOnly && styles.inputReadOnly]}
+                      keyboardType={keyboardType || "default"}
+                      value={String(form[key] ?? "")}
+                      onChangeText={(v) => !readOnly && set(key, v)}
+                      editable={!readOnly}
+                      placeholderTextColor={COLORS.textLight}
+                      placeholder="-"
+                    />
+                    {unit ? <Text style={styles.unit}>{unit}</Text> : null}
+                  </View>
+                </View>
+              ))}
+
+              {/* Select options (pill buttons) */}
+              {sec.selects?.map(({ key, label, options }) => (
+                <View key={key} style={styles.fieldRow}>
+                  <Text style={styles.fieldLabel}>{label}</Text>
+                  <View style={styles.pillRow}>
+                    {options.map((opt) => (
+                      <TouchableOpacity
+                        key={opt}
+                        style={[styles.pill, form[key] === opt && styles.pillActive]}
+                        onPress={() => set(key, opt)}
+                      >
+                        <Text style={[styles.pillText, form[key] === opt && styles.pillTextActive]}>
+                          {opt}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              ))}
+
+              {/* Boolean toggles */}
+              {sec.booleans?.map(({ key, label }) => (
+                <View key={key} style={styles.switchRow}>
+                  <Text style={styles.fieldLabel}>{label}</Text>
+                  <Switch
+                    value={!!form[key]}
+                    onValueChange={(v) => set(key, v)}
+                    trackColor={{ false: COLORS.border, true: COLORS.primary }}
+                    thumbColor="#fff"
+                  />
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+      ))}
+
+      {message ? (
+        <Text style={[styles.message, message.startsWith("✅") ? styles.msgOk : styles.msgErr]}>
+          {message}
+        </Text>
+      ) : null}
+
+      <TouchableOpacity
+        style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+        onPress={handleSave}
+        disabled={saving}
+      >
+        {saving
+          ? <ActivityIndicator color="#fff" />
+          : <Text style={styles.saveBtnText}>💾 Lưu Hồ Sơ</Text>
+        }
+      </TouchableOpacity>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  scroll:         { flex: 1, backgroundColor: COLORS.background },
+  container:      { padding: 16, paddingBottom: 40 },
+  pageTitle:      { fontSize: FONTS.xl, fontWeight: "800", color: COLORS.secondary, marginBottom: 16 },
+  section:        { backgroundColor: COLORS.card, borderRadius: RADIUS.md, marginBottom: 10, overflow: "hidden", elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  secHeader:      { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16 },
+  secTitle:       { fontSize: FONTS.base, fontWeight: "700", color: COLORS.secondary },
+  secArrow:       { fontSize: FONTS.sm, color: COLORS.textSub },
+  secBody:        { paddingHorizontal: 16, paddingBottom: 16, borderTopWidth: 1, borderTopColor: COLORS.border },
+  fieldRow:       { marginTop: 12 },
+  fieldLabel:     { fontSize: FONTS.sm, fontWeight: "600", color: COLORS.secondary, marginBottom: 6 },
+  inputWrap:      { flexDirection: "row", alignItems: "center", gap: 8 },
+  input:          { flex: 1, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.sm, padding: 10, fontSize: FONTS.base, color: COLORS.textMain },
+  inputReadOnly:  { backgroundColor: "#f8fafc", color: COLORS.textSub },
+  unit:           { fontSize: FONTS.sm, color: COLORS.textSub, minWidth: 44 },
+  pillRow:        { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  pill:           { paddingVertical: 6, paddingHorizontal: 12, borderRadius: RADIUS.xl, borderWidth: 1, borderColor: COLORS.border, backgroundColor: "#f8fafc" },
+  pillActive:     { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  pillText:       { fontSize: FONTS.sm, color: COLORS.textSub },
+  pillTextActive: { color: "#fff", fontWeight: "600" },
+  switchRow:      { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 12 },
+  message:        { padding: 12, borderRadius: RADIUS.sm, marginBottom: 12, textAlign: "center", fontSize: FONTS.sm },
+  msgOk:          { backgroundColor: "#f0fdf4", color: "#15803d" },
+  msgErr:         { backgroundColor: "#fef2f2", color: "#b91c1c" },
+  saveBtn:        { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, padding: 15, alignItems: "center", marginTop: 8 },
+  saveBtnDisabled:{ opacity: 0.6 },
+  saveBtnText:    { color: "#fff", fontSize: FONTS.md, fontWeight: "700" },
+});
+
+```
+
+### frontend\mobile\src\screens\PhanTichBenhScreen.tsx
+```tsx
+// src/screens/PhanTichBenhScreen.jsx
+import { useState, useEffect, useCallback } from "react";
+import {
+  View, Text, ScrollView, TouchableOpacity,
+  StyleSheet, ActivityIndicator, TextInput,
+} from "react-native";
+import { getPlugins, getPluginMetadata, getHealthProfile, scorePlugin } from "../api/healthApi";
+import { useAuth } from '../context/AuthContext';
+import { COLORS, FONTS, RADIUS } from "../../constants/appTheme";
+
+// EAV fallback — giống hệt web
+const EAV_FALLBACK = {
+  age: "tuoi", systolic: "huyetApTamThu", diastolic: "huyetApTamTruong",
+  fasting_glucose: "duongHuyet", hba1c: "hba1c", total_cholesterol: "cholesterol",
+  ldl: "ldl", hdl: "hdl", creatinine: "creatinine", waist: "vongEo",
+  smoking_status: "hutThuoc", exercise_minutes_per_week: "soPhutVanDongMoiTuan",
+  alcohol: "uongRuouBia", diabetes_status: "tieuDuong",
+  family_history_diabetes: "giaDinhTieuDuong",
+  family_history_hypertension: "giaDinhCaoHuyetAp",
+  family_history_cardiovascular: "giaDinhTimMach",
+};
+
+function resolveFieldValue(field, healthProfile) {
+  const direct = healthProfile?.[field.key];
+  if (direct !== undefined && direct !== null && direct !== "") return String(direct);
+  const fallbackKey = EAV_FALLBACK[field.health_profile_key || field.key];
+  if (fallbackKey) {
+    const v = healthProfile?.[fallbackKey];
+    if (v !== undefined && v !== null && v !== "") return String(v);
+  }
+  return "";
+}
+
+// ── Sub-components ──────────────────────────────────────────────────────────
+function ScoreBar({ score, color }) {
+  return (
+    <View style={styles.barTrack}>
+      <View style={[styles.barFill, { width: `${Math.min(score, 100)}%`, backgroundColor: color }]} />
+    </View>
+  );
+}
+
+function RuleCard({ data }) {
+  if (!data) return null;
+  const color = riskColor(data.score ?? 0);
+  const lvlColor = riskColorByLevel(data.risk_level ?? "");
+  return (
+    <View style={styles.resultCard}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardEngine}>📋 Rule-based Engine</Text>
+        <Text style={[styles.cardScore, { color }]}>{(data.score ?? 0).toFixed(1)} điểm</Text>
+      </View>
+      <ScoreBar score={data.score ?? 0} color={color} />
+      <View style={styles.levelRow}>
+        <Text style={styles.levelLabel}>Phân tầng nguy cơ</Text>
+        <View style={[styles.pill, { backgroundColor: lvlColor + "22", borderColor: lvlColor }]}>
+          <Text style={[styles.pillText, { color: lvlColor }]}>
+            {String(data.risk_level ?? "").toUpperCase()}
+          </Text>
+        </View>
+      </View>
+      {data.matched_rules?.length > 0 && (
+        <View style={styles.rulesBox}>
+          <Text style={styles.rulesHeading}>Yếu tố kích hoạt</Text>
+          {data.matched_rules.map((r, i) => (
+            <Text key={i} style={styles.ruleItem}>• {r.description || r.id}</Text>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+function AICard({ data }) {
+  if (!data) return null;
+  const isReady = data.status === "READY";
+  const pct = (data.probability ?? 0) * 100;
+  const color = riskColor(pct);
+  const lvlColor = riskColorByLevel(data.risk_level ?? "");
+  return (
+    <View style={styles.resultCard}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardEngine}>🧠 AI Model</Text>
+        {isReady
+          ? <Text style={[styles.cardScore, { color }]}>{pct.toFixed(1)}%</Text>
+          : <View style={[styles.pill, { backgroundColor: COLORS.warning + "22", borderColor: COLORS.warning }]}>
+              <Text style={[styles.pillText, { color: COLORS.warning }]}>PARTIAL</Text>
+            </View>
+        }
+      </View>
+      {isReady ? (
+        <>
+          <ScoreBar score={pct} color={color} />
+          <View style={styles.levelRow}>
+            <Text style={styles.levelLabel}>Phân tầng</Text>
+            <View style={[styles.pill, { backgroundColor: lvlColor + "22", borderColor: lvlColor }]}>
+              <Text style={[styles.pillText, { color: lvlColor }]}>
+                {String(data.risk_level ?? "").toUpperCase()}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.confidence}>Độ tin cậy: {data.confidence ?? 0}%</Text>
+        </>
+      ) : (
+        <View style={styles.partialBox}>
+          <Text style={styles.partialText}>
+            ⚠️ Cần điền đầy đủ chỉ số sinh hóa trong Hồ sơ sức khỏe để kích hoạt AI.
+          </Text>
+          {data.missing_features?.length > 0 && (
+            <Text style={styles.missingText}>
+              Thiếu: {data.missing_features.join(", ")}
+            </Text>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
+function RecsCard({ recs }) {
+  if (!recs?.length) return null;
+  return (
+    <View style={[styles.resultCard, { borderLeftWidth: 4, borderLeftColor: COLORS.primary }]}>
+      <Text style={styles.recsTitle}>💡 Khuyến nghị cá nhân hóa</Text>
+      {recs.map((rec, i) => {
+        const text = typeof rec === "string" ? rec : rec.text;
+        return (
+          <View key={i} style={styles.recItem}>
+            <View style={styles.recNum}><Text style={styles.recNumText}>{i + 1}</Text></View>
+            <Text style={styles.recText}>{text}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+// ── Main screen ─────────────────────────────────────────────────────────────
+export default function PhanTichBenhScreen() {
+  const { user } = useAuth();
+  const [plugins, setPlugins]           = useState([]);
+  const [selectedPlugin, setSelected]   = useState(null);
+  const [metadata, setMetadata]         = useState(null);
+  const [healthProfile, setProfile]     = useState({});
+  const [formValues, setFormValues]     = useState({});
+  const [result, setResult]             = useState(null);
+  const [loading, setLoading]           = useState(false);
+  const [loadingPlugins, setLoadingPlugins] = useState(true);
+
+  // Load plugins + health profile
+  useEffect(() => {
+    Promise.all([
+      getPlugins(),
+      user ? getHealthProfile(user) : Promise.resolve({ data: {} }),
+    ]).then(([pluginsRes, profileRes]) => {
+      setPlugins(pluginsRes.plugins || []);
+      setProfile(profileRes.data || {});
+    }).finally(() => setLoadingPlugins(false));
+  }, [user]);
+
+  // Load plugin metadata when selected
+  const selectPlugin = useCallback(async (id) => {
+    setSelected(id);
+    setResult(null);
+    try {
+      const meta = await getPluginMetadata(id);
+      setMetadata(meta);
+      // Pre-fill form from health profile
+      const prefilled = {};
+      (meta.fields || []).forEach((f) => {
+        prefilled[f.key] = resolveFieldValue(f, healthProfile);
+      });
+      setFormValues(prefilled);
+    } catch {}
+  }, [healthProfile]);
+
+  const handleAnalyze = async () => {
+    if (!selectedPlugin || !user) return;
+    setLoading(true);
+    setResult(null);
+    try {
+      const res = await scorePlugin(selectedPlugin, user, formValues);
+      setResult(res);
+    } catch (e) {
+      setResult({ error: e.response?.data?.detail || "Lỗi khi phân tích" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const renderField = (field) => {
+    const val = formValues[field.key] ?? "";
+    if (field.type === "boolean") {
+      return (
+        <View key={field.key} style={styles.fieldRow}>
+          <Text style={styles.fieldLabel}>{field.label}</Text>
+          <View style={styles.pillRow}>
+            {["true", "false"].map((opt) => (
+              <TouchableOpacity
+                key={opt}
+                style={[styles.optPill, val === opt && styles.optPillActive]}
+                onPress={() => setFormValues((p) => ({ ...p, [field.key]: opt }))}
+              >
+                <Text style={[styles.optPillText, val === opt && styles.optPillTextActive]}>
+                  {opt === "true" ? "Có" : "Không"}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      );
+    }
+    if (field.type === "select") {
+      return (
+        <View key={field.key} style={styles.fieldRow}>
+          <Text style={styles.fieldLabel}>{field.label}</Text>
+          <View style={styles.pillRow}>
+            {field.options?.map((opt) => (
+              <TouchableOpacity
+                key={opt.value}
+                style={[styles.optPill, val === opt.value && styles.optPillActive]}
+                onPress={() => setFormValues((p) => ({ ...p, [field.key]: opt.value }))}
+              >
+                <Text style={[styles.optPillText, val === opt.value && styles.optPillTextActive]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      );
+    }
+    // number / text
+    return (
+      <View key={field.key} style={styles.fieldRow}>
+        <Text style={styles.fieldLabel}>
+          {field.label}{field.required ? " *" : ""}
+          {field.unit ? <Text style={styles.unitInline}> ({field.unit})</Text> : null}
+        </Text>
+        <TextInput
+          style={styles.input}
+          keyboardType="decimal-pad"
+          value={String(val)}
+          onChangeText={(v) => setFormValues((p) => ({ ...p, [field.key]: v }))}
+          placeholder={field.unit || "-"}
+          placeholderTextColor={COLORS.textLight}
+        />
+      </View>
+    );
+  };
+
+  if (loadingPlugins) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Đang tải plugin...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
+      <Text style={styles.pageTitle}>Phân Tích Nguy Cơ</Text>
+
+      {/* Plugin selector */}
+      <Text style={styles.sectionTitle}>Chọn bệnh cần phân tích</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pluginRow}>
+        {plugins.map((p) => (
+          <TouchableOpacity
+            key={p.id}
+            style={[styles.pluginChip, selectedPlugin === p.id && styles.pluginChipActive]}
+            onPress={() => selectPlugin(p.id)}
+          >
+            <Text style={[styles.pluginChipText, selectedPlugin === p.id && styles.pluginChipTextActive]}>
+              {p.name}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      {/* Dynamic form */}
+      {metadata && (
+        <View style={styles.formCard}>
+          <Text style={styles.formTitle}>{metadata.disease_info?.name}</Text>
+          {(metadata.fields || []).map(renderField)}
+
+          <TouchableOpacity
+            style={[styles.analyzeBtn, loading && styles.analyzeBtnDisabled]}
+            onPress={handleAnalyze}
+            disabled={loading}
+          >
+            {loading
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={styles.analyzeBtnText}>🔍 Phân tích nguy cơ</Text>
+            }
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Results */}
+      {result?.error && (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{result.error}</Text>
+        </View>
+      )}
+      {result && !result.error && (
+        <View>
+          <Text style={styles.sectionTitle}>Kết quả phân tích</Text>
+          <RuleCard data={result.rule_based} />
+          <AICard   data={result.ai_result} />
+          <RecsCard recs={result.recommendations} />
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  scroll:              { flex: 1, backgroundColor: COLORS.background },
+  container:           { padding: 16, paddingBottom: 40 },
+  center:              { flex: 1, justifyContent: "center", alignItems: "center", gap: 12 },
+  loadingText:         { color: COLORS.textSub, fontSize: FONTS.base },
+  pageTitle:           { fontSize: FONTS.xl, fontWeight: "800", color: COLORS.secondary, marginBottom: 16 },
+  sectionTitle:        { fontSize: FONTS.md, fontWeight: "700", color: COLORS.secondary, marginBottom: 10, marginTop: 4 },
+  pluginRow:           { marginBottom: 16 },
+  pluginChip:          { paddingVertical: 8, paddingHorizontal: 16, borderRadius: RADIUS.xl, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.card, marginRight: 8 },
+  pluginChipActive:    { borderColor: COLORS.primary, backgroundColor: COLORS.primary },
+  pluginChipText:      { fontSize: FONTS.sm, color: COLORS.textSub, fontWeight: "600" },
+  pluginChipTextActive:{ color: "#fff" },
+  formCard:            { backgroundColor: COLORS.card, borderRadius: RADIUS.md, padding: 16, marginBottom: 16, elevation: 2, shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  formTitle:           { fontSize: FONTS.md, fontWeight: "700", color: COLORS.secondary, marginBottom: 12 },
+  fieldRow:            { marginBottom: 14 },
+  fieldLabel:          { fontSize: FONTS.sm, fontWeight: "600", color: COLORS.secondary, marginBottom: 6 },
+  unitInline:          { color: COLORS.textSub, fontWeight: "400" },
+  input:               { borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.sm, padding: 10, fontSize: FONTS.base, color: COLORS.textMain },
+  pillRow:             { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  optPill:             { paddingVertical: 6, paddingHorizontal: 14, borderRadius: RADIUS.xl, borderWidth: 1, borderColor: COLORS.border, backgroundColor: "#f8fafc" },
+  optPillActive:       { borderColor: COLORS.primary, backgroundColor: COLORS.primary },
+  optPillText:         { fontSize: FONTS.sm, color: COLORS.textSub },
+  optPillTextActive:   { color: "#fff", fontWeight: "600" },
+  analyzeBtn:          { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, padding: 14, alignItems: "center", marginTop: 16 },
+  analyzeBtnDisabled:  { opacity: 0.6 },
+  analyzeBtnText:      { color: "#fff", fontSize: FONTS.md, fontWeight: "700" },
+  resultCard:          { backgroundColor: COLORS.card, borderRadius: RADIUS.md, padding: 16, marginBottom: 12, elevation: 2, shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  cardHeader:          { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+  cardEngine:          { fontSize: FONTS.base, fontWeight: "700", color: COLORS.secondary },
+  cardScore:           { fontSize: FONTS.lg, fontWeight: "800" },
+  barTrack:            { height: 8, backgroundColor: COLORS.border, borderRadius: 4, marginBottom: 12, overflow: "hidden" },
+  barFill:             { height: "100%", borderRadius: 4 },
+  levelRow:            { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  levelLabel:          { fontSize: FONTS.sm, color: COLORS.textSub },
+  pill:                { paddingVertical: 4, paddingHorizontal: 10, borderRadius: RADIUS.xl, borderWidth: 1 },
+  pillText:            { fontSize: FONTS.sm, fontWeight: "700" },
+  confidence:          { fontSize: FONTS.sm, color: COLORS.textSub, marginTop: 8 },
+  rulesBox:            { marginTop: 12, backgroundColor: "#f8fafc", borderRadius: RADIUS.sm, padding: 10 },
+  rulesHeading:        { fontSize: FONTS.sm, fontWeight: "700", color: COLORS.secondary, marginBottom: 6 },
+  ruleItem:            { fontSize: FONTS.sm, color: COLORS.textSub, marginBottom: 3 },
+  partialBox:          { backgroundColor: "#fffbeb", borderRadius: RADIUS.sm, padding: 12, marginTop: 8 },
+  partialText:         { fontSize: FONTS.sm, color: "#92400e" },
+  missingText:         { fontSize: FONTS.sm, color: COLORS.textSub, marginTop: 4 },
+  recsTitle:           { fontSize: FONTS.base, fontWeight: "700", color: COLORS.secondary, marginBottom: 12 },
+  recItem:             { flexDirection: "row", gap: 10, marginBottom: 8, alignItems: "flex-start" },
+  recNum:              { width: 22, height: 22, borderRadius: 11, backgroundColor: COLORS.primary, justifyContent: "center", alignItems: "center" },
+  recNumText:          { color: "#fff", fontSize: 11, fontWeight: "700" },
+  recText:             { flex: 1, fontSize: FONTS.sm, color: COLORS.textSub, lineHeight: 20 },
+  errorBox:            { backgroundColor: "#fef2f2", borderRadius: RADIUS.sm, padding: 14, marginBottom: 12 },
+  errorText:           { color: "#b91c1c", fontSize: FONTS.sm },
+});
+
+```
+
+### frontend\mobile\src\screens\TrangChuScreen.tsx
+```tsx
+// src/screens/TrangChuScreen.jsx
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
+import { router } from 'expo-router';
+import { useAuth } from '../context/AuthContext';
+import { COLORS, FONTS, RADIUS } from "../../constants/appTheme";
+
+const FEATURES = [
+  { icon: "🩺", title: "Phân tích Nguy cơ",  desc: "Đánh giá nguy cơ 5 bệnh mạn tính bằng AI",  screen: "PhanTichBenh" },
+  { icon: "📋", title: "Hồ sơ Sức khỏe",     desc: "Cập nhật chỉ số sinh hóa và thông tin cá nhân", screen: "HoSoSucKhoe" },
+  { icon: "💊", title: "Tra cứu Thuốc",       desc: "Tìm kiếm thông tin thuốc và tác dụng phụ",  screen: "TraThuoc" },
+];
+
+const DISEASES = [
+  { icon: "🩸", name: "Tiểu đường Type 2",  color: "#dbeafe" },
+  { icon: "❤️", name: "Tim mạch",           color: "#fee2e2" },
+  { icon: "🫀", name: "Tăng huyết áp",      color: "#fef3c7" },
+  { icon: "🫘", name: "Thận mạn tính",       color: "#d1fae5" },
+  { icon: "🧠", name: "Đột quỵ",            color: "#ede9fe" },
+];
+
+export default function TrangChuScreen({ navigation }) {
+  const { user, logout } = useAuth();
+
+  return (
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
+      {/* Greeting */}
+      <View style={styles.greetCard}>
+        <Text style={styles.greetHi}>Xin chào, 👋</Text>
+        <Text style={styles.greetName}>{user}</Text>
+        <Text style={styles.greetSub}>Hãy theo dõi sức khỏe của bạn mỗi ngày</Text>
+      </View>
+
+      {/* Feature cards */}
+      <Text style={styles.sectionTitle}>Chức năng chính</Text>
+      {FEATURES.map((f) => (
+        <TouchableOpacity
+          key={f.screen}
+          style={styles.featureCard}
+          onPress={() => router.push(`/(tabs)/${f.screen.toLowerCase().replace(/([A-Z])/g, '-$1').slice(1)}`)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.featureIcon}>{f.icon}</Text>
+          <View style={styles.featureText}>
+            <Text style={styles.featureTitle}>{f.title}</Text>
+            <Text style={styles.featureDesc}>{f.desc}</Text>
+          </View>
+          <Text style={styles.featureArrow}>›</Text>
+        </TouchableOpacity>
+      ))}
+
+      {/* Disease chips */}
+      <Text style={styles.sectionTitle}>Bệnh được hỗ trợ</Text>
+      <View style={styles.diseaseRow}>
+        {DISEASES.map((d) => (
+          <View key={d.name} style={[styles.diseaseChip, { backgroundColor: d.color }]}>
+            <Text style={styles.diseaseIcon}>{d.icon}</Text>
+            <Text style={styles.diseaseName}>{d.name}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* Logout */}
+      <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
+        <Text style={styles.logoutText}>Đăng xuất</Text>
+      </TouchableOpacity>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  scroll:        { flex: 1, backgroundColor: COLORS.background },
+  container:     { padding: 16, paddingBottom: 32 },
+  greetCard:     { backgroundColor: COLORS.primary, borderRadius: RADIUS.lg, padding: 20, marginBottom: 20 },
+  greetHi:       { color: "rgba(255,255,255,0.8)", fontSize: FONTS.base },
+  greetName:     { color: "#fff", fontSize: FONTS.xl, fontWeight: "800", marginTop: 2 },
+  greetSub:      { color: "rgba(255,255,255,0.75)", fontSize: FONTS.sm, marginTop: 6 },
+  sectionTitle:  { fontSize: FONTS.md, fontWeight: "700", color: COLORS.secondary, marginBottom: 10, marginTop: 4 },
+  featureCard:   { backgroundColor: COLORS.card, borderRadius: RADIUS.md, padding: 16, marginBottom: 10, flexDirection: "row", alignItems: "center", elevation: 2, shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  featureIcon:   { fontSize: 28, marginRight: 14 },
+  featureText:   { flex: 1 },
+  featureTitle:  { fontSize: FONTS.base, fontWeight: "700", color: COLORS.secondary },
+  featureDesc:   { fontSize: FONTS.sm, color: COLORS.textSub, marginTop: 2 },
+  featureArrow:  { fontSize: 24, color: COLORS.textLight },
+  diseaseRow:    { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 24 },
+  diseaseChip:   { flexDirection: "row", alignItems: "center", borderRadius: RADIUS.xl, paddingVertical: 6, paddingHorizontal: 12, gap: 4 },
+  diseaseIcon:   { fontSize: 14 },
+  diseaseName:   { fontSize: FONTS.sm, fontWeight: "600", color: COLORS.secondary },
+  logoutBtn:     { borderWidth: 1, borderColor: COLORS.danger, borderRadius: RADIUS.sm, padding: 13, alignItems: "center" },
+  logoutText:    { color: COLORS.danger, fontWeight: "600", fontSize: FONTS.base },
+});
+
+```
+
+### frontend\mobile\src\screens\TraThuocScreen.tsx
+```tsx
+// src/screens/TraThuocScreen.jsx
+import { useState } from "react";
+import {
+  View, Text, TextInput, TouchableOpacity, FlatList,
+  StyleSheet, ActivityIndicator,
+} from "react-native";
+import { searchMedicine } from "../api/healthApi";
+import { COLORS, FONTS, RADIUS } from "../../constants/appTheme";
+
+export default function TraThuocScreen() {
+  const [keyword, setKeyword]   = useState("");
+  const [results, setResults]   = useState([]);
+  const [loading, setLoading]   = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [error, setError]       = useState("");
+
+  const handleSearch = async () => {
+    const q = keyword.trim();
+    if (!q) return;
+    setLoading(true);
+    setError("");
+    setSearched(true);
+    try {
+      const data = await searchMedicine(q);
+      setResults(data.medicines || data || []);
+    } catch {
+      setError("Không thể kết nối tới máy chủ.");
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const renderItem = ({ item }) => (
+    <View style={styles.card}>
+      <Text style={styles.drugName}>{item.name || item.drug_name || item.tenThuoc}</Text>
+      {item.uses || item.congDung ? (
+        <View style={styles.section}>
+          <Text style={styles.secLabel}>Công dụng</Text>
+          <Text style={styles.secValue}>{item.uses || item.congDung}</Text>
+        </View>
+      ) : null}
+      {item.side_effects || item.tacDungPhu ? (
+        <View style={styles.section}>
+          <Text style={styles.secLabel}>Tác dụng phụ</Text>
+          <Text style={styles.secValue}>{item.side_effects || item.tacDungPhu}</Text>
+        </View>
+      ) : null}
+      {item.dosage || item.lieuDung ? (
+        <View style={styles.section}>
+          <Text style={styles.secLabel}>Liều dùng</Text>
+          <Text style={styles.secValue}>{item.dosage || item.lieuDung}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+
+  return (
+    <View style={styles.flex}>
+      <View style={styles.searchBar}>
+        <TextInput
+          style={styles.input}
+          placeholder="Nhập tên thuốc cần tra cứu..."
+          placeholderTextColor={COLORS.textLight}
+          value={keyword}
+          onChangeText={setKeyword}
+          onSubmitEditing={handleSearch}
+          returnKeyType="search"
+        />
+        <TouchableOpacity style={styles.searchBtn} onPress={handleSearch}>
+          <Text style={styles.searchBtnText}>Tra</Text>
+        </TouchableOpacity>
+      </View>
+
+      {loading && (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+        </View>
+      )}
+
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      {!loading && searched && results.length === 0 && !error && (
+        <View style={styles.center}>
+          <Text style={styles.emptyIcon}>💊</Text>
+          <Text style={styles.emptyText}>Không tìm thấy thuốc phù hợp.</Text>
+        </View>
+      )}
+
+      {!loading && !searched && (
+        <View style={styles.center}>
+          <Text style={styles.emptyIcon}>🔍</Text>
+          <Text style={styles.emptyText}>Nhập tên thuốc để tra cứu thông tin</Text>
+        </View>
+      )}
+
+      <FlatList
+        data={results}
+        keyExtractor={(_, i) => String(i)}
+        renderItem={renderItem}
+        contentContainerStyle={styles.list}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  flex:         { flex: 1, backgroundColor: COLORS.background },
+  searchBar:    { flexDirection: "row", padding: 16, gap: 10, backgroundColor: COLORS.card, elevation: 2, shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  input:        { flex: 1, borderWidth: 1, borderColor: COLORS.border, borderRadius: RADIUS.sm, padding: 10, fontSize: FONTS.base, color: COLORS.textMain },
+  searchBtn:    { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, paddingHorizontal: 18, justifyContent: "center" },
+  searchBtnText:{ color: "#fff", fontWeight: "700", fontSize: FONTS.base },
+  list:         { padding: 16 },
+  card:         { backgroundColor: COLORS.card, borderRadius: RADIUS.md, padding: 16, marginBottom: 12, elevation: 2, shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  drugName:     { fontSize: FONTS.md, fontWeight: "800", color: COLORS.secondary, marginBottom: 10 },
+  section:      { marginTop: 8 },
+  secLabel:     { fontSize: FONTS.sm, fontWeight: "700", color: COLORS.primary, marginBottom: 2 },
+  secValue:     { fontSize: FONTS.sm, color: COLORS.textSub, lineHeight: 20 },
+  center:       { flex: 1, justifyContent: "center", alignItems: "center", gap: 8, paddingTop: 60 },
+  emptyIcon:    { fontSize: 40 },
+  emptyText:    { fontSize: FONTS.base, color: COLORS.textSub, textAlign: "center" },
+  error:        { color: COLORS.danger, padding: 16, textAlign: "center" },
+});
 
 ```
 
