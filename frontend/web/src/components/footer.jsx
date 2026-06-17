@@ -26,17 +26,10 @@ const ACCOUNT_LINKS = [
 ];
 
 const CONTACT_ITEMS = [
-  { icon: "✉", text: "cict@ctu.edu.vn" },
-  { icon: "☎", text: "(0292) 3872 209" },
-  { icon: "⌖", text: "Khu II, đường 3/2, Q. Ninh Kiều, TP. Cần Thơ" },
-  { icon: "⊞", text: "Trường CNTT&TT – Đại học Cần Thơ" },
-];
-
-const TECH_BADGES = [
-  { dot: true, label: "Rule Engine" },
-  { dot: true, label: "ML Engine" },
-  { dot: false, label: "5 Bệnh Plugin" },
-  { dot: false, label: "NHANES Dataset" },
+  { iconClass: "fa-solid fa-envelope", text: "cict@ctu.edu.vn" },
+  { iconClass: "fa-solid fa-phone", text: "(0292) 3872 209" },
+  { iconClass: "fa-solid fa-location-dot", text: "Khu II, đường 3/2, Q. Ninh Kiều, TP. Cần Thơ" },
+  { iconClass: "fa-solid fa-building-columns", text: "Trường CNTT&TT - Đại học Cần Thơ" },
 ];
 
 export default function Footer({ setCurrentView }) {
@@ -66,15 +59,6 @@ export default function Footer({ setCurrentView }) {
             Nền tảng sàng lọc nguy cơ bệnh mạn tính kết hợp luật chuyên gia
             và học máy. Kiến trúc Plugin-Based — mở rộng không cần sửa code.
           </p>
-
-          <div className="footer-badges">
-            {TECH_BADGES.map((b, i) => (
-              <span key={i} className="footer-badge">
-                {b.dot && <span className="footer-badge-dot" />}
-                {b.label}
-              </span>
-            ))}
-          </div>
         </div>
 
         {/* ── Navigation column ── */}
@@ -84,7 +68,7 @@ export default function Footer({ setCurrentView }) {
             {NAV_LINKS.map((item) => (
               <li key={item.key}>
                 <button className="footer-link" onClick={() => handleNav(item.key)}>
-                  <span className="footer-link-arrow">›</span>
+                  <i className="footer-link-arrow fa-solid fa-chevron-right" aria-hidden="true"></i>
                   {item.label}
                 </button>
               </li>
@@ -99,7 +83,7 @@ export default function Footer({ setCurrentView }) {
             {DISEASE_LINKS.map((item) => (
               <li key={item.key}>
                 <button className="footer-link" onClick={() => handleNav(item.key)}>
-                  <span className="footer-link-arrow">›</span>
+                  <i className="footer-link-arrow fa-solid fa-chevron-right" aria-hidden="true"></i>
                   {item.label}
                 </button>
               </li>
@@ -110,7 +94,7 @@ export default function Footer({ setCurrentView }) {
             {ACCOUNT_LINKS.map((item) => (
               <li key={item.key}>
                 <button className="footer-link" onClick={() => handleNav(item.key)}>
-                  <span className="footer-link-arrow">›</span>
+                  <i className="footer-link-arrow fa-solid fa-chevron-right" aria-hidden="true"></i>
                   {item.label}
                 </button>
               </li>
@@ -124,7 +108,7 @@ export default function Footer({ setCurrentView }) {
           <ul className="footer-links footer-links--contact">
             {CONTACT_ITEMS.map((item, i) => (
               <li key={i} className="footer-contact-item">
-                <span className="footer-contact-icon">{item.icon}</span>
+                <i className={`footer-contact-icon ${item.iconClass}`} aria-hidden="true"></i>
                 <span className="footer-contact-text">{item.text}</span>
               </li>
             ))}
@@ -140,7 +124,7 @@ export default function Footer({ setCurrentView }) {
                 className="footer-social-btn"
                 aria-label="Facebook CICT"
               >
-                fb
+                <i className="fa-brands fa-facebook-f" aria-hidden="true"></i>
               </a>
               <a
                 href="https://cit.ctu.edu.vn"
@@ -149,14 +133,14 @@ export default function Footer({ setCurrentView }) {
                 className="footer-social-btn"
                 aria-label="Website CICT"
               >
-                web
+                <i className="fa-solid fa-globe" aria-hidden="true"></i>
               </a>
               <a
                 href="mailto:cict@ctu.edu.vn"
                 className="footer-social-btn"
                 aria-label="Email"
               >
-                mail
+                <i className="fa-solid fa-envelope" aria-hidden="true"></i>
               </a>
             </div>
           </div>

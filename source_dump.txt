@@ -73,6 +73,9 @@ LuanVanKTPM/
 │   │   │   └── metadata.json
 │   │   └── stroke/
 │   │       └── metadata.json
+│   ├── static/
+│   │   └── avatars/
+│   │       └── 1_6bb2b4b879274502a512d1db7e22b09c.png
 │   ├── venv/
 │   ├── main.py
 │   ├── requirements.txt
@@ -81,12 +84,19 @@ LuanVanKTPM/
 │   ├── mobile/
 │   ├── node_modules/
 │   └── web/
+│       ├── dist/
 │       ├── node_modules/
 │       ├── public/
 │       │   ├── favicon.svg
 │       │   └── icons.svg
 │       ├── src/
 │       │   ├── assets/
+│       │   │   ├── CICT.png
+│       │   │   ├── CTU.png
+│       │   │   ├── DEVLinh.png
+│       │   │   ├── DEVQuoc.jpg
+│       │   │   ├── MrThai.JPG
+│       │   │   ├── MrThanh.PNG
 │       │   │   ├── hero.png
 │       │   │   ├── react.svg
 │       │   │   └── vite.svg
@@ -96,6 +106,7 @@ LuanVanKTPM/
 │       │   │   ├── header.css
 │       │   │   └── header.jsx
 │       │   ├── css/
+│       │   │   ├── auth.css
 │       │   │   ├── gioi-thieu.css
 │       │   │   ├── phan-tich-benh.css
 │       │   │   ├── thongtin-nd.css
@@ -138,8 +149,11 @@ LuanVanKTPM/
 ### backend\main.py
 ```py
 # backend/main.py
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 # Import router từ thư mục app, auth, và function nằm cùng cấp
 from app.plugin_api import router as plugin_router
@@ -152,6 +166,11 @@ from function.cn_thongtin_nguoidung import router as user_info_router  # <-- [TH
   # <-- [THÊM DÒNG NÀY] Import API Chỉ Số Sức Khỏe
 
 app = FastAPI(title="LuanVanKTPM - Disease Risk Engine")
+
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 app.add_middleware(
     CORSMiddleware,
@@ -172,6 +191,7 @@ app.include_router(user_info_router)  # <-- [THÊM DÒNG NÀY] Khai báo để F
 @app.get("/")
 def root():
     return {"message": "LuanVanKTPM Backend Running - Thư mục gốc độc lập"}
+
 ```
 
 ### backend\test_db.py
@@ -2654,6 +2674,7 @@ from passlib.context import CryptContext
 
 from database.database import SessionLocal
 from database.nguoi_dung import NguoiDung
+from database.thongtin_nd import ThongTinNguoiDung
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -2684,12 +2705,18 @@ def login(user: UserLoginSchema, db: Session = Depends(get_db)):
         )
     
     # 3. Trả về thông tin (kèm tenDangNhap thay vì email)
+    extra = db.query(ThongTinNguoiDung).filter(
+        ThongTinNguoiDung.idNguoiDung == db_user.idNguoiDung
+    ).first()
+
     return {
         "access_token": f"fake-token-for-{db_user.tenDangNhap}",
         "token_type": "bearer",
         "tenDangNhap": db_user.tenDangNhap,
-        "hoTen": db_user.hoTen
+        "hoTen": db_user.hoTen,
+        "anhDaiDien": extra.anhDaiDien if extra else None,
     }
+
 ```
 
 ### backend\function\cn_hs_suckhoe.py
@@ -2869,7 +2896,10 @@ def upsert_health_profile(profile_data: HealthProfileSchema, db: Session = Depen
 ### backend\function\cn_thongtin_nguoidung.py
 ```py
 # backend/function/cn_thongtin_nguoidung.py
-from fastapi import APIRouter, HTTPException, Depends
+from pathlib import Path
+from uuid import uuid4
+
+from fastapi import APIRouter, HTTPException, Depends, File, UploadFile
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
@@ -2882,6 +2912,17 @@ from database.thongtin_nd import ThongTinNguoiDung
 router = APIRouter(prefix="/user-info", tags=["User Info"])
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+AVATAR_DIR = BASE_DIR / "static" / "avatars"
+AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_AVATAR_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+MAX_AVATAR_SIZE = 2 * 1024 * 1024
 
 
 def get_db():
@@ -2926,6 +2967,19 @@ class UpdateProfileSchema(BaseModel):
 class ChangePasswordSchema(BaseModel):
     currentPassword: str
     newPassword: str
+
+
+def get_or_create_extra(user: NguoiDung, db: Session) -> ThongTinNguoiDung:
+    extra = db.query(ThongTinNguoiDung).filter(
+        ThongTinNguoiDung.idNguoiDung == user.idNguoiDung
+    ).first()
+
+    if not extra:
+        extra = ThongTinNguoiDung(idNguoiDung=user.idNguoiDung)
+        db.add(extra)
+        db.flush()
+
+    return extra
 
 
 # ---------------------------------------------------------------------------
@@ -3002,15 +3056,10 @@ def update_user_info(
 
     # ── 2. Remaining fields → thongTinNguoiDung (upsert) ────────────────────
     if update_data:
-        extra = db.query(ThongTinNguoiDung).filter(
-            ThongTinNguoiDung.idNguoiDung == user.idNguoiDung
-        ).first()
+        extra = get_or_create_extra(user, db)
 
-        if extra:
-            for k, v in update_data.items():
-                setattr(extra, k, v)
-        else:
-            db.add(ThongTinNguoiDung(idNguoiDung=user.idNguoiDung, **update_data))
+        for k, v in update_data.items():
+            setattr(extra, k, v)
 
     try:
         db.commit()
@@ -3018,6 +3067,67 @@ def update_user_info(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Loi luu du lieu: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# POST /user-info/{ten_dang_nhap}/avatar
+# Uploads avatar image from user's computer and stores its public URL
+# ---------------------------------------------------------------------------
+
+@router.post("/{ten_dang_nhap}/avatar")
+async def upload_avatar(
+    ten_dang_nhap: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    user = db.query(NguoiDung).filter(
+        NguoiDung.tenDangNhap == ten_dang_nhap
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="Khong tim thay nguoi dung")
+
+    extension = ALLOWED_AVATAR_TYPES.get(file.content_type or "")
+    if not extension:
+        raise HTTPException(
+            status_code=400,
+            detail="Chi ho tro anh JPG, PNG, WEBP hoac GIF",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_AVATAR_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail="Anh dai dien khong duoc vuot qua 2MB",
+        )
+
+    filename = f"{user.idNguoiDung}_{uuid4().hex}{extension}"
+    avatar_path = AVATAR_DIR / filename
+    avatar_path.write_bytes(content)
+
+    avatar_url = f"/static/avatars/{filename}"
+    extra = get_or_create_extra(user, db)
+    old_avatar = extra.anhDaiDien
+    extra.anhDaiDien = avatar_url
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        if avatar_path.exists():
+            avatar_path.unlink()
+        raise HTTPException(status_code=500, detail=f"Loi luu anh dai dien: {str(e)}")
+
+    if old_avatar and old_avatar.startswith("/static/avatars/"):
+        old_path = BASE_DIR.joinpath(*old_avatar.lstrip("/").split("/"))
+        if old_path.exists() and old_path != avatar_path:
+            old_path.unlink()
+
+    return {
+        "message": "Tai anh dai dien thanh cong",
+        "status": "success",
+        "anhDaiDien": avatar_url,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -3053,6 +3163,7 @@ def change_password(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Loi luu mat khau: {str(e)}")
+
 ```
 
 ### backend\function\cn_tra_thuoc.py
@@ -4272,6 +4383,7 @@ export default defineConfig({
 ```jsx
 // frontend/src/App.jsx
 import { useState } from "react";
+import { BrowserRouter as Router, useNavigate, useLocation } from "react-router-dom"; // <-- IMPORT REACT ROUTER
 import PhanTichBenh from "./phan-tich-benh"; 
 import DangNhap from "./dang-nhap";
 import DangKy from "./dang-ky";
@@ -4281,50 +4393,101 @@ import GioiThieu from "./gioi-thieu";
 import TraThuoc from "./tra-thuoc";
 import ThongTinND from "./thongtin-nd.jsx";
 
-
 import Header from "./components/header.jsx";
-import Footer from "./components/footer.jsx"; // <-- ĐÃ THÊM IMPORT FOOTER
+import Footer from "./components/footer.jsx";
+
+function getStoredUserProfile() {
+  try {
+    const raw = localStorage.getItem("currentUser");
+    if (raw) return JSON.parse(raw);
+  } catch {
+    localStorage.removeItem("currentUser");
+  }
+
+  const tenDangNhap = localStorage.getItem("userName");
+  return tenDangNhap ? { tenDangNhap, hoTen: "", anhDaiDien: "" } : null;
+}
+
+function getUserDisplayName(userProfile) {
+  return userProfile?.hoTen || userProfile?.tenDangNhap || "";
+}
 
 // Đọc trạng thái auth từ localStorage ngay lúc khởi tạo state
 function getInitialAuth() {
   const token = localStorage.getItem("token");
-  const email = localStorage.getItem("userName");
-  if (token && email) {
-    return { isAuthenticated: true, userEmail: email };
+  const userProfile = getStoredUserProfile();
+  if (token && userProfile?.tenDangNhap) {
+    return { isAuthenticated: true, userProfile };
   }
   // Dọn sạch nếu thiếu một trong hai
   localStorage.removeItem("token");
   localStorage.removeItem("userName");
-  return { isAuthenticated: false, userEmail: "" };
+  localStorage.removeItem("currentUser");
+  return { isAuthenticated: false, userProfile: null };
 }
 
 const initialAuth = getInitialAuth();
 
-export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(initialAuth.isAuthenticated);
-  const [userEmail, setUserEmail] = useState(initialAuth.userEmail);
-  // ĐỂ MỞ TRANG ĐĂNG NHẬP ĐẦU TIÊN: Đổi trạng thái mặc định từ "welcome" thành "login"
-  const [authMode, setAuthMode] = useState("login");
-  const [currentView, setCurrentView] = useState("trang-chu");
+// Component nội dung chính sử dụng logic của Router
+function AppContent() {
+  const navigate = useNavigate();
+  const location = useLocation();
 
-  const handleLoginSuccess = (email) => {
+  const [isAuthenticated, setIsAuthenticated] = useState(initialAuth.isAuthenticated);
+  const [userProfile, setUserProfile] = useState(initialAuth.userProfile);
+  const [authMode, setAuthMode] = useState("login");
+  const displayName = getUserDisplayName(userProfile);
+
+  // ĐỒNG BỘ STATE VỚI URL: Lấy currentView từ URL hiện tại để khi reload không bị mất dấu
+  const currentView = location.pathname === "/" ? "trang-chu" : location.pathname.substring(1);
+
+  // MOCK FUNCTION: Bọc useNavigate lại bằng tên setCurrentView để tương thích ngược 
+  // 100% với các component Header, Footer, TrangChu cũ mà không cần sửa code của chúng.
+  const setCurrentView = (view) => {
+    if (view === "trang-chu") {
+      navigate("/");
+    } else {
+      navigate(`/${view}`);
+    }
+  };
+
+  const handleLoginSuccess = (profile) => {
+    const nextProfile = {
+      tenDangNhap: profile?.tenDangNhap || profile,
+      hoTen: profile?.hoTen || "",
+      anhDaiDien: profile?.anhDaiDien || "",
+    };
+
     setIsAuthenticated(true);
-    setUserEmail(email);
+    setUserProfile(nextProfile);
+    localStorage.setItem("userName", nextProfile.tenDangNhap);
+    localStorage.setItem("currentUser", JSON.stringify(nextProfile));
     setCurrentView("trang-chu");
-    // Đăng nhập thành công trả về trang chủ
+  };
+
+  const handleProfileUpdate = (profile) => {
+    setUserProfile((prev) => {
+      const nextProfile = {
+        ...(prev || {}),
+        ...(profile || {}),
+        tenDangNhap: profile?.tenDangNhap || prev?.tenDangNhap || localStorage.getItem("userName") || "",
+      };
+      localStorage.setItem("currentUser", JSON.stringify(nextProfile));
+      return nextProfile;
+    });
   };
 
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("userName");
+    localStorage.removeItem("currentUser");
     setIsAuthenticated(false);
-    setUserEmail("");
+    setUserProfile(null);
     setAuthMode("login");
-    // Khi đăng xuất, điều hướng quay lại màn hình đăng nhập
     setCurrentView("trang-chu");
   };
 
-  // Hàm quản lý render các màn hình theo currentView từ Header
+  // Hàm quản lý render các màn hình theo currentView từ URL
   const renderContent = () => {
     switch (currentView) {
       // 1. Các component đã có sẵn
@@ -4334,13 +4497,13 @@ export default function App() {
       case "profile":
         return <ChiSoSucKhoe />;
       case "thong-tin-nd":
-        return <ThongTinND />;
+        return <ThongTinND onProfileUpdate={handleProfileUpdate} />;
       case "trang-chu":
         return (
           <TrangChu
             currentView={currentView}
             setCurrentView={setCurrentView}
-            userName={userEmail}
+            userName={displayName}
             onLogout={handleLogout}
           />
         );
@@ -4379,7 +4542,7 @@ export default function App() {
           <TrangChu
             currentView={currentView}
             setCurrentView={setCurrentView}
-            userName={userEmail}
+            userName={displayName}
             onLogout={handleLogout}
           />
         );
@@ -4387,7 +4550,7 @@ export default function App() {
   };
 
   if (!isAuthenticated) {
-    // Khối hiển thị giao diện Khách xem trước (chỉ kích hoạt nếu thiết lập authMode về "welcome")
+    // Khối hiển thị giao diện Khách xem trước
     if (authMode === "welcome") {
       return (
         <div style={{ 
@@ -4418,7 +4581,7 @@ export default function App() {
             onLogout={() => setAuthMode("login")}
           />
           
-           <main style={{ 
+          <main style={{ 
             flex: 1, 
             display: "flex", 
             flexDirection: "column",
@@ -4430,7 +4593,6 @@ export default function App() {
             <TrangChu onGoToLogin={() => setAuthMode("login")} />
           </main>
 
-          {/* <-- ĐÃ THÊM FOOTER CHO CHẾ ĐỘ KHÁCH --> */}
           <Footer setCurrentView={() => setAuthMode("login")} />
         </div>
       );
@@ -4469,15 +4631,16 @@ export default function App() {
           max-width: 100% !important;
           overflow-x: hidden;
           background-color: #F8FAFC;
-         }
+        }
         * { box-sizing: border-box; }
       `}</style>
 
       {/* Header hệ thống */}
       <Header 
         currentView={currentView}
-        setCurrentView={setCurrentView}
-        userName={userEmail}
+        setCurrentView={setCurrentView} // Truyền mock function xuống Header
+        userName={displayName}
+        userProfile={userProfile}
         onLogout={handleLogout}
       />
 
@@ -4495,12 +4658,21 @@ export default function App() {
         {renderContent()}
       </main>
 
-      {/* <-- ĐÃ THÊM FOOTER CHO GIAO DIỆN ĐÃ ĐĂNG NHẬP --> */}
       <Footer setCurrentView={setCurrentView} />
 
     </div>
   );
 }
+
+// Bọc Component bằng Router ở cấp cao nhất
+export default function App() {
+  return (
+    <Router>
+      <AppContent />
+    </Router>
+  );
+}
+
 ```
 
 ### frontend\web\src\dang-ky.jsx
@@ -4508,18 +4680,20 @@ export default function App() {
 // frontend/src/dang_ky.jsx
 import { useState } from "react";
 import axios from "axios";
+import "./css/auth.css";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 
 export default function DangKy({ onSwitchToLogin }) {
-  const [formData, setFormData] = useState({ 
-    tenDangNhap: "", 
-    email: "", 
-    password: "", 
-    hoTen: "" 
+  const [formData, setFormData] = useState({
+    tenDangNhap: "",
+    email: "",
+    password: "",
+    hoTen: "",
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -4542,70 +4716,172 @@ export default function DangKy({ onSwitchToLogin }) {
   };
 
   return (
-    <div style={{ background: "white", padding: "40px", borderRadius: "12px", boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)", width: "100%", maxWidth: "400px" }}>
-      <h2 style={{ textAlign: "center", color: "#0f172a", marginBottom: "24px", fontSize: "24px" }}>
-        Tạo Tài Khoản Mới
-      </h2>
-
-      {error && (
-        <div style={{ color: "#b91c1c", backgroundColor: "#fef2f2", padding: "12px", borderRadius: "6px", marginBottom: "20px", textAlign: "center", border: "1px solid #f87171" }}>
-          {error}
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-        
-        <div>
-          <label style={{ fontWeight: "600", display: "block", marginBottom: "6px", color: "#334155" }}>Tên đăng nhập *</label>
-          <input 
-            type="text" name="tenDangNhap" required
-            value={formData.tenDangNhap} onChange={handleChange}
-            style={{ width: "100%", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }} 
-          />
-        </div>
-
-        <div>
-          <label style={{ fontWeight: "600", display: "block", marginBottom: "6px", color: "#334155" }}>Họ và tên</label>
-          <input 
-            type="text" name="hoTen" 
-            value={formData.hoTen} onChange={handleChange}
-            style={{ width: "100%", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }} 
-          />
-        </div>
-
-        <div>
-          <label style={{ fontWeight: "600", display: "block", marginBottom: "6px", color: "#334155" }}>Email *</label>
-          <input 
-            type="email" name="email" required
-            value={formData.email} onChange={handleChange}
-            style={{ width: "100%", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }} 
-          />
-        </div>
-        
-        <div>
-          <label style={{ fontWeight: "600", display: "block", marginBottom: "6px", color: "#334155" }}>Mật khẩu *</label>
-          <input 
-            type="password" name="password" required
-            value={formData.password} onChange={handleChange}
-            style={{ width: "100%", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box" }} 
-          />
-        </div>
-
-        <button 
-          type="submit" disabled={loading}
-          style={{ padding: "12px", backgroundColor: "#2563eb", color: "white", border: "none", borderRadius: "6px", fontSize: "16px", fontWeight: "bold", cursor: loading ? "not-allowed" : "pointer", marginTop: "8px" }}>
-          {loading ? "Đang xử lý..." : "Đăng Ký"}
-        </button>
-      </form>
-
-      <div style={{ textAlign: "center", marginTop: "20px", color: "#64748b", fontSize: "14px" }}>
-        Đã có tài khoản?{" "}
-        <button 
-          onClick={onSwitchToLogin} 
-          style={{ background: "none", border: "none", color: "#2563eb", cursor: "pointer", fontWeight: "600", padding: "0", fontSize: "14px" }}>
-          Đăng nhập tại đây
-        </button>
+    <div className="auth-page">
+      {/* Background mesh */}
+      <div className="auth-bg-mesh" aria-hidden="true">
+        <div className="auth-mesh-blob auth-mesh-blob--1" />
+        <div className="auth-mesh-blob auth-mesh-blob--2" />
+        <div className="auth-mesh-blob auth-mesh-blob--3" />
       </div>
+
+      {/* Brand */}
+      <div className="auth-brand">
+        <div className="auth-brand-logo">
+          <div className="auth-brand-icon"><i className="fa-solid fa-heart-pulse" aria-hidden="true"></i></div>
+          <span className="auth-brand-name">Healthy<span>AI</span></span>
+        </div>
+        <span className="auth-brand-tagline">Hệ thống đánh giá nguy cơ bệnh mãn tính</span>
+      </div>
+
+      {/* Card */}
+      <div className="auth-card">
+        <div className="auth-card-header">
+          <div className="auth-badge">
+            <span className="auth-badge-dot" />
+            Miễn phí &amp; An toàn
+          </div>
+          <h2 className="auth-card-title">Tạo tài khoản <em>mới</em></h2>
+          <p className="auth-card-desc">Điền thông tin bên dưới để bắt đầu sử dụng hệ thống</p>
+        </div>
+
+        <div className="auth-card-body">
+          {/* Error banner */}
+          {error && (
+            <div className="auth-error">
+              <i className="auth-error-icon fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+              {error}
+            </div>
+          )}
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} style={{ display: "contents" }}>
+            {/* Tên đăng nhập & Họ tên – 2 cột */}
+            <div className="auth-fields-row">
+              <div className="auth-field">
+                <label className="auth-label" htmlFor="reg-username">
+                  Tên đăng nhập
+                  <span className="auth-label-required">*</span>
+                </label>
+                <div className="auth-input-wrap">
+                  <i className="auth-input-icon fa-solid fa-user" aria-hidden="true"></i>
+                  <input
+                    id="reg-username"
+                    className="auth-input"
+                    type="text"
+                    name="tenDangNhap"
+                    required
+                    autoComplete="username"
+                    placeholder="vd: nguyen_van_a"
+                    value={formData.tenDangNhap}
+                    onChange={handleChange}
+                  />
+                </div>
+              </div>
+
+              <div className="auth-field">
+                <label className="auth-label" htmlFor="reg-hoten">
+                  Họ và tên
+                  <span className="auth-label-optional">&nbsp;(tuỳ chọn)</span>
+                </label>
+                <div className="auth-input-wrap">
+                  <i className="auth-input-icon fa-solid fa-id-card" aria-hidden="true"></i>
+                  <input
+                    id="reg-hoten"
+                    className="auth-input"
+                    type="text"
+                    name="hoTen"
+                    autoComplete="name"
+                    placeholder="Nguyễn Văn A"
+                    value={formData.hoTen}
+                    onChange={handleChange}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Email */}
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="reg-email">
+                Email
+                <span className="auth-label-required">*</span>
+              </label>
+              <div className="auth-input-wrap">
+                <i className="auth-input-icon fa-solid fa-envelope" aria-hidden="true"></i>
+                <input
+                  id="reg-email"
+                  className="auth-input"
+                  type="email"
+                  name="email"
+                  required
+                  autoComplete="email"
+                  placeholder="email@example.com"
+                  value={formData.email}
+                  onChange={handleChange}
+                />
+              </div>
+            </div>
+
+            {/* Mật khẩu */}
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="reg-password">
+                Mật khẩu
+                <span className="auth-label-required">*</span>
+              </label>
+              <div className="auth-input-wrap">
+                <i className="auth-input-icon fa-solid fa-lock" aria-hidden="true"></i>
+                <input
+                  id="reg-password"
+                  className="auth-input"
+                  type={showPassword ? "text" : "password"}
+                  name="password"
+                  required
+                  autoComplete="new-password"
+                  placeholder="Tối thiểu 8 ký tự"
+                  value={formData.password}
+                  onChange={handleChange}
+                />
+                <button
+                  type="button"
+                  className="auth-pw-toggle"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                >
+                  <i className={`fa-solid ${showPassword ? "fa-eye-slash" : "fa-eye"}`} aria-hidden="true"></i>
+                </button>
+              </div>
+            </div>
+
+            {/* Submit */}
+            <button
+              type="submit"
+              className="auth-submit-btn"
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <span className="auth-spinner" />
+                  Đang xử lý...
+                </>
+              ) : (
+                <><i className="fa-solid fa-circle-check" aria-hidden="true"></i> Tạo Tài Khoản</>
+              )}
+            </button>
+          </form>
+
+          {/* Switch */}
+          <div className="auth-divider">hoặc</div>
+          <div className="auth-switch">
+            Đã có tài khoản?{" "}
+            <button className="auth-switch-btn" onClick={onSwitchToLogin}>
+              Đăng nhập tại đây
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <p className="auth-footer-note">
+        © {new Date().getFullYear()} HealthyAI · Hệ thống đánh giá nguy cơ bệnh mãn tính
+      </p>
     </div>
   );
 }
@@ -4613,16 +4889,18 @@ export default function DangKy({ onSwitchToLogin }) {
 
 ### frontend\web\src\dang-nhap.jsx
 ```jsx
+// frontend/src/dang_nhap.jsx
 import { useState } from "react";
 import axios from "axios";
+import "./css/auth.css";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
 
 export default function DangNhap({ onLoginSuccess, onSwitchToRegister }) {
-  // Đổi state email thành tenDangNhap
   const [formData, setFormData] = useState({ tenDangNhap: "", password: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -4635,13 +4913,13 @@ export default function DangNhap({ onLoginSuccess, onSwitchToRegister }) {
 
     try {
       const res = await axios.post(`${API_BASE_URL}/auth/login`, formData);
-      
-      // Lưu token và Tên đăng nhập vào localStorage
       localStorage.setItem("token", res.data.access_token);
       localStorage.setItem("userName", res.data.tenDangNhap);
-      
-      // Gửi tên đăng nhập lên App.jsx để hiển thị "Xin chào, ..."
-      onLoginSuccess(res.data.tenDangNhap);
+      onLoginSuccess({
+        tenDangNhap: res.data.tenDangNhap,
+        hoTen: res.data.hoTen,
+        anhDaiDien: res.data.anhDaiDien,
+      });
     } catch (err) {
       setError(err.response?.data?.detail || "Đã xảy ra lỗi kết nối với máy chủ!");
     } finally {
@@ -4650,51 +4928,128 @@ export default function DangNhap({ onLoginSuccess, onSwitchToRegister }) {
   };
 
   return (
-    <div style={{ background: "white", padding: "40px", borderRadius: "12px", boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1)", width: "100%", maxWidth: "400px" }}>
-      <h2 style={{ textAlign: "center", color: "#0f172a", marginBottom: "24px", fontSize: "24px" }}>
-        Đăng Nhập Hệ Thống
-      </h2>
-
-      {error && (
-        <div style={{ color: "#b91c1c", backgroundColor: "#fef2f2", padding: "12px", borderRadius: "6px", marginBottom: "20px", textAlign: "center", border: "1px solid #f87171" }}>
-          {error}
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-        <div>
-          <label style={{ fontWeight: "600", display: "block", marginBottom: "8px", color: "#334155" }}>Tên đăng nhập</label>
-          <input 
-            type="text" name="tenDangNhap" required
-            value={formData.tenDangNhap} onChange={handleChange}
-            style={{ width: "100%", padding: "12px", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box", fontSize: "15px" }} 
-          />
-        </div>
-        
-        <div>
-          <label style={{ fontWeight: "600", display: "block", marginBottom: "8px", color: "#334155" }}>Mật khẩu</label>
-          <input 
-            type="password" name="password" required
-            value={formData.password} onChange={handleChange}
-            style={{ width: "100%", padding: "12px", border: "1px solid #cbd5e1", borderRadius: "6px", boxSizing: "border-box", fontSize: "15px" }} 
-          />
-        </div>
-
-        <button 
-          type="submit" disabled={loading}
-          style={{ padding: "14px", backgroundColor: "#2563eb", color: "white", border: "none", borderRadius: "6px", fontSize: "16px", fontWeight: "bold", cursor: loading ? "not-allowed" : "pointer", marginTop: "12px", transition: "background-color 0.2s" }}>
-          {loading ? "Đang xử lý..." : "Đăng Nhập"}
-        </button>
-      </form>
-
-      <div style={{ textAlign: "center", marginTop: "24px", color: "#64748b", fontSize: "14px" }}>
-        Chưa có tài khoản?{" "}
-        <button 
-          onClick={onSwitchToRegister} 
-          style={{ background: "none", border: "none", color: "#2563eb", cursor: "pointer", fontWeight: "600", padding: "0", fontSize: "14px" }}>
-          Đăng ký ngay
-        </button>
+    <div className="auth-page">
+      {/* Background mesh */}
+      <div className="auth-bg-mesh" aria-hidden="true">
+        <div className="auth-mesh-blob auth-mesh-blob--1" />
+        <div className="auth-mesh-blob auth-mesh-blob--2" />
+        <div className="auth-mesh-blob auth-mesh-blob--3" />
       </div>
+
+      {/* Brand */}
+      <div className="auth-brand">
+        <div className="auth-brand-logo">
+          <div className="auth-brand-icon"><i className="fa-solid fa-heart-pulse" aria-hidden="true"></i></div>
+          <span className="auth-brand-name">Healthy<span>AI</span></span>
+        </div>
+        <span className="auth-brand-tagline">Hệ thống đánh giá nguy cơ bệnh mãn tính</span>
+      </div>
+
+      {/* Card */}
+      <div className="auth-card">
+        <div className="auth-card-header">
+          <div className="auth-badge">
+            <span className="auth-badge-dot" />
+            Bảo mật &amp; Riêng tư
+          </div>
+          <h2 className="auth-card-title">Đăng nhập <em>hệ thống</em></h2>
+          <p className="auth-card-desc">Nhập thông tin tài khoản để tiếp tục</p>
+        </div>
+
+        <div className="auth-card-body">
+          {/* Error banner */}
+          {error && (
+            <div className="auth-error">
+              <i className="auth-error-icon fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+              {error}
+            </div>
+          )}
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} style={{ display: "contents" }}>
+            {/* Tên đăng nhập */}
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="login-username">
+                Tên đăng nhập
+                <span className="auth-label-required">*</span>
+              </label>
+              <div className="auth-input-wrap">
+                <i className="auth-input-icon fa-solid fa-user" aria-hidden="true"></i>
+                <input
+                  id="login-username"
+                  className="auth-input"
+                  type="text"
+                  name="tenDangNhap"
+                  required
+                  autoComplete="username"
+                  placeholder="Nhập tên đăng nhập"
+                  value={formData.tenDangNhap}
+                  onChange={handleChange}
+                />
+              </div>
+            </div>
+
+            {/* Mật khẩu */}
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="login-password">
+                Mật khẩu
+                <span className="auth-label-required">*</span>
+              </label>
+              <div className="auth-input-wrap">
+                <i className="auth-input-icon fa-solid fa-lock" aria-hidden="true"></i>
+                <input
+                  id="login-password"
+                  className="auth-input"
+                  type={showPassword ? "text" : "password"}
+                  name="password"
+                  required
+                  autoComplete="current-password"
+                  placeholder="Nhập mật khẩu"
+                  value={formData.password}
+                  onChange={handleChange}
+                />
+                <button
+                  type="button"
+                  className="auth-pw-toggle"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                >
+                  <i className={`fa-solid ${showPassword ? "fa-eye-slash" : "fa-eye"}`} aria-hidden="true"></i>
+                </button>
+              </div>
+            </div>
+
+            {/* Submit */}
+            <button
+              type="submit"
+              className="auth-submit-btn"
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <span className="auth-spinner" />
+                  Đang xử lý...
+                </>
+              ) : (
+                <><i className="fa-solid fa-right-to-bracket" aria-hidden="true"></i> Đăng Nhập</>
+              )}
+            </button>
+          </form>
+
+          {/* Switch */}
+          <div className="auth-divider">hoặc</div>
+          <div className="auth-switch">
+            Chưa có tài khoản?{" "}
+            <button className="auth-switch-btn" onClick={onSwitchToRegister}>
+              Đăng ký ngay
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <p className="auth-footer-note">
+        © {new Date().getFullYear()} HealthyAI · Hệ thống đánh giá nguy cơ bệnh mãn tính
+      </p>
     </div>
   );
 }
@@ -4702,16 +5057,19 @@ export default function DangNhap({ onLoginSuccess, onSwitchToRegister }) {
 
 ### frontend\web\src\gioi-thieu.jsx
 ```jsx
-import React from "react";
 // Nhớ đảm bảo bạn đã copy nội dung file gioi-thieu.css vào đường dẫn này nhé
 import "./css/gioi-thieu.css";
+import mrThaiImage from "./assets/MrThai.JPG";
+import mrThanhImage from "./assets/MrThanh.PNG";
+import devLinhImage from "./assets/DEVLinh.png";
+import devQuocImage from "./assets/DEVQuoc.JPG";
+import CTU from "./assets/CTU.png";
+import CICT from "./assets/CICT.png";
+
+
+
 
 export default function GioiThieu({ setCurrentView }) {
-  // Hàm điều hướng nội bộ
-  const navigate = (view) => {
-    if (setCurrentView) setCurrentView(view);
-  };
-
   return (
     <div className="gioi-thieu-page">
       {/* ═══════════════════════════════════════════
@@ -4756,7 +5114,7 @@ export default function GioiThieu({ setCurrentView }) {
               <div className="about-card">
                 <div className="about-icon">
                   <img
-                    src="https://www.ctu.edu.vn/images/upload/logo.png"
+                    src={CTU}
                     alt="CTU Logo"
                     className="about-logo"
                   />
@@ -4773,7 +5131,7 @@ export default function GioiThieu({ setCurrentView }) {
               <div className="about-card">
                 <div className="about-icon">
                   <img
-                    src="https://drive.google.com/thumbnail?id=1eWowijMhg8LRCPTBTXFZEaBl7HcW-NiU&sz=w1000"
+                    src={CICT}
                     alt="CICT Logo"
                     className="about-logo"
                     style={{
@@ -4803,7 +5161,7 @@ export default function GioiThieu({ setCurrentView }) {
           <div className="container">
             <div className="section-header">
               <div className="section-badge">Dự án</div>
-              <h2 className="section-title">Về Healthy AI (LuanVanKTPM)</h2>
+              <h2 className="section-title">Về Healthy AI</h2>
             </div>
 
             <div className="project-content">
@@ -4825,7 +5183,9 @@ export default function GioiThieu({ setCurrentView }) {
                   , giúp dự đoán chính xác khi có đủ dữ liệu và luôn đảm bảo có
                   kết quả nhờ luật y khoa chuyên gia làm fallback.
                 </p>
+              </div>
 
+              <div className="project-col project-col--visual">
                 <div className="project-highlights">
                   <h4 className="highlights-title">Điểm nổi bật</h4>
                   <ul className="highlights-list">
@@ -4862,70 +5222,6 @@ export default function GioiThieu({ setCurrentView }) {
                   </ul>
                 </div>
               </div>
-
-              <div className="project-col project-col--visual">
-                <div className="project-visual-card">
-                  <div className="visual-header">
-                    <div className="visual-dots">
-                      <span></span>
-                      <span></span>
-                      <span></span>
-                    </div>
-                    <span className="visual-title">
-                      Quy trình Đánh giá Nguy cơ
-                    </span>
-                  </div>
-                  <div className="visual-body">
-                    <div className="pipeline-item">
-                      <span className="pipeline-number">1</span>
-                      <span className="pipeline-text">
-                        Thu thập Hồ sơ Sức khỏe
-                      </span>
-                    </div>
-                    <div className="pipeline-arrow">
-                      <i className="fa-solid fa-arrow-down"></i>
-                    </div>
-                    <div className="pipeline-item">
-                      <span className="pipeline-number">2</span>
-                      <span className="pipeline-text">
-                        Tải Plugin Bệnh (Metadata)
-                      </span>
-                    </div>
-                    <div className="pipeline-arrow">
-                      <i className="fa-solid fa-arrow-down"></i>
-                    </div>
-                    <div className="pipeline-item">
-                      <span className="pipeline-number">3</span>
-                      <span className="pipeline-text">
-                        Hợp nhất & Chuẩn hóa Dữ liệu
-                      </span>
-                    </div>
-                    <div className="pipeline-arrow">
-                      <i className="fa-solid fa-arrow-down"></i>
-                    </div>
-                    <div className="pipeline-item">
-                      <span className="pipeline-number">4</span>
-                      <span className="pipeline-text">
-                        Dual Engine (Rule + Machine Learning)
-                      </span>
-                    </div>
-                    <div className="pipeline-arrow">
-                      <i className="fa-solid fa-arrow-down"></i>
-                    </div>
-                    <div className="pipeline-item pipeline-item--final">
-                      <span
-                        className="pipeline-number"
-                        style={{ background: "#22c55e" }}
-                      >
-                        ✓
-                      </span>
-                      <span className="pipeline-text">
-                        Sinh Giải thích & Khuyến nghị
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </section>
@@ -4934,7 +5230,7 @@ export default function GioiThieu({ setCurrentView }) {
              SECTION 3: TEAM
         ───────────────────────────────────── */}
         <section className="team-section">
-          <div className="container">
+          <div className="container team-container">
             <div className="section-header">
               <div className="section-badge">Đội ngũ</div>
               <h2 className="section-title">Những người đứng sau dự án</h2>
@@ -4942,71 +5238,80 @@ export default function GioiThieu({ setCurrentView }) {
 
             {/* Advisors */}
             <div className="team-group">
-              <h3 className="team-group-title">Giảng viên hướng dẫn</h3>
-              <div className="team-grid team-grid--advisors">
+              <h3 className="team-group-title">
+                <i className="fa-solid fa-graduation-cap"></i> Giảng viên hướng dẫn
+              </h3>
+              <div className="team-grid">
                 <div className="team-member">
-                  <div className="member-avatar member-avatar--advisor">
+                  <div className="member-avatar">
                     <img
-                      src="https://drive.google.com/thumbnail?id=1ezRKzGVCVNobRF0kEJeWUUtchSdPu_rP&sz=w1000"
+                      src={mrThaiImage}
                       alt="TS. Trương Minh Thái"
                       className="member-image"
                     />
                   </div>
                   <h4 className="member-name">TS. Trương Minh Thái</h4>
-                  <p className="member-role">Hướng dẫn khoa học</p>
-                  <p className="member-info">
-                    <small>Lĩnh vực: Công Nghệ Phần Mềm</small>
+                  <span className="member-role-pill">Hướng dẫn khoa học</span>
+                  <p className="member-info">Lĩnh vực: Công Nghệ Phần Mềm</p>
+                  <p className="member-desc">
+                    Định hướng nghiên cứu tổng thể, tư vấn thiết kế kiến trúc phần mềm và đảm bảo tính chuẩn xác của các thuật toán lõi.
                   </p>
                 </div>
 
                 <div className="team-member">
-                  <div className="member-avatar member-avatar--advisor">
+                  <div className="member-avatar">
                     <img
-                      src="https://drive.google.com/thumbnail?id=1bM76xY1C0jYUyKYBiO68C7YFt0-j1R8-&sz=w1000"
+                      src={mrThanhImage}
                       alt="TS. Mã Trường Thành"
                       className="member-image"
                     />
                   </div>
                   <h4 className="member-name">TS. Mã Trường Thành</h4>
-                  <p className="member-role">Hướng dẫn kỹ thuật</p>
-                  <p className="member-info">
-                    <small>Lĩnh vực: Khoa Học Máy Tính</small>
+                  <span className="member-role-pill">Hướng dẫn kỹ thuật</span>
+                  <p className="member-info">Lĩnh vực: Khoa Học Máy Tính</p>
+                  <p className="member-desc">
+                    Hỗ trợ chuyên sâu về xây dựng, huấn luyện mô hình Machine Learning và tối ưu hóa hiệu suất dự đoán AI.
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Team Members - Giữ nguyên layout nhóm nhưng điều chỉnh Role cho phù hợp KTPM */}
+            {/* Team Members */}
             <div className="team-group">
-              <h3 className="team-group-title">Đội ngũ thực hiện</h3>
-
+              <h3 className="team-group-title">
+                <i className="fa-solid fa-users"></i> Đội ngũ thực hiện
+              </h3>
               <div className="team-grid">
                 <div className="team-member">
                   <div className="member-avatar">
                     <img
-                      src="https://drive.google.com/thumbnail?id=146qa8yRMF_cE44wmgafREtJA9KYYsvip&sz=w1000"
+                      src={devLinhImage}
                       alt="T. Lê Gia Linh"
                       className="member-image"
                     />
                   </div>
-
                   <h4 className="member-name">T. Lê Gia Linh</h4>
-                  <p className="member-role">Lập Trình Viên</p>
-                  <p className="member-id">B2203561 - DI2296F1</p>
+                  <span className="member-role-pill">Lập Trình Viên</span>
+                  <p className="member-info">MSSV: B2203561 - DI2296F1</p>
+                  <p className="member-desc">
+                    Phát triển Data Pipeline, huấn luyện các mô hình Machine Learning và xây dựng hệ thống Rule Engine.
+                  </p>
                 </div>
 
                 <div className="team-member">
                   <div className="member-avatar">
                     <img
-                      src="https://drive.google.com/thumbnail?id=10D0bqovpPyguHq2gMIdQQSF124c7VCGM&sz=w1000"
+                      src={devQuocImage}
                       alt="Tr. Ng Khánh Quốc"
                       className="member-image"
                     />
                   </div>
-
                   <h4 className="member-name">Tr. Ng Khánh Quốc</h4>
-                  <p className="member-role">Lập Trình Viên</p>
-                  <p className="member-id">B2203576 - DI2296F2</p>
+                  <span className="member-role-pill">Lập Trình Viên</span>
+                  <p className="member-info">MSSV: B2203576 - DI2296F2</p>
+                  <p className="member-desc">
+                    Thiết kế UI/UX, phát triển ứng dụng Frontend và xây dựng kiến trúc Plugin-based API trên FastAPI.
+                  </p>
                 </div>
               </div>
             </div>
@@ -5017,80 +5322,82 @@ export default function GioiThieu({ setCurrentView }) {
              SECTION 4: OBJECTIVES
         ───────────────────────────────────── */}
         <section className="objectives-section">
-          <div className="container">
-            <div className="section-header">
-              <div className="section-badge">Mục tiêu</div>
-              <h2 className="section-title">
-                Những gì chúng tôi muốn đạt được
-              </h2>
+          <div className="container objectives-container">
+            <div className="section-header text-center">
+              <div className="section-badge section-badge--eyebrow">MỤC TIÊU CHIẾN LƯỢC</div>
+              <h2 className="section-title">Những gì chúng tôi muốn đạt được</h2>
             </div>
 
             <div className="objectives-grid">
-              <div className="objective-card">
-                <div className="obj-icon obj-icon--1">
+              {/* Nhóm 1: Trải nghiệm người dùng & Cá nhân hóa (Tông màu xanh dương / Indigo) */}
+              <div className="objective-card obj-group--ux">
+                <div className="obj-icon-wrapper">
                   <i className="fa-solid fa-notes-medical"></i>
                 </div>
-                <h3 className="obj-title">Hồ sơ sức khỏe dùng chung</h3>
+                <h3 className="obj-card-title">Hồ sơ sức khỏe dùng chung</h3>
                 <p className="obj-desc">
-                  Giải quyết vấn đề nhập liệu lặp lại. Người dùng chỉ cần cung
-                  cấp chỉ số một lần để đánh giá cho mọi loại bệnh.
+                  Giải quyết vấn đề nhập liệu lặp lại. Người dùng chỉ cần cung cấp chỉ số lâm sàng một lần duy nhất để sàng lọc toàn diện cho mọi loại bệnh.
                 </p>
               </div>
 
-              <div className="objective-card">
-                <div className="obj-icon obj-icon--2">
-                  <i className="fa-solid fa-puzzle-piece"></i>
-                </div>
-                <h3 className="obj-title">Kiến trúc Plugin linh hoạt</h3>
-                <p className="obj-desc">
-                  Cho phép thêm bệnh lý mới vào hệ thống thông qua file JSON mà
-                  không cần chỉnh sửa mã nguồn cốt lõi.
-                </p>
-              </div>
-
-              <div className="objective-card">
-                <div className="obj-icon obj-icon--3">
-                  <i className="fa-solid fa-scale-balanced"></i>
-                </div>
-                <h3 className="obj-title">Đánh giá minh bạch</h3>
-                <p className="obj-desc">
-                  Kết hợp Rule Engine chuẩn y tế với Machine Learning, đảm bảo
-                  kết quả có thể giải thích chi tiết, không phải "hộp đen".
-                </p>
-              </div>
-
-              <div className="objective-card">
-                <div className="obj-icon obj-icon--4">
-                  <i className="fa-solid fa-brain"></i>
-                </div>
-                <h3 className="obj-title">AI Fallback thông minh</h3>
-                <p className="obj-desc">
-                  Mô hình ML dự đoán khi đủ dữ liệu, tự động lui về hệ thống
-                  Luật chuyên gia khi thiếu thông số để luôn có kết quả.
-                </p>
-              </div>
-
-              <div className="objective-card">
-                <div className="obj-icon obj-icon--5">
+              <div className="objective-card obj-group--ux">
+                <div className="obj-icon-wrapper">
                   <i className="fa-solid fa-comment-medical"></i>
                 </div>
-                <h3 className="obj-title">Khuyến nghị cá nhân hóa</h3>
+                <h3 className="obj-card-title">Khuyến nghị cá nhân hóa</h3>
                 <p className="obj-desc">
-                  Explanation Engine tự động sinh ra lời giải thích chi tiết và
-                  các khuyến nghị theo dõi, thay đổi lối sống.
+                  Explanation Engine tự động phân tích kết quả, sinh ra lời giải thích chi tiết cùng các lời khuyên thiết thực về lối sống và y tế.
                 </p>
               </div>
 
-              <div className="objective-card">
-                <div className="obj-icon obj-icon--6">
-                  <i className="fa-solid fa-shield-halved"></i>
+              <div className="objective-card obj-group--ux">
+                <div className="obj-icon-wrapper">
+                  <i className="fa-solid fa-sliders"></i>
                 </div>
-                <h3 className="obj-title">Giao diện Metadata-Driven</h3>
+                <h3 className="obj-card-title">Giao diện Metadata-Driven</h3>
                 <p className="obj-desc">
-                  UI được tự động tạo hình dựa trên cấu hình của từng plugin
-                  bệnh, đảm bảo đồng bộ hoàn hảo với backend.
+                  Hệ thống UI tự động tạo hình dựa trên cấu hình của từng plugin bệnh lý, đảm bảo sự đồng bộ hoàn hảo, liền mạch tuyệt đối với backend.
                 </p>
               </div>
+
+              {/* Nhóm 2: Kỹ thuật số & Cơ chế Backend (Tông màu xanh lá / Teal) */}
+              <div className="objective-card obj-group--tech">
+                <div className="obj-icon-wrapper">
+                  <i className="fa-solid fa-puzzle-piece"></i>
+                </div>
+                <h3 className="obj-card-title">Kiến trúc Plugin linh hoạt</h3>
+                <p className="obj-desc">
+                  Cho phép mở rộng mô hình bệnh lý mới vào hệ thống một cách dễ dàng thông qua tệp JSON cấu hình mà không cần sửa đổi mã nguồn cốt lõi.
+                </p>
+              </div>
+
+              <div className="objective-card obj-group--tech">
+                <div className="obj-icon-wrapper">
+                  <i className="fa-solid fa-scale-balanced"></i>
+                </div>
+                <h3 className="obj-card-title">Đánh giá minh bạch</h3>
+                <p className="obj-desc">
+                  Kết hợp chặt chẽ giữa Rule Engine chuẩn y khoa với Machine Learning, đảm bảo mọi kết quả trả về đều tường minh, loại bỏ hoàn toàn cơ chế "hộp đen".
+                </p>
+              </div>
+
+              <div className="objective-card obj-group--tech">
+                <div className="obj-icon-wrapper">
+                  <i className="fa-solid fa-brain"></i>
+                </div>
+                <h3 className="obj-card-title">AI Fallback thông minh</h3>
+                <p className="obj-desc">
+                  Mô hình ML đảm nhận dự đoán chính xác khi có đủ dữ liệu, tự động lui về hệ thống Luật chuyên gia khi thiếu thông số để luôn luôn trả ra kết quả.
+                </p>
+              </div>
+            </div>
+
+            {/* Bổ sung CTA Section cuối trang để xóa bỏ khoảng trắng thừa */}
+            <div className="objectives-cta">
+              <p className="cta-inline-text">Bạn đã sẵn sàng trải nghiệm giải pháp công nghệ y tế số toàn diện chưa?</p>
+              <button className="cta-inline-btn" onClick={() => setCurrentView("risk")}>
+                Bắt đầu phân tích ngay <i className="fa-solid fa-arrow-right"></i>
+              </button>
             </div>
           </div>
         </section>
@@ -5099,74 +5406,112 @@ export default function GioiThieu({ setCurrentView }) {
              SECTION 5: TECH STACK
         ───────────────────────────────────── */}
         <section className="tech-section">
-          <div className="container">
-            <div className="section-header">
-              <div className="section-badge">Công nghệ</div>
+          <div className="container tech-container">
+            <div className="section-header text-center" style={{ marginBottom: "40px" }}>
+              <div className="section-badge section-badge--eyebrow">CÔNG NGHỆ CỐT LÕI</div>
               <h2 className="section-title">Các công nghệ được sử dụng</h2>
             </div>
 
+            {/* Sử dụng lưới 4 cột (Desktop) hoặc 2 cột (Tablet) để cân bằng tuyệt đối */}
             <div className="tech-grid">
+
+              {/* Cột 1: Frontend (Giữ nguyên) */}
               <div className="tech-category">
-                <h3 className="tech-category-title">Frontend</h3>
-                <div className="tech-items">
-                  <div className="tech-item">
-                    <span className="tech-name">React 18 & Vite</span>
-                  </div>
-                  <div className="tech-item">
-                    <span className="tech-name">Metadata-Driven UI</span>
-                  </div>
-                  <div className="tech-item">
-                    <span className="tech-name">Axios (API Integration)</span>
-                  </div>
+                <div className="tech-cat-header">
+                  <h3 className="tech-category-title">Frontend</h3>
                 </div>
+                <ul className="tech-items-list">
+                  <li className="tech-list-item">
+                    <div className="tech-svg-group">
+                      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/react/react-original.svg" alt="React" className="tech-svg" />
+                      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/vitejs/vitejs-original.svg" alt="Vite" className="tech-svg" />
+                    </div>
+                    <span className="tech-text">React 18 & Vite</span>
+                  </li>
+                  <li className="tech-list-item">
+                    <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/tailwindcss/tailwindcss-original.svg" alt="UI" className="tech-svg" />
+                    <span className="tech-text">Metadata-Driven UI</span>
+                  </li>
+                  <li className="tech-list-item">
+                    <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/axios/axios-plain.svg" alt="Axios" className="tech-svg" />
+                    <span className="tech-text">Axios Integration</span>
+                  </li>
+                </ul>
               </div>
 
+              {/* Cột 2: Backend (Đã fix Pydantic và Plugin) */}
               <div className="tech-category">
-                <h3 className="tech-category-title">Backend</h3>
-                <div className="tech-items">
-                  <div className="tech-item">
-                    <span className="tech-name">Python & FastAPI</span>
-                  </div>
-                  <div className="tech-item">
-                    <span className="tech-name">Pydantic Validation</span>
-                  </div>
-                  <div className="tech-item">
-                    <span className="tech-name">
-                      Plugin Loader Architecture
-                    </span>
-                  </div>
+                <div className="tech-cat-header">
+                  <h3 className="tech-category-title">Backend</h3>
                 </div>
+                <ul className="tech-items-list">
+                  <li className="tech-list-item">
+                    <div className="tech-svg-group">
+                      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/python/python-original.svg" alt="Python" className="tech-svg" />
+                      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/fastapi/fastapi-original.svg" alt="FastAPI" className="tech-svg" />
+                    </div>
+                    <span className="tech-text">Python & FastAPI</span>
+                  </li>
+                  <li className="tech-list-item">
+                    {/* Dùng SimpleIcons cho Pydantic với mã màu chuẩn hồng/đỏ của hãng */}
+                    <img src="https://cdn.simpleicons.org/pydantic/E92063" alt="Pydantic" className="tech-svg" />
+                    <span className="tech-text">Pydantic Validation</span>
+                  </li>
+                  <li className="tech-list-item">
+                    {/* Dùng Iconify (Phosphor Icons) dạng mảnh ghép (puzzle) cho Plugin */}
+                    <i className="tech-svg tech-fa-icon fa-solid fa-puzzle-piece" aria-hidden="true"></i>
+                    <span className="tech-text">Plugin Architecture</span>
+                  </li>
+                </ul>
               </div>
 
+              {/* Cột 3: AI & ML (Đã fix icon cho NHANES Dataset) */}
               <div className="tech-category">
-                <h3 className="tech-category-title">AI & ML</h3>
-                <div className="tech-items">
-                  <div className="tech-item">
-                    <span className="tech-name">Scikit-learn & Pandas</span>
-                  </div>
-                  <div className="tech-item">
-                    <span className="tech-name">XGBoost & Random Forest</span>
-                  </div>
-                  <div className="tech-item">
-                    <span className="tech-name">Dataset từ NHANES</span>
-                  </div>
+                <div className="tech-cat-header">
+                  <h3 className="tech-category-title">AI & ML</h3>
                 </div>
+                <ul className="tech-items-list">
+                  <li className="tech-list-item">
+                    <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/scikitlearn/scikitlearn-original.svg" alt="Scikit" className="tech-svg" />
+                    <span className="tech-text">Scikit-learn & Pandas</span>
+                  </li>
+                  <li className="tech-list-item">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/6/69/XGBoost_logo.png" alt="XGBoost" className="tech-svg" style={{ objectFit: 'contain' }} />
+                    <span className="tech-text">XGBoost & RF Models</span>
+                  </li>
+                  <li className="tech-list-item">
+                    {/* Dùng Iconify dạng Database cho tập dữ liệu */}
+                    <i className="tech-svg tech-fa-icon fa-solid fa-database" aria-hidden="true"></i>
+                    <span className="tech-text">Dataset</span>
+                  </li>
+                </ul>
               </div>
 
+              {/* Cột 4: Database & Auth (Đã fix icon cho Bcrypt) */}
               <div className="tech-category">
-                <h3 className="tech-category-title">Database & Auth</h3>
-                <div className="tech-items">
-                  <div className="tech-item">
-                    <span className="tech-name">SQLite / MySQL</span>
-                  </div>
-                  <div className="tech-item">
-                    <span className="tech-name">SQLAlchemy ORM</span>
-                  </div>
-                  <div className="tech-item">
-                    <span className="tech-name">Bcrypt Password Hashing</span>
-                  </div>
+                <div className="tech-cat-header">
+                  <h3 className="tech-category-title">Database & Auth</h3>
                 </div>
+                <ul className="tech-items-list">
+                  <li className="tech-list-item">
+                    <div className="tech-svg-group">
+                      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/mysql/mysql-original.svg" alt="MySQL" className="tech-svg" />
+                      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/sqlite/sqlite-original.svg" alt="SQLite" className="tech-svg" />
+                    </div>
+                    <span className="tech-text">MySQL / SQLite</span>
+                  </li>
+                  <li className="tech-list-item">
+                    <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/sqlalchemy/sqlalchemy-original.svg" alt="SQLAlchemy" className="tech-svg" />
+                    <span className="tech-text">SQLAlchemy ORM</span>
+                  </li>
+                  <li className="tech-list-item">
+                    {/* Dùng Iconify dạng khiên bảo mật cho Hashing */}
+                    <i className="tech-svg tech-fa-icon fa-solid fa-shield-halved" aria-hidden="true"></i>
+                    <span className="tech-text">Bcrypt Hashing</span>
+                  </li>
+                </ul>
               </div>
+
             </div>
           </div>
         </section>
@@ -5174,35 +5519,7 @@ export default function GioiThieu({ setCurrentView }) {
         {/* ─────────────────────────────────────
              SECTION 6: CTA & NAVIGATION
         ───────────────────────────────────── */}
-        <section className="cta-section">
-          <div className="container">
-            <div className="cta-content">
-              <h2 className="cta-title">Sẵn sàng bảo vệ sức khỏe?</h2>
-              <p className="cta-desc">
-                Cập nhật Hồ sơ sức khỏe của bạn ngay hôm nay để nhận báo cáo
-                phân tích rủi ro chi tiết từ Healthy AI.
-              </p>
-              <div className="cta-actions">
-                <button
-                  onClick={() => navigate("risk")}
-                  className="cta-btn cta-btn--primary"
-                  style={{ border: "none", cursor: "pointer" }}
-                >
-                  <i className="fa-solid fa-heart-pulse"></i>
-                  Bắt đầu đánh giá ngay
-                </button>
-                <button
-                  onClick={() => navigate("profile")}
-                  className="cta-btn cta-btn--outline"
-                  style={{ cursor: "pointer" }}
-                >
-                  <i className="fa-solid fa-file-medical"></i>
-                  Thiết lập hồ sơ
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
+        
       </main>
     </div>
   );
@@ -5276,16 +5593,16 @@ export default function ChiSoSucKhoe() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!tenDangNhap) return setMessage("⚠️ Vui lòng đăng nhập trước!");
+    if (!tenDangNhap) return setMessage("Vui lòng đăng nhập trước!");
     try {
       setSaving(true);
       const payload = { tenDangNhap, ...formData };
       const numericFields = ["tuoi", "chieuCao", "canNang", "bmi", "vongEo", "huyetApTamThu", "huyetApTamTruong", "duongHuyet", "hba1c", "cholesterol", "ldl", "hdl", "triglyceride", "creatinine", "acidUric", "soPhutVanDongMoiTuan"];
       numericFields.forEach(k => { payload[k] = formData[k] ? Number(formData[k]) : null; });
       await axios.post(`${API_BASE_URL}/health-profile/`, payload);
-      setMessage("✅ Lưu dữ liệu chỉ số thành công!");
+      setMessage("Lưu dữ liệu chỉ số thành công!");
       setTimeout(() => setMessage(""), 3000);
-    } catch (error) { setMessage("❌ Lỗi khi lưu dữ liệu!"); } 
+    } catch (error) { setMessage("Lỗi khi lưu dữ liệu!"); } 
     finally { setSaving(false); }
   };
 
@@ -5330,7 +5647,7 @@ export default function ChiSoSucKhoe() {
           border-top: none;
         }
 
-        .tag-btn { padding: 10px 20px; border-radius: 20px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s; user-select: none; border: 1px solid #D1D5DB; background: white; color: #475569; }
+        .tag-btn { padding: 10px 20px; border-radius: 20px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s; user-select: none; border: 1px solid #D1D5DB; background: white; color: #475569; display: inline-flex; align-items: center; gap: 8px; }
         .tag-btn:hover { border-color: #2563EB; color: #2563EB; }
         .tag-btn.active { background: #DBEAFE; border-color: #2563EB; color: #1E3A8A; box-shadow: 0 2px 4px rgba(37,99,235,0.1); }
       `}</style>
@@ -5351,13 +5668,13 @@ export default function ChiSoSucKhoe() {
         )}
       </div>
 
-      {message && <div style={{ padding: "16px", marginBottom: "24px", borderRadius: "8px", backgroundColor: message.includes("✅") ? "#DCFCE7" : "#FEF2F2", color: message.includes("✅") ? "#166534" : "#991B1B", fontWeight: "600" }}>{message}</div>}
+      {message && <div style={{ padding: "16px", marginBottom: "24px", borderRadius: "8px", backgroundColor: message.includes("thành công") ? "#DCFCE7" : "#FEF2F2", color: message.includes("thành công") ? "#166534" : "#991B1B", fontWeight: "600" }}>{message}</div>}
 
       <form onSubmit={handleSubmit}>
         {/* KHỐI 1 */}
         <div className={`acc-header ${activeAccordion === 1 ? 'active' : ''}`} onClick={() => setActiveAccordion(activeAccordion === 1 ? 0 : 1)}>
-          <span>🫀 1. Thể chất & Sinh tồn</span>
-          <span>{activeAccordion === 1 ? '▼' : '▶'}</span>
+          <span><i className="fa-solid fa-heart-pulse" aria-hidden="true"></i> 1. Thể chất & Sinh tồn</span>
+          <span><i className={`fa-solid ${activeAccordion === 1 ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i></span>
         </div>
         <div className={`acc-wrapper ${activeAccordion === 1 ? 'open' : ''}`} style={{ background: "#EFF6FF" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
@@ -5375,8 +5692,8 @@ export default function ChiSoSucKhoe() {
 
         {/* KHỐI 2 */}
         <div className={`acc-header ${activeAccordion === 2 ? 'active' : ''}`} onClick={() => setActiveAccordion(activeAccordion === 2 ? 0 : 2)}>
-          <span>🧪 2. Chỉ số Sinh hóa chuyên sâu</span>
-          <span>{activeAccordion === 2 ? '▼' : '▶'}</span>
+          <span><i className="fa-solid fa-flask-vial" aria-hidden="true"></i> 2. Chỉ số Sinh hóa chuyên sâu</span>
+          <span><i className={`fa-solid ${activeAccordion === 2 ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i></span>
         </div>
         <div className={`acc-wrapper ${activeAccordion === 2 ? 'open' : ''}`} style={{ background: "#F0FDF4" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
@@ -5392,8 +5709,8 @@ export default function ChiSoSucKhoe() {
 
         {/* KHỐI 3 */}
         <div className={`acc-header ${activeAccordion === 3 ? 'active' : ''}`} onClick={() => setActiveAccordion(activeAccordion === 3 ? 0 : 3)}>
-          <span>🏃 3. Lối sống cá nhân</span>
-          <span>{activeAccordion === 3 ? '▼' : '▶'}</span>
+          <span><i className="fa-solid fa-person-running" aria-hidden="true"></i> 3. Lối sống cá nhân</span>
+          <span><i className={`fa-solid ${activeAccordion === 3 ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i></span>
         </div>
         <div className={`acc-wrapper ${activeAccordion === 3 ? 'open' : ''}`} style={{ background: "#FFF7ED" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
@@ -5410,34 +5727,34 @@ export default function ChiSoSucKhoe() {
 
         {/* KHỐI 4 */}
         <div className={`acc-header ${activeAccordion === 4 ? 'active' : ''}`} onClick={() => setActiveAccordion(activeAccordion === 4 ? 0 : 4)}>
-          <span>⚠️ 4. Tiền sử bệnh lý (Cá nhân & Gia đình)</span>
-          <span>{activeAccordion === 4 ? '▼' : '▶'}</span>
+          <span><i className="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> 4. Tiền sử bệnh lý (Cá nhân & Gia đình)</span>
+          <span><i className={`fa-solid ${activeAccordion === 4 ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i></span>
         </div>
         <div className={`acc-wrapper ${activeAccordion === 4 ? 'open' : ''}`} style={{ background: "#FEF2F2" }}>
           <div style={{ marginBottom: "28px" }}>
             <label style={{...lblStyle, marginBottom:"12px"}}>Tiền sử lâm sàng bản thân:</label>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
-              <div className={`tag-btn ${formData.caoHuyetAp ? 'active' : ''}`} onClick={() => toggleCheckbox('caoHuyetAp')}>{formData.caoHuyetAp ? '✓' : '+'} Cao huyết áp</div>
-              <div className={`tag-btn ${formData.tieuDuong ? 'active' : ''}`} onClick={() => toggleCheckbox('tieuDuong')}>{formData.tieuDuong ? '✓' : '+'} Tiểu đường</div>
-              <div className={`tag-btn ${formData.benhTimMach ? 'active' : ''}`} onClick={() => toggleCheckbox('benhTimMach')}>{formData.benhTimMach ? '✓' : '+'} Tim mạch</div>
-              <div className={`tag-btn ${formData.gout ? 'active' : ''}`} onClick={() => toggleCheckbox('gout')}>{formData.gout ? '✓' : '+'} Bệnh Gout</div>
+              <div className={`tag-btn ${formData.caoHuyetAp ? 'active' : ''}`} onClick={() => toggleCheckbox('caoHuyetAp')}><i className={`fa-solid ${formData.caoHuyetAp ? 'fa-check' : 'fa-plus'}`} aria-hidden="true"></i> Cao huyết áp</div>
+              <div className={`tag-btn ${formData.tieuDuong ? 'active' : ''}`} onClick={() => toggleCheckbox('tieuDuong')}><i className={`fa-solid ${formData.tieuDuong ? 'fa-check' : 'fa-plus'}`} aria-hidden="true"></i> Tiểu đường</div>
+              <div className={`tag-btn ${formData.benhTimMach ? 'active' : ''}`} onClick={() => toggleCheckbox('benhTimMach')}><i className={`fa-solid ${formData.benhTimMach ? 'fa-check' : 'fa-plus'}`} aria-hidden="true"></i> Tim mạch</div>
+              <div className={`tag-btn ${formData.gout ? 'active' : ''}`} onClick={() => toggleCheckbox('gout')}><i className={`fa-solid ${formData.gout ? 'fa-check' : 'fa-plus'}`} aria-hidden="true"></i> Bệnh Gout</div>
             </div>
           </div>
 
           <div>
             <label style={{...lblStyle, marginBottom:"12px"}}>Tiền sử di truyền gia đình cận huyết:</label>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
-              <div className={`tag-btn ${formData.giaDinhCaoHuyetAp ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhCaoHuyetAp')}>{formData.giaDinhCaoHuyetAp ? '✓' : '+'} Cao huyết áp GD</div>
-              <div className={`tag-btn ${formData.giaDinhTieuDuong ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhTieuDuong')}>{formData.giaDinhTieuDuong ? '✓' : '+'} Tiểu đường GD</div>
-              <div className={`tag-btn ${formData.giaDinhTimMach ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhTimMach')}>{formData.giaDinhTimMach ? '✓' : '+'} Tim mạch GD</div>
-              <div className={`tag-btn ${formData.giaDinhGout ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhGout')}>{formData.giaDinhGout ? '✓' : '+'} Gout GD</div>
+              <div className={`tag-btn ${formData.giaDinhCaoHuyetAp ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhCaoHuyetAp')}><i className={`fa-solid ${formData.giaDinhCaoHuyetAp ? 'fa-check' : 'fa-plus'}`} aria-hidden="true"></i> Cao huyết áp GD</div>
+              <div className={`tag-btn ${formData.giaDinhTieuDuong ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhTieuDuong')}><i className={`fa-solid ${formData.giaDinhTieuDuong ? 'fa-check' : 'fa-plus'}`} aria-hidden="true"></i> Tiểu đường GD</div>
+              <div className={`tag-btn ${formData.giaDinhTimMach ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhTimMach')}><i className={`fa-solid ${formData.giaDinhTimMach ? 'fa-check' : 'fa-plus'}`} aria-hidden="true"></i> Tim mạch GD</div>
+              <div className={`tag-btn ${formData.giaDinhGout ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhGout')}><i className={`fa-solid ${formData.giaDinhGout ? 'fa-check' : 'fa-plus'}`} aria-hidden="true"></i> Gout GD</div>
             </div>
           </div>
         </div>
 
         {/* NÚT SUBMIT */}
         <button type="submit" disabled={saving} style={{ width: "100%", padding: "16px", backgroundColor: saving ? "#94A3B8" : "#2563EB", color: "white", fontSize: "16px", fontWeight: "700", border: "none", borderRadius: "12px", cursor: saving ? "not-allowed" : "pointer", marginTop: "24px", transition: "all 0.2s", boxShadow: "0 4px 6px -1px rgba(37, 99, 235, 0.2)" }}>
-          {saving ? "⏳ Đang kết nối dữ liệu đám mây..." : "💾 LƯU HỒ SƠ SỨC KHỎE CAN THIỆP"}
+          {saving ? <><i className="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Đang kết nối dữ liệu đám mây...</> : <><i className="fa-solid fa-floppy-disk" aria-hidden="true"></i> LƯU HỒ SƠ SỨC KHỎE CAN THIỆP</>}
         </button>
       </form>
     </div>
@@ -5446,12 +5763,14 @@ export default function ChiSoSucKhoe() {
 
 const lblStyle = { display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" };
 const nextBtnStyle = { padding: "8px 16px", background: "#FFFFFF", border: "1px solid #CBD5E1", borderRadius: "8px", color: "#475569", fontWeight: "600", cursor: "pointer", transition: "all 0.2s" };
+
 ```
 
 ### frontend\web\src\main.jsx
 ```jsx
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import '@fortawesome/fontawesome-free/css/all.min.css'
 import './index.css'
 import App from './App.jsx'
 
@@ -5514,7 +5833,7 @@ function riskHexColor(score) {
 function EmptyResults() {
   return (
     <div className="ptb-results-empty">
-      <div className="ptb-empty-icon">🩺</div>
+      <div className="ptb-empty-icon"><i className="fa-solid fa-stethoscope" aria-hidden="true"></i></div>
       <p className="ptb-empty-title">Kết quả xuất hiện tại đây</p>
       <p className="ptb-empty-desc">
         Điền đầy đủ thông tin và nhấn <strong>Phân tích nguy cơ</strong> để
@@ -5532,7 +5851,7 @@ function RuleBasedCard({ data }) {
     <div className="ptb-result-card">
       <div className="ptb-result-card-header">
         <span className="ptb-result-engine-label">
-          <span className="ptb-result-engine-icon">📋</span>
+          <i className="ptb-result-engine-icon fa-solid fa-clipboard-list" aria-hidden="true"></i>
           Rule-based Engine
         </span>
         <span
@@ -5585,7 +5904,7 @@ function AIModelCard({ data }) {
     <div className="ptb-result-card">
       <div className="ptb-result-card-header">
         <span className="ptb-result-engine-label">
-          <span className="ptb-result-engine-icon">🧠</span>
+          <i className="ptb-result-engine-icon fa-solid fa-brain" aria-hidden="true"></i>
           AI Model
         </span>
         {isReady
@@ -5621,7 +5940,7 @@ function AIModelCard({ data }) {
           </>
         ) : (
           <div className="ptb-ai-partial">
-            <span className="ptb-ai-partial-icon">⚠️</span>
+            <i className="ptb-ai-partial-icon fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
             <p className="ptb-ai-partial-text">
               Cần điền đầy đủ các chỉ số sinh hóa nâng cao trong mục{" "}
               <strong>Hồ sơ sức khỏe</strong> để kích hoạt phân tích AI.
@@ -5638,7 +5957,7 @@ function RecommendationsCard({ recs }) {
   return (
     <div className="ptb-rec-card">
       <div className="ptb-rec-card-header">
-        <span style={{ fontSize: "1.1rem" }}>💡</span>
+        <i className="fa-solid fa-lightbulb" aria-hidden="true" style={{ fontSize: "1.1rem" }}></i>
         <h4 className="ptb-rec-title">Khuyến nghị cá nhân hóa</h4>
       </div>
       <div className="ptb-rec-body">
@@ -5832,7 +6151,7 @@ export default function MainRiskPage() {
       .map(f => f.label);
 
     if (missing.length > 0) {
-      alert(`⚠️ Thiếu thông tin bắt buộc:\n- ${missing.join("\n- ")}`);
+      alert(`Thiếu thông tin bắt buộc:\n- ${missing.join("\n- ")}`);
       return;
     }
 
@@ -5985,9 +6304,7 @@ export default function MainRiskPage() {
         <div className="ptb-form-card">
           <div className="ptb-form-card-header">
             <div className="ptb-form-title-row">
-              <div className="ptb-form-disease-icon">
-                {disease.icon || "🩺"}
-              </div>
+              <div className="ptb-form-disease-icon"><i className="fa-solid fa-stethoscope" aria-hidden="true"></i></div>
               <div>
                 <h2 className="ptb-form-title">
                   {disease.name || "Thông số đánh giá"}
@@ -6005,7 +6322,7 @@ export default function MainRiskPage() {
                   Hồ sơ đã tải
                 </>
               ) : (
-                <>⚠️ Chưa có hồ sơ</>
+                <><i className="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Chưa có hồ sơ</>
               )}
             </div>
           </div>
@@ -6019,7 +6336,7 @@ export default function MainRiskPage() {
                 if (key === "bmi") return (
                   <div key="bmi_group" className="ptb-bmi-group ptb-field--full">
                     <p className="ptb-bmi-hint">
-                      <span>ℹ️</span>
+                      <i className="fa-solid fa-circle-info" aria-hidden="true"></i>
                       Chỉ số BMI được tính tự động từ chiều cao và cân nặng.
                     </p>
                     <div className="ptb-bmi-row">
@@ -6073,7 +6390,7 @@ export default function MainRiskPage() {
                         Kích hoạt yếu tố này
                       </span>
                     </label>
-                    {errors[key] && <span className="ptb-field-error">⚠ {errors[key]}</span>}
+                    {errors[key] && <span className="ptb-field-error"><i className="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {errors[key]}</span>}
                   </div>
                 );
 
@@ -6095,7 +6412,7 @@ export default function MainRiskPage() {
                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                       ))}
                     </select>
-                    {errors[key] && <span className="ptb-field-error">⚠ {errors[key]}</span>}
+                    {errors[key] && <span className="ptb-field-error"><i className="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {errors[key]}</span>}
                   </div>
                 );
 
@@ -6119,7 +6436,7 @@ export default function MainRiskPage() {
                         : e.target.value
                       )}
                     />
-                    {errors[key] && <span className="ptb-field-error">⚠ {errors[key]}</span>}
+                    {errors[key] && <span className="ptb-field-error"><i className="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {errors[key]}</span>}
                   </div>
                 );
               })}
@@ -6131,8 +6448,8 @@ export default function MainRiskPage() {
               disabled={isCalculating}
             >
               {isCalculating
-                ? <><span>⏳</span> Đang phân tích chỉ số liên tầng...</>
-                : <><span>🩺</span> Phân tích nguy cơ</>
+                ? <><i className="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Đang phân tích chỉ số liên tầng...</>
+                : <><i className="fa-solid fa-stethoscope" aria-hidden="true"></i> Phân tích nguy cơ</>
               }
             </button>
           </div>
@@ -6154,22 +6471,28 @@ export default function MainRiskPage() {
     </div>
   );
 }
+
 ```
 
 ### frontend\web\src\thongtin-nd.jsx
 ```jsx
-// frontend/src/thongtin-nd.jsx
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import "../src/css/thongtin-nd.css";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
+const MAX_AVATAR_SIZE = 2 * 1024 * 1024;
+const ALLOWED_AVATAR_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
-// ---------------------------------------------------------------------------
-// Password strength helper
-// ---------------------------------------------------------------------------
+function resolveAvatarUrl(url) {
+  if (!url) return "";
+  if (/^(https?:|data:|blob:)/i.test(url)) return url;
+  return `${API_BASE_URL}${url.startsWith("/") ? url : `/${url}`}`;
+}
+
 function getPasswordStrength(password) {
-  if (!password) return { score: 0, label: "", color: "#E2E8F0" };
+  if (!password) return { score: 0, label: "", color: "#E2E8F0", icon: "" };
+
   let score = 0;
   if (password.length >= 8) score++;
   if (password.length >= 12) score++;
@@ -6178,20 +6501,19 @@ function getPasswordStrength(password) {
   if (/[^A-Za-z0-9]/.test(password)) score++;
 
   const levels = [
-    { label: "", color: "#E2E8F0" },
-    { label: "Yeu", color: "#EF4444" },
-    { label: "Trung binh", color: "#F59E0B" },
-    { label: "Kha", color: "#3B82F6" },
-    { label: "Manh", color: "#10B981" },
-    { label: "Rat manh", color: "#059669" },
+    { label: "", color: "#E2E8F0", icon: "" },
+    { label: "Yếu", color: "#EF4444", icon: "fa-circle-exclamation" },
+    { label: "Trung bình", color: "#F59E0B", icon: "fa-triangle-exclamation" },
+    { label: "Khá", color: "#3B82F6", icon: "fa-check-circle" },
+    { label: "Mạnh", color: "#10B981", icon: "fa-shield-check" },
+    { label: "Rất mạnh", color: "#059669", icon: "fa-shield" },
   ];
+
   return { score, ...levels[Math.min(score, 5)] };
 }
 
-// ---------------------------------------------------------------------------
-// Sub-component: Profile tab
-// ---------------------------------------------------------------------------
 function ProfileTab({ tenDangNhap, onSaveSuccess }) {
+  const fileInputRef = useRef(null);
   const [formData, setFormData] = useState({
     hoTen: "",
     email: "",
@@ -6204,28 +6526,12 @@ function ProfileTab({ tenDangNhap, onSaveSuccess }) {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
     if (!tenDangNhap) return;
-    setLoading(true);
-    axios
-      .get(`${API_BASE_URL}/user-info/${tenDangNhap}`)
-      .then((res) => {
-        const d = res.data;
-        setFormData({
-          hoTen: d.hoTen || "",
-          email: d.email || "",
-          soDienThoai: d.soDienThoai || "",
-          ngheNghiep: d.ngheNghiep || "",
-          diaChi: d.diaChi || "",
-          tinhThanh: d.tinhThanh || "",
-          quanHuyen: d.quanHuyen || "",
-          anhDaiDien: d.anhDaiDien || "",
-        });
-      })
-      .catch(() => showToast("error", "Khong tai duoc thong tin tai khoan"))
-      .finally(() => setLoading(false));
+    fetchProfile();
   }, [tenDangNhap]);
 
   function showToast(type, message) {
@@ -6233,51 +6539,90 @@ function ProfileTab({ tenDangNhap, onSaveSuccess }) {
     setTimeout(() => setToast(null), 3500);
   }
 
+  async function fetchProfile() {
+    setLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE_URL}/user-info/${tenDangNhap}`);
+      const d = res.data;
+      setFormData({
+        hoTen: d.hoTen || "",
+        email: d.email || "",
+        soDienThoai: d.soDienThoai || "",
+        ngheNghiep: d.ngheNghiep || "",
+        diaChi: d.diaChi || "",
+        tinhThanh: d.tinhThanh || "",
+        quanHuyen: d.quanHuyen || "",
+        anhDaiDien: d.anhDaiDien || "",
+      });
+    } catch {
+      showToast("error", "Khong tai duoc thong tin tai khoan");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function handleChange(e) {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   }
 
+  async function handleAvatarChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !tenDangNhap) return;
+
+    if (!ALLOWED_AVATAR_TYPES.includes(file.type)) {
+      return showToast("error", "Chỉ hỗ trợ ảnh JPG, PNG, WEBP hoặc GIF");
+    }
+
+    if (file.size > MAX_AVATAR_SIZE) {
+      return showToast("error", "Ảnh đại diện không được vượt quá 2MB");
+    }
+
+    const data = new FormData();
+    data.append("file", file);
+    setAvatarUploading(true);
+
+    try {
+      const res = await axios.post(
+        `${API_BASE_URL}/user-info/${tenDangNhap}/avatar`,
+        data,
+        { headers: { "Content-Type": "multipart/form-data" } }
+      );
+      const avatarUrl = res.data?.anhDaiDien || "";
+      setFormData((prev) => ({ ...prev, anhDaiDien: avatarUrl }));
+      showToast("success", "Cập nhật ảnh đại diện thành công!");
+      if (onSaveSuccess) onSaveSuccess(formData.hoTen);
+    } catch (err) {
+      const detail = err.response?.data?.detail || "Lỗi tải ảnh đại diện";
+      showToast("error", detail);
+    } finally {
+      setAvatarUploading(false);
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     if (!tenDangNhap) return;
+
     setSaving(true);
     try {
-      // Only send non-empty fields to avoid clearing existing data
       const payload = Object.fromEntries(
         Object.entries(formData).filter(([, v]) => v !== "")
       );
       await axios.put(`${API_BASE_URL}/user-info/${tenDangNhap}`, payload);
-      showToast("success", "Cap nhat thong tin thanh cong!");
-      if (onSaveSuccess) onSaveSuccess(formData.hoTen);
+      showToast("success", "Cập nhật thông tin thành công!");
+      if (onSaveSuccess) onSaveSuccess({
+        tenDangNhap,
+        hoTen: formData.hoTen,
+        anhDaiDien: formData.anhDaiDien,
+      });
     } catch (err) {
-      const detail = err.response?.data?.detail || "Loi cap nhat thong tin";
+      const detail = err.response?.data?.detail || "Lỗi cập nhật thông tin";
       showToast("error", detail);
     } finally {
       setSaving(false);
     }
-  }
-
-  function handleReset() {
-    // Re-fetch to discard edits
-    if (!tenDangNhap) return;
-    setLoading(true);
-    axios
-      .get(`${API_BASE_URL}/user-info/${tenDangNhap}`)
-      .then((res) => {
-        const d = res.data;
-        setFormData({
-          hoTen: d.hoTen || "",
-          email: d.email || "",
-          soDienThoai: d.soDienThoai || "",
-          ngheNghiep: d.ngheNghiep || "",
-          diaChi: d.diaChi || "",
-          tinhThanh: d.tinhThanh || "",
-          quanHuyen: d.quanHuyen || "",
-          anhDaiDien: d.anhDaiDien || "",
-        });
-      })
-      .finally(() => setLoading(false));
   }
 
   if (loading) {
@@ -6287,7 +6632,7 @@ function ProfileTab({ tenDangNhap, onSaveSuccess }) {
           <div
             key={i}
             className="tn-skeleton"
-            style={{ height: 42, marginBottom: 16 }}
+            style={{ height: 44, marginBottom: 20 }}
           />
         ))}
       </div>
@@ -6300,48 +6645,81 @@ function ProfileTab({ tenDangNhap, onSaveSuccess }) {
 
   return (
     <>
-      {/* Avatar block */}
       <div className="tn-avatar-block">
         {formData.anhDaiDien ? (
           <img
-            src={formData.anhDaiDien}
+            src={resolveAvatarUrl(formData.anhDaiDien)}
             alt="avatar"
             className="tn-avatar-img"
-            onError={(e) => (e.currentTarget.style.display = "none")}
+            onError={(e) => {
+              e.currentTarget.style.display = "none";
+            }}
           />
         ) : (
           <div className="tn-avatar-circle">{initials}</div>
         )}
+
         <div className="tn-avatar-meta">
-          <p className="tn-avatar-name">
-            {formData.hoTen || tenDangNhap}
+          <p className="tn-avatar-name">{formData.hoTen || tenDangNhap}</p>
+          <p className="tn-avatar-username">
+            <i className="fas fa-user-circle"></i>
+            @{tenDangNhap}
           </p>
-          <p className="tn-avatar-username">@{tenDangNhap}</p>
+          <div className="tn-avatar-actions">
+            <input
+              ref={fileInputRef}
+              className="tn-avatar-input"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              onChange={handleAvatarChange}
+            />
+            <button
+              type="button"
+              className="tn-avatar-upload-btn"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={avatarUploading}
+            >
+              <i className={avatarUploading ? "fas fa-spinner fa-spin" : "fas fa-camera"}></i>
+              {avatarUploading ? "Đang tải..." : "Chọn ảnh"}
+            </button>
+            <span className="tn-avatar-hint">JPG, PNG, WEBP, GIF tối đa 2MB</span>
+          </div>
         </div>
       </div>
 
       {toast && (
         <div className={`tn-toast tn-toast--${toast.type}`}>
-          {toast.type === "success" ? "Luu thanh cong!" : "Loi: "}
-          {toast.message}
+          <i
+            className={`fas ${
+              toast.type === "success" ? "fa-circle-check" : "fa-circle-xmark"
+            }`}
+          ></i>
+          <span>
+            {toast.type === "success" ? "Thành công! " : "Lỗi: "}
+            {toast.message}
+          </span>
         </div>
       )}
 
       <form onSubmit={handleSubmit}>
-        {/* Account info */}
         <div className="tn-card">
-          <p className="tn-card-title">Thong tin tai khoan</p>
+          <p className="tn-card-title">
+            <i className="fas fa-shield-alt"></i>
+            Thông tin tài khoản
+          </p>
           <div className="tn-grid">
             <div className="tn-field">
-              <label className="tn-label">Ten dang nhap</label>
-              <input
-                className="tn-input tn-input--readonly"
-                value={tenDangNhap}
-                readOnly
-              />
+              <label className="tn-label">
+                <i className="fas fa-user"></i>
+                Tên đăng nhập
+              </label>
+              <input className="tn-input tn-input--readonly" value={tenDangNhap} readOnly />
             </div>
             <div className="tn-field">
-              <label className="tn-label">Ho va ten</label>
+              <label className="tn-label">
+                <i className="fas fa-id-card"></i>
+                Họ và tên
+              </label>
               <input
                 className="tn-input"
                 name="hoTen"
@@ -6351,7 +6729,10 @@ function ProfileTab({ tenDangNhap, onSaveSuccess }) {
               />
             </div>
             <div className="tn-field tn-field--full">
-              <label className="tn-label">Dia chi email</label>
+              <label className="tn-label">
+                <i className="fas fa-envelope"></i>
+                Địa chỉ email
+              </label>
               <input
                 className="tn-input"
                 type="email"
@@ -6364,12 +6745,17 @@ function ProfileTab({ tenDangNhap, onSaveSuccess }) {
           </div>
         </div>
 
-        {/* Contact info */}
         <div className="tn-card">
-          <p className="tn-card-title">Thong tin lien he</p>
+          <p className="tn-card-title">
+            <i className="fas fa-address-book"></i>
+            Thong tin lien he
+          </p>
           <div className="tn-grid">
             <div className="tn-field">
-              <label className="tn-label">So dien thoai</label>
+              <label className="tn-label">
+                <i className="fas fa-phone"></i>
+                Số điện thoại
+              </label>
               <input
                 className="tn-input"
                 name="soDienThoai"
@@ -6379,17 +6765,23 @@ function ProfileTab({ tenDangNhap, onSaveSuccess }) {
               />
             </div>
             <div className="tn-field">
-              <label className="tn-label">Nghe nghiep</label>
+              <label className="tn-label">
+                <i className="fas fa-briefcase"></i>
+                Nghề nghiệp
+              </label>
               <input
                 className="tn-input"
                 name="ngheNghiep"
                 value={formData.ngheNghiep}
                 onChange={handleChange}
-                placeholder="Sinh vien, Nhan vien van phong, ..."
+                placeholder="Sinh vien, nhan vien van phong, ..."
               />
             </div>
             <div className="tn-field">
-              <label className="tn-label">Tinh / Thanh pho</label>
+              <label className="tn-label">
+                <i className="fas fa-map-pin"></i>
+                Tỉnh / Thành phố
+              </label>
               <input
                 className="tn-input"
                 name="tinhThanh"
@@ -6399,53 +6791,46 @@ function ProfileTab({ tenDangNhap, onSaveSuccess }) {
               />
             </div>
             <div className="tn-field">
-              <label className="tn-label">Quan / Huyen</label>
+              <label className="tn-label">
+                <i className="fas fa-location-dot"></i>
+                Quận / Huyện
+              </label>
               <input
                 className="tn-input"
                 name="quanHuyen"
                 value={formData.quanHuyen}
                 onChange={handleChange}
-                placeholder="Ninh Kieu"
+                placeholder="Quan Ninh Kieu"
               />
             </div>
             <div className="tn-field tn-field--full">
-              <label className="tn-label">Dia chi cu the</label>
+              <label className="tn-label">
+                <i className="fas fa-home"></i>
+                Địa chỉ
+              </label>
               <input
                 className="tn-input"
                 name="diaChi"
                 value={formData.diaChi}
                 onChange={handleChange}
-                placeholder="So nha, duong, phuong / xa"
-              />
-            </div>
-            <div className="tn-field tn-field--full">
-              <label className="tn-label">URL anh dai dien</label>
-              <input
-                className="tn-input"
-                name="anhDaiDien"
-                value={formData.anhDaiDien}
-                onChange={handleChange}
-                placeholder="https://example.com/avatar.jpg"
+                placeholder="123 Duong Nguyen Hue"
               />
             </div>
           </div>
         </div>
 
         <div className="tn-actions">
-          <button
-            type="button"
-            className="tn-btn tn-btn--ghost"
-            onClick={handleReset}
-            disabled={saving}
-          >
-            Huy thay doi
+          <button type="button" className="tn-btn tn-btn--ghost" onClick={fetchProfile}>
+            <i className="fas fa-redo"></i>
+            Hủy bỏ
           </button>
           <button
             type="submit"
             className="tn-btn tn-btn--primary"
-            disabled={saving}
+            disabled={saving || avatarUploading}
           >
-            {saving ? "Dang luu..." : "Luu thong tin"}
+            <i className={saving ? "fas fa-spinner fa-spin" : "fas fa-save"}></i>
+            {saving ? "Đang cập nhật..." : "Lưu thay đổi"}
           </button>
         </div>
       </form>
@@ -6453,9 +6838,6 @@ function ProfileTab({ tenDangNhap, onSaveSuccess }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Sub-component: Password tab
-// ---------------------------------------------------------------------------
 function PasswordTab({ tenDangNhap }) {
   const [formData, setFormData] = useState({
     currentPassword: "",
@@ -6482,27 +6864,25 @@ function PasswordTab({ tenDangNhap }) {
   async function handleSubmit(e) {
     e.preventDefault();
     if (!formData.currentPassword || !formData.newPassword) {
-      return showToast("error", "Vui long dien day du thong tin");
+      return showToast("error", "Vui lòng điền đầy đủ thông tin");
     }
     if (formData.newPassword !== formData.confirmPassword) {
-      return showToast("error", "Mat khau xac nhan khong khop");
+      return showToast("error", "Mật khẩu xác nhận không khớp");
     }
     if (formData.newPassword.length < 6) {
-      return showToast("error", "Mat khau moi phai co it nhat 6 ky tu");
+      return showToast("error", "Mật khẩu mới phải có ít nhất 6 ký tự");
     }
+
     setSaving(true);
     try {
-      await axios.post(
-        `${API_BASE_URL}/user-info/${tenDangNhap}/change-password`,
-        {
-          currentPassword: formData.currentPassword,
-          newPassword: formData.newPassword,
-        }
-      );
-      showToast("success", "Doi mat khau thanh cong!");
+      await axios.post(`${API_BASE_URL}/user-info/${tenDangNhap}/change-password`, {
+        currentPassword: formData.currentPassword,
+        newPassword: formData.newPassword,
+      });
+      showToast("success", "Đổi mật khẩu thành công!");
       setFormData({ currentPassword: "", newPassword: "", confirmPassword: "" });
     } catch (err) {
-      const detail = err.response?.data?.detail || "Loi doi mat khau";
+      const detail = err.response?.data?.detail || "Lỗi đổi mật khẩu";
       showToast("error", detail);
     } finally {
       setSaving(false);
@@ -6513,81 +6893,73 @@ function PasswordTab({ tenDangNhap }) {
     <>
       {toast && (
         <div className={`tn-toast tn-toast--${toast.type}`}>
-          {toast.message}
+          <i
+            className={`fas ${
+              toast.type === "success" ? "fa-circle-check" : "fa-circle-xmark"
+            }`}
+          ></i>
+          <span>{toast.message}</span>
         </div>
       )}
 
       <form onSubmit={handleSubmit}>
         <div className="tn-card">
-          <p className="tn-card-title">Doi mat khau</p>
+          <p className="tn-card-title">
+            <i className="fas fa-lock"></i>
+            Đổi mật khẩu
+          </p>
           <div className="tn-grid tn-grid--full">
             <div className="tn-field">
-              <label className="tn-label">Mat khau hien tai</label>
-              <div style={{ position: "relative" }}>
+              <label className="tn-label">
+                <i className="fas fa-key"></i>
+                Mật khẩu hiện tại
+              </label>
+              <div className="tn-password-wrapper">
                 <input
-                  className="tn-input"
+                  className="tn-input tn-password-input"
                   type={showCurrent ? "text" : "password"}
                   name="currentPassword"
                   value={formData.currentPassword}
                   onChange={handleChange}
-                  placeholder="Nhap mat khau hien tai"
-                  style={{ paddingRight: 44 }}
+                  placeholder="Nhập mật khẩu hiện tại"
                 />
                 <button
                   type="button"
+                  className="tn-password-toggle"
                   onClick={() => setShowCurrent((p) => !p)}
-                  style={{
-                    position: "absolute",
-                    right: 12,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "#94A3B8",
-                    fontSize: 16,
-                    padding: 0,
-                  }}
+                  aria-label="Toggle password visibility"
                 >
-                  {showCurrent ? "Hide" : "Show"}
+                  <i className={`fas ${showCurrent ? "fa-eye-slash" : "fa-eye"}`}></i>
                 </button>
               </div>
             </div>
 
             <div className="tn-field">
-              <label className="tn-label">Mat khau moi</label>
-              <div style={{ position: "relative" }}>
+              <label className="tn-label">
+                <i className="fas fa-lock"></i>
+                Mật khẩu mới
+              </label>
+              <div className="tn-password-wrapper">
                 <input
-                  className="tn-input"
+                  className="tn-input tn-password-input"
                   type={showNew ? "text" : "password"}
                   name="newPassword"
                   value={formData.newPassword}
                   onChange={handleChange}
-                  placeholder="It nhat 6 ky tu"
-                  style={{ paddingRight: 44 }}
+                  placeholder="Ít nhất 6 ký tự"
                 />
                 <button
                   type="button"
+                  className="tn-password-toggle"
                   onClick={() => setShowNew((p) => !p)}
-                  style={{
-                    position: "absolute",
-                    right: 12,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "#94A3B8",
-                    fontSize: 16,
-                    padding: 0,
-                  }}
+                  aria-label="Toggle password visibility"
                 >
-                  {showNew ? "Hide" : "Show"}
+                  <i className={`fas ${showNew ? "fa-eye-slash" : "fa-eye"}`}></i>
                 </button>
               </div>
 
               {formData.newPassword && (
-                <>
+                <div className="tn-strength-container">
                   <div className="tn-strength-bar">
                     <div
                       className="tn-strength-fill"
@@ -6598,38 +6970,38 @@ function PasswordTab({ tenDangNhap }) {
                     />
                   </div>
                   {strength.label && (
-                    <span
-                      className="tn-strength-label"
-                      style={{ color: strength.color }}
-                    >
+                    <span className="tn-strength-label" style={{ color: strength.color }}>
+                      <i className={`fas ${strength.icon}`}></i>
                       {strength.label}
                     </span>
                   )}
-                </>
+                </div>
               )}
             </div>
 
             <div className="tn-field">
-              <label className="tn-label">Xac nhan mat khau moi</label>
+              <label className="tn-label">
+                <i className="fas fa-check-circle"></i>
+                Xác nhận mật khẩu mới
+              </label>
               <input
-                className="tn-input"
+                className={`tn-input ${
+                  formData.confirmPassword &&
+                  formData.confirmPassword !== formData.newPassword
+                    ? "tn-input--error"
+                    : ""
+                }`}
                 type="password"
                 name="confirmPassword"
                 value={formData.confirmPassword}
                 onChange={handleChange}
-                placeholder="Nhap lai mat khau moi"
-                style={{
-                  borderColor:
-                    formData.confirmPassword &&
-                    formData.confirmPassword !== formData.newPassword
-                      ? "#EF4444"
-                      : undefined,
-                }}
+                placeholder="Nhập lại mật khẩu mới"
               />
               {formData.confirmPassword &&
                 formData.confirmPassword !== formData.newPassword && (
-                  <span style={{ fontSize: 12, color: "#EF4444", marginTop: 2 }}>
-                    Mat khau xac nhan chua khop
+                  <span className="tn-error-text">
+                    <i className="fas fa-triangle-exclamation"></i>
+                    Mật khẩu xác nhận chưa khớp
                   </span>
                 )}
             </div>
@@ -6638,11 +7010,18 @@ function PasswordTab({ tenDangNhap }) {
 
         <div className="tn-actions">
           <button
-            type="submit"
-            className="tn-btn tn-btn--primary"
-            disabled={saving}
+            type="reset"
+            className="tn-btn tn-btn--ghost"
+            onClick={() =>
+              setFormData({ currentPassword: "", newPassword: "", confirmPassword: "" })
+            }
           >
-            {saving ? "Dang cap nhat..." : "Cap nhat mat khau"}
+            <i className="fas fa-times"></i>
+            Xóa
+          </button>
+          <button type="submit" className="tn-btn tn-btn--primary" disabled={saving}>
+            <i className={saving ? "fas fa-spinner fa-spin" : "fas fa-key"}></i>
+            {saving ? "Đang cập nhật..." : "Cập nhật mật khẩu"}
           </button>
         </div>
       </form>
@@ -6650,22 +7029,16 @@ function PasswordTab({ tenDangNhap }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Root component
-// ---------------------------------------------------------------------------
 export default function ThongTinNguoiDung({ onProfileUpdate }) {
   const [activeTab, setActiveTab] = useState("profile");
-
   const tenDangNhap = localStorage.getItem("userName");
-
   const tabs = [
-    { key: "profile", label: "Thong tin ca nhan" },
-    { key: "password", label: "Doi mat khau" },
+    { key: "profile", label: "Thông tin cá nhân", icon: "fa-user-circle" },
+    { key: "password", label: "Đổi mật khẩu", icon: "fa-lock" },
   ];
 
   return (
     <div className="tn-page">
-      {/* Tab bar */}
       <div className="tn-tabs">
         {tabs.map((tab) => (
           <button
@@ -6673,6 +7046,7 @@ export default function ThongTinNguoiDung({ onProfileUpdate }) {
             className={`tn-tab${activeTab === tab.key ? " active" : ""}`}
             onClick={() => setActiveTab(tab.key)}
           >
+            <i className={`fas ${tab.icon}`}></i>
             {tab.label}
           </button>
         ))}
@@ -6687,12 +7061,11 @@ export default function ThongTinNguoiDung({ onProfileUpdate }) {
         />
       )}
 
-      {activeTab === "password" && (
-        <PasswordTab tenDangNhap={tenDangNhap} />
-      )}
+      {activeTab === "password" && <PasswordTab tenDangNhap={tenDangNhap} />}
     </div>
   );
 }
+
 ```
 
 ### frontend\web\src\tra-thuoc.jsx
@@ -6713,7 +7086,7 @@ const SEVERITY_CONFIG = {
     bullet: "tt-warning-bullet--danger",
     label: "tt-warning-label--danger",
     item: "tt-warning-item--danger",
-    icon: "!",
+    iconClass: "fa-solid fa-exclamation",
     accordionHeader: "tt-warnings-accordion-header--danger",
     accordionTitle: "tt-accordion-title--danger",
     listClass: "tt-warnings-list--danger",
@@ -6723,7 +7096,7 @@ const SEVERITY_CONFIG = {
     bullet: "tt-warning-bullet--warning",
     label: "tt-warning-label--warning",
     item: "tt-warning-item--warning",
-    icon: "!",
+    iconClass: "fa-solid fa-exclamation",
     accordionHeader: "tt-warnings-accordion-header--warning",
     accordionTitle: "tt-accordion-title--warning",
     listClass: "tt-warnings-list--warning",
@@ -6733,7 +7106,7 @@ const SEVERITY_CONFIG = {
     bullet: "tt-warning-bullet--info",
     label: "tt-warning-label--info",
     item: "tt-warning-item--info",
-    icon: "i",
+    iconClass: "fa-solid fa-info",
     accordionHeader: "tt-warnings-accordion-header--warning",
     accordionTitle: "tt-accordion-title--warning",
     listClass: "tt-warnings-list--warning",
@@ -6767,7 +7140,7 @@ function SearchBar({ value, onChange, onSearch, loading }) {
         onClick={onSearch}
         disabled={loading || !value.trim()}
       >
-        {loading ? "Đang tìm…" : "Tìm kiếm"}
+        {loading ? "Đang tìm…" : <><i className="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Tìm kiếm</>}
       </button>
     </div>
   );
@@ -6891,7 +7264,7 @@ function HealthWarnings({ warnings, profileAvailable, tenDangNhap }) {
   if (!tenDangNhap) {
     return (
       <div className="tt-warning-notice tt-warning-notice--neutral">
-        <span className="tt-notice-icon tt-notice-icon--neutral">i</span>
+        <i className="tt-notice-icon tt-notice-icon--neutral fa-solid fa-circle-info" aria-hidden="true"></i>
         <span>
           Đăng nhập để xem cảnh báo dựa trên hồ sơ sức khỏe cá nhân.
         </span>
@@ -6903,7 +7276,7 @@ function HealthWarnings({ warnings, profileAvailable, tenDangNhap }) {
   if (!profileAvailable) {
     return (
       <div className="tt-warning-notice tt-warning-notice--alert">
-        <span>⚠</span>
+        <i className="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
         <span>
           Chưa có hồ sơ sức khỏe. Vui lòng cập nhật hồ sơ sức khỏe để nhận
           cảnh báo phù hợp.
@@ -6916,7 +7289,7 @@ function HealthWarnings({ warnings, profileAvailable, tenDangNhap }) {
   if (warnings.length === 0) {
     return (
       <div className="tt-warning-notice tt-warning-notice--safe">
-        <span className="tt-notice-icon tt-notice-icon--safe">✓</span>
+        <i className="tt-notice-icon tt-notice-icon--safe fa-solid fa-circle-check" aria-hidden="true"></i>
         <span>
           Không có cảnh báo đặc biệt dựa trên hồ sơ sức khỏe hiện tại của bạn.
         </span>
@@ -6978,7 +7351,7 @@ function HealthWarnings({ warnings, profileAvailable, tenDangNhap }) {
             return (
               <div key={w.id || idx} className={`tt-warning-item ${cfg.item}`}>
                 <span className={`tt-warning-bullet ${cfg.bullet}`}>
-                  {cfg.icon}
+                  <i className={cfg.iconClass} aria-hidden="true"></i>
                 </span>
                 <div>
                   <div className={`tt-warning-label ${cfg.label}`}>
@@ -7098,14 +7471,14 @@ export default function TraThuoc() {
 
         {error && (
           <div className="tt-error-banner">
-            <span>⚠</span>
+            <i className="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
             <span>{error}</span>
           </div>
         )}
 
         {!tenDangNhap && (
           <div className="tt-login-hint">
-            <span className="tt-hint-icon">i</span>
+            <i className="tt-hint-icon fa-solid fa-circle-info" aria-hidden="true"></i>
             Đăng nhập để kích hoạt chức năng cảnh báo sức khỏe cá nhân.
           </div>
         )}
@@ -7116,7 +7489,7 @@ export default function TraThuoc() {
         <div ref={resultRef}>
           {medicines.length === 0 ? (
             <div className="tt-no-results">
-              <span className="tt-no-results-icon">🔍</span>
+              <i className="tt-no-results-icon fa-solid fa-magnifying-glass" aria-hidden="true"></i>
               <p className="tt-no-results-text">
                 Không tìm thấy thuốc nào khớp với từ khóa{" "}
                 <strong>"{query}"</strong>. Thử tìm với tên khác hoặc tên hoạt
@@ -7167,7 +7540,7 @@ export default function TraThuoc() {
                   </>
                 ) : (
                   <div className="tt-select-prompt">
-                    <span className="tt-select-prompt-icon">💊</span>
+                    <i className="tt-select-prompt-icon fa-solid fa-pills" aria-hidden="true"></i>
                     Chọn một thuốc từ danh sách bên trái để xem thông tin chi
                     tiết và cảnh báo sức khỏe.
                   </div>
@@ -7181,7 +7554,7 @@ export default function TraThuoc() {
       {/* Trang thai cho truoc khi tim kiem */}
       {!searchDone && !loading && (
         <div className="tt-empty-state">
-          <span className="tt-empty-icon">💊</span>
+          <i className="tt-empty-icon fa-solid fa-pills" aria-hidden="true"></i>
           <p className="tt-empty-text">
             Nhập tên thuốc hoặc hoạt chất và nhấn "Tìm kiếm" để bắt đầu.
           </p>
@@ -7197,251 +7570,12 @@ export default function TraThuoc() {
 // frontend/web/src/trang-chu.jsx
 import "../src/css/trang-chu.css";
 
-// SVG icons as inline components – no external dependencies
-function IconHeartPulse() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-    </svg>
-  );
-}
-
-function IconDatabase() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <ellipse cx="12" cy="5" rx="9" ry="3" />
-      <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-      <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-    </svg>
-  );
-}
-
-function IconBrain() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9.5 2a5 5 0 0 1 5 5v4a5 5 0 0 1-5 5H5a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5z" />
-      <path d="M14.5 2a5 5 0 0 1 5 5v4a5 5 0 0 1-5 5H10" />
-      <path d="M9.5 16v6" />
-      <path d="M14.5 16v6" />
-      <path d="M6 22h12" />
-    </svg>
-  );
-}
-
-function IconCheck() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  );
-}
-
-function IconUser() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-      <circle cx="12" cy="7" r="4" />
-    </svg>
-  );
-}
-
-function IconPlugin() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2L2 7l10 5 10-5-10-5z" />
-      <path d="M2 17l10 5 10-5" />
-      <path d="M2 12l10 5 10-5" />
-    </svg>
-  );
-}
-
-function IconActivity() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-    </svg>
-  );
-}
-
-function IconShield() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-    </svg>
-  );
-}
-
-function IconBook() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-    </svg>
-  );
-}
-
-function IconPlay() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="5 3 19 12 5 21 5 3" />
-    </svg>
-  );
-}
-
-function IconInfo() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <path d="M12 16v-4" />
-      <path d="M12 8h.01" />
-    </svg>
-  );
-}
-
-// Disease cards data
-const DISEASES = [
-  {
-    id: "diabetes",
-    name: "Tiểu Đường",
-    desc: "Đánh giá nguy cơ đái tháo đường type 2 dựa trên đường huyết và HbA1c",
-    icon: "🩸",
-    iconClass: "dc-icon--red",
-    tag: "ML + Rule",
-    featured: false,
-  },
-  {
-    id: "hypertension",
-    name: "Cao Huyết Áp",
-    desc: "Phân tích huyết áp, BMI và lối sống để đánh giá nguy cơ tăng huyết áp",
-    icon: "💊",
-    iconClass: "dc-icon--blue",
-    tag: "ML + Rule",
-    featured: true,
-  },
-  {
-    id: "cardiovascular",
-    name: "Tim Mạch",
-    desc: "Dự đoán nguy cơ bệnh tim mạch từ cholesterol và các yếu tố rủi ro",
-    icon: "🫀",
-    iconClass: "dc-icon--amber",
-    tag: "ML + Rule",
-    featured: false,
-  },
-  {
-    id: "kidney",
-    name: "Bệnh Thận",
-    desc: "Đánh giá suy thận mạn qua creatinine, acid uric và hồ sơ sinh hóa",
-    icon: "🔬",
-    iconClass: "dc-icon--purple",
-    tag: "ML + Rule",
-    featured: false,
-  },
-  {
-    id: "stroke",
-    name: "Đột Quỵ",
-    desc: "Phân tích yếu tố nguy cơ đột quỵ dựa trên quy tắc chuyên gia",
-    icon: "🧠",
-    iconClass: "dc-icon--teal",
-    tag: "Rule Engine",
-    featured: false,
-  },
-];
-
-// Workflow steps data
-const WORKFLOW_STEPS = [
-  {
-    id: 1,
-    icon: <IconUser />,
-    iconVariant: "",
-    title: "Xây dựng Hồ Sơ Sức Khỏe",
-    desc: "Người dùng nhập các chỉ số sinh tồn, sinh hóa, lối sống và tiền sử bệnh một lần duy nhất. Dữ liệu được lưu vào Health Profile và tái sử dụng cho mọi lần đánh giá.",
-    tags: [
-      { label: "BMI", cls: "ws-tag--blue" },
-      { label: "Huyết áp", cls: "ws-tag--blue" },
-      { label: "Đường huyết", cls: "ws-tag--blue" },
-      { label: "Cholesterol", cls: "ws-tag--blue" },
-    ],
-    cardVariant: "",
-    isLast: false,
-  },
-  {
-    id: 2,
-    icon: <IconPlugin />,
-    iconVariant: "",
-    title: "Tải Plugin Bệnh Động",
-    desc: "Người dùng chọn bệnh cần đánh giá. Hệ thống tự động tải plugin tương ứng từ metadata.json và sinh form nhập liệu mà không cần code mới.",
-    tags: [
-      { label: "Plugin-Based", cls: "ws-tag--blue" },
-      { label: "Metadata-Driven", cls: "ws-tag--blue" },
-      { label: "No-Code Form", cls: "ws-tag" },
-    ],
-    cardVariant: "",
-    isLast: false,
-  },
-  {
-    id: 3,
-    icon: <IconDatabase />,
-    iconVariant: "",
-    title: "Hợp Nhất Dữ Liệu",
-    desc: "Backend kết hợp Health Profile từ cơ sở dữ liệu với dữ liệu bổ sung từ form. Form data được ưu tiên khi xung đột, tạo ra bộ dữ liệu hợp nhất để đưa vào engine.",
-    tags: [
-      { label: "Health Profile", cls: "ws-tag" },
-      { label: "Form Data", cls: "ws-tag" },
-      { label: "Unified Data", cls: "ws-tag--blue" },
-    ],
-    cardVariant: "",
-    isLast: false,
-  },
-  {
-    id: 4,
-    icon: <IconShield />,
-    iconVariant: "ws-icon--highlight",
-    title: "Rule Engine Đánh Giá",
-    desc: "Rule Engine luôn chạy, tính điểm rủi ro dựa trên các quy tắc y tế được định nghĩa rõ ràng — baseline mapping, risk modifiers, protective factors và interactions.",
-    tags: [
-      { label: "Luôn hoạt động", cls: "ws-tag--blue" },
-      { label: "Giải thích được", cls: "ws-tag--blue" },
-      { label: "Có Fallback", cls: "ws-tag" },
-    ],
-    cardVariant: "ws-card--highlight",
-    isLast: false,
-  },
-  {
-    id: 5,
-    icon: <IconBrain />,
-    iconVariant: "ws-icon--highlight",
-    title: "ML Engine Dự Đoán",
-    desc: "Mô hình học máy huấn luyện từ dữ liệu NHANES tính xác suất mắc bệnh. Chạy song song với Rule Engine khi đủ dữ liệu đầu vào, tự động fallback nếu thiếu đặc trưng.",
-    tags: [
-      { label: "XGBoost", cls: "ws-tag--blue" },
-      { label: "F-beta Optimized", cls: "ws-tag--blue" },
-      { label: "NHANES Dataset", cls: "ws-tag" },
-    ],
-    cardVariant: "ws-card--highlight",
-    isLast: false,
-  },
-  {
-    id: 6,
-    icon: <IconCheck />,
-    iconVariant: "ws-icon--success",
-    title: "Kết Quả & Khuyến Nghị",
-    desc: "Hệ thống trả về mức độ nguy cơ từ Rule Engine và ML Engine cùng giải thích chi tiết và các khuyến nghị cá nhân hóa. Kết quả được lưu vào lịch sử đánh giá.",
-    tags: [
-      { label: "Risk Level", cls: "ws-tag--green" },
-      { label: "Explanation", cls: "ws-tag--green" },
-      { label: "Recommendations", cls: "ws-tag--green" },
-    ],
-    cardVariant: "ws-card--success",
-    isLast: true,
-  },
-];
-
 // Feature cards data
 const FEATURES = [
   {
     id: 1,
     iconClass: "fc-icon--1",
-    icon: <IconPlugin />,
+    icon: <i className="fa-solid fa-puzzle-piece"></i>,
     title: "Plugin-Based Architecture",
     desc: "Thêm bệnh mới chỉ cần tạo metadata.json trong thư mục plugin — không cần sửa code backend hay frontend.",
     featured: false,
@@ -7449,7 +7583,7 @@ const FEATURES = [
   {
     id: 2,
     iconClass: "fc-icon--2",
-    icon: <IconHeartPulse />,
+    icon: <i className="fa-solid fa-heart-pulse"></i>,
     title: "Hồ Sơ Sức Khỏe Trung Tâm",
     desc: "Nhập dữ liệu một lần, sử dụng cho tất cả các bệnh. Health Profile là nguồn dữ liệu chính được tái sử dụng.",
     featured: false,
@@ -7457,7 +7591,7 @@ const FEATURES = [
   {
     id: 3,
     iconClass: "fc-icon--3",
-    icon: <IconShield />,
+    icon: <i className="fa-solid fa-shield-halved"></i>,
     title: "Rule Engine Minh Bạch",
     desc: "Kết quả dựa trên quy tắc y tế rõ ràng, có thể giải thích từng điểm số — không phải hộp đen.",
     featured: true,
@@ -7466,7 +7600,7 @@ const FEATURES = [
   {
     id: 4,
     iconClass: "fc-icon--4",
-    icon: <IconBrain />,
+    icon: <i className="fa-solid fa-brain"></i>,
     title: "ML Engine với Fallback",
     desc: "Mô hình học máy tự động fallback về Rule Engine khi thiếu dữ liệu, đảm bảo kết quả luôn có sẵn.",
     featured: false,
@@ -7474,7 +7608,7 @@ const FEATURES = [
   {
     id: 5,
     iconClass: "fc-icon--5",
-    icon: <IconActivity />,
+    icon: <i className="fa-solid fa-chart-line"></i>,
     title: "Lịch Sử Đánh Giá",
     desc: "Theo dõi xu hướng nguy cơ theo thời gian, so sánh kết quả giữa các lần đánh giá và phát hiện thay đổi sớm.",
     featured: false,
@@ -7482,14 +7616,14 @@ const FEATURES = [
   {
     id: 6,
     iconClass: "fc-icon--6",
-    icon: <IconBook />,
+    icon: <i className="fa-solid fa-book-medical"></i>,
     title: "5 Bệnh Được Hỗ Trợ",
     desc: "Tiểu đường, cao huyết áp, tim mạch, bệnh thận và đột quỵ — 4 bệnh có cả ML và Rule Engine.",
     featured: false,
   },
 ];
 
-export default function TrangChu({ setCurrentView, userName, onLogout, onGoToLogin }) {
+export default function TrangChu({ setCurrentView, onGoToLogin }) {
 
   // Hàm navigate an toàn — nếu chưa đăng nhập (setCurrentView undefined) thì gọi onGoToLogin
   function navigate(key) {
@@ -7507,158 +7641,219 @@ export default function TrangChu({ setCurrentView, userName, onLogout, onGoToLog
             HERO
         ==================================================== */}
         <section className="hero">
-          <div className="hero-bg-mesh" aria-hidden="true">
-            <div className="mesh-circle mesh-circle--1" />
-            <div className="mesh-circle mesh-circle--2" />
-            <div className="mesh-circle mesh-circle--3" />
-          </div>
 
-          <div className="container hero-container">
-            {/* Left: Text */}
-            <div className="hero-text">
+          <div className="hero-decoration-blob"></div>
+
+          <div className="container hero-container relative-z1">
+
+            {/* Cột trái: Nội dung & Call to Action */}
+            <div className="hero-content">
               <div className="hero-badge">
-                <span className="badge-dot" />
-                Trường Công Nghệ Thông Tin &amp; Truyền Thông – Đại Học Cần Thơ
+                <i className="badge-icon fa-solid fa-graduation-cap" aria-hidden="true"></i>
+                <span className="badge-text">Trường CNTT&TT – ĐH Cần Thơ</span>
               </div>
 
-              <h1 className="hero-heading">
-                Đánh Giá Nguy Cơ<br />
-                <em>Bệnh Mạn Tính</em> Bằng<br />
-                AI &amp; Rule Engine
+              <h1 className="hero-title">
+                Đánh Giá Nguy Cơ <br />
+                <span className="text-gradient">Bệnh Mạn Tính</span> <br />
+                Bằng AI & Rule Engine
               </h1>
 
               <p className="hero-desc">
-                Nền tảng sàng lọc sức khỏe thông minh kết hợp luật chuyên gia
-                và mô hình học máy. Hỗ trợ 5 nhóm bệnh mạn tính phổ biến với
-                kiến trúc Plugin-Based mở rộng linh hoạt.
+                Hệ thống dự đoán rủi ro y tế kết hợp giữa trí tuệ nhân tạo (Machine Learning) và bộ luật y khoa chuyên gia, đem lại kết quả chuẩn xác, tường minh và có khả năng giải thích chi tiết.
               </p>
 
               <div className="hero-cta">
-                <button
-                  className="btn btn--primary"
-                  onClick={() => navigate("risk")}
-                >
-                  <IconPlay />
-                  Bắt đầu đánh giá
+                <button className="btn hero-btn-primary" onClick={() => navigate("risk")}>
+                  Bắt đầu đánh giá <i className="fa-solid fa-arrow-right"></i>
                 </button>
-                <button
-                  className="btn btn--outline"
-                  onClick={() => navigate("gioi-thieu")}
-                >
-                  <IconInfo />
-                  Tìm hiểu hệ thống
+                <button className="btn hero-btn-secondary" onClick={() => navigate("about")}>
+                  <i className="fa-solid fa-circle-info"></i> Tìm hiểu hệ thống
                 </button>
               </div>
 
-              <div className="hero-trust">
-                <div className="trust-item">
-                  <span className="trust-num">5</span>
-                  <span className="trust-label">Bệnh mạn tính</span>
+              {/* Block thống kê: Key Stats Bar */}
+              <div className="hero-stats-block">
+                <div className="stat-item">
+                  <span className="stat-value">X+</span>
+                  <span className="stat-label">Bệnh mạn tính</span>
                 </div>
-                <div className="trust-divider" />
-                <div className="trust-item">
-                  <span className="trust-num">2 Engine</span>
-                  <span className="trust-label">Rule + ML kết hợp</span>
+                <div className="stat-divider"></div>
+                <div className="stat-item">
+                  <span className="stat-value">2</span>
+                  <span className="stat-label">Engine kết hợp</span>
                 </div>
-                <div className="trust-divider" />
-                <div className="trust-item">
-                  <span className="trust-num">NHANES</span>
-                  <span className="trust-label">Dữ liệu huấn luyện</span>
+                <div className="stat-divider"></div>
+                <div className="stat-item">
+                  <span className="stat-value">JSON</span>
+                  <span className="stat-label">Cấu hình Plugin</span>
                 </div>
               </div>
             </div>
 
-            {/* Right: Risk Assessment Card */}
-            <div className="hero-visual" aria-hidden="true">
-              <div className="visual-card--main">
-                <div className="vc-header">
-                  <div className="vc-dots">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                  <span className="vc-title">Kết quả đánh giá · Nguy cơ tổng hợp</span>
+            {/* Cột phải: Card Plugin Overview (Giữ nguyên như bản trước) */}
+            <div className="hero-visual">
+              <div className="plugin-overview-card">
+                {/* ... Nội dung Plugin Card giữ nguyên ... */}
+                <div className="poc-header">
+                  <h3 className="poc-title">
+                    <i className="fa-solid fa-layer-group" style={{ color: '#2563EB', marginRight: '8px' }}></i> Hệ thống Plugin Bệnh Lý
+                  </h3>
+                  <span className="poc-status-badge">
+                    <span className="status-dot"></span> Đang hoạt động
+                  </span>
                 </div>
-                <div className="vc-body">
-                  <div className="vc-patient-row">
-                    <div className="vc-patient-avatar">NV</div>
-                    <div className="vc-patient-info">
-                      <span className="vc-patient-name">Nguyễn Văn A</span>
-                      <span className="vc-patient-meta">45 tuổi · Nam · BMI 26.4</span>
+
+                <div className="poc-grid">
+                  {/* 1. Tiểu đường */}
+                  <div className="poc-item poc-item--diabetes">
+                    <div className="poc-icon"><i className="fa-solid fa-droplet"></i></div>
+                    <div className="poc-info">
+                      <span className="poc-name">Tiểu đường</span>
+                      <span className="poc-tech">Rule + ML</span>
                     </div>
                   </div>
 
-                  <div className="vc-risk-list">
-                    <div className="vc-risk-item">
-                      <div className="vc-risk-label">
-                        <span>Tiểu Đường</span>
-                        <span className="vc-risk-pct" style={{ color: "#f59e0b" }}>62%</span>
-                      </div>
-                      <div className="vc-risk-bar-track">
-                        <div className="vc-risk-bar-fill vc-risk-bar-fill--mid" style={{ width: "62%" }} />
-                      </div>
-                    </div>
-                    <div className="vc-risk-item">
-                      <div className="vc-risk-label">
-                        <span>Cao Huyết Áp</span>
-                        <span className="vc-risk-pct" style={{ color: "#ef4444" }}>81%</span>
-                      </div>
-                      <div className="vc-risk-bar-track">
-                        <div className="vc-risk-bar-fill vc-risk-bar-fill--high" style={{ width: "81%" }} />
-                      </div>
-                    </div>
-                    <div className="vc-risk-item">
-                      <div className="vc-risk-label">
-                        <span>Tim Mạch</span>
-                        <span className="vc-risk-pct" style={{ color: "#22c55e" }}>28%</span>
-                      </div>
-                      <div className="vc-risk-bar-track">
-                        <div className="vc-risk-bar-fill vc-risk-bar-fill--low" style={{ width: "28%" }} />
-                      </div>
+                  {/* 2. Tim mạch */}
+                  <div className="poc-item poc-item--cardio">
+                    <div className="poc-icon"><i className="fa-solid fa-heart-pulse"></i></div>
+                    <div className="poc-info">
+                      <span className="poc-name">Tim mạch</span>
+                      <span className="poc-tech">Rule + ML</span>
                     </div>
                   </div>
 
-                  <div className="vc-footer-meta">
-                    <span className="vc-meta-chip">Rule + ML Engine</span>
-                    <span className="vc-meta-status">
-                      <span className="vc-meta-dot" />
-                      Đã phân tích
-                    </span>
+                  {/* 3. Cao huyết áp */}
+                  <div className="poc-item poc-item--hypertension">
+                    <div className="poc-icon"><i className="fa-solid fa-gauge-high"></i></div>
+                    <div className="poc-info">
+                      <span className="poc-name">Cao huyết áp</span>
+                      <span className="poc-tech">Rule + ML</span>
+                    </div>
+                  </div>
+
+                  {/* 4. Bệnh thận */}
+                  <div className="poc-item poc-item--kidney">
+                    <div className="poc-icon"><i className="fa-solid fa-staff-snake"></i></div>
+                    <div className="poc-info">
+                      <span className="poc-name">Bệnh thận</span>
+                      <span className="poc-tech">Rule + ML</span>
+                    </div>
+                  </div>
+
+                  {/* 5. Đột quỵ */}
+                  <div className="poc-item poc-item--stroke">
+                    <div className="poc-icon"><i className="fa-solid fa-brain"></i></div>
+                    <div className="poc-info">
+                      <span className="poc-name">Đột quỵ</span>
+                      <span className="poc-tech">Rule + ML</span>
+                    </div>
+                  </div>
+
+                  {/* 6. Mở rộng (Dashed) */}
+                  <div className="poc-item poc-item--dashed">
+                    <div className="poc-icon"><i className="fa-solid fa-plus"></i></div>
+                    <div className="poc-info">
+                      <span className="poc-name">Mở rộng bệnh mới</span>
+                      <span className="poc-tech">Metadata JSON</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="poc-footer">
+                  <div className="poc-footer-text">
+                    <i className="fa-solid fa-code-branch"></i> Kiến trúc mở rộng linh hoạt, không giới hạn
                   </div>
                 </div>
               </div>
             </div>
+
           </div>
         </section>
 
         {/* ====================================================
             DISEASE STRIP
         ==================================================== */}
-        <section className="diseases">
+        <section className="diseases-section">
           <div className="container">
-            <div className="section-header">
-              <div className="section-badge">5 Bệnh Được Hỗ Trợ</div>
+            <div className="section-header text-center" style={{ marginBottom: "36px" }}>
+              <div className="section-badge section-badge--eyebrow">5 BỆNH ĐƯỢC HỖ TRỢ</div>
               <h2 className="section-title">Sàng lọc toàn diện các bệnh mạn tính</h2>
               <p className="section-desc">
-                Mỗi bệnh là một plugin độc lập — thêm mới mà không cần sửa code, 
-                mỗi plugin tích hợp cả Rule Engine và ML Engine.
+                Mỗi bệnh lý vận hành như một plugin độc lập, tự động phân luồng xử lý qua Rule Engine hoặc Machine Learning để đảm bảo độ chính xác cao nhất.
               </p>
             </div>
 
+            {/* Lưới 3 cột x 2 hàng */}
             <div className="disease-grid">
-              {DISEASES.map((d) => (
-                <div
-                  key={d.id}
-                  className={`disease-card${d.featured ? " disease-card--featured" : ""}`}
-                >
-                  <div className={`dc-icon ${d.iconClass}`}>
-                    {d.icon}
-                  </div>
-                  <div className="dc-name">{d.name}</div>
-                  <div className="dc-desc">{d.desc}</div>
-                  <span className="dc-tag">{d.tag}</span>
+
+              {/* 1. Tiểu đường (Nhóm Chuyển hóa - Xanh dương) */}
+              <div className="disease-card disease-card--metabolic">
+                <div className="dc-icon-wrapper">
+                  <i className="dc-icon fa-solid fa-droplet" aria-hidden="true"></i>
                 </div>
-              ))}
+                <h3 className="dc-title">Bệnh Tiểu Đường</h3>
+                <p className="dc-desc">Sàng lọc sớm nguy cơ đái tháo đường tuýp 2 dựa trên chỉ số Glucose, BMI và tiền sử gia đình.</p>
+                <div className="dc-footer">
+                  <span className="dc-badge dc-badge--hybrid">ML + RULE ENGINE</span>
+                </div>
+              </div>
+
+              {/* 2. Cao huyết áp (Nhóm Tim mạch - Đỏ/Cam) */}
+              <div className="disease-card disease-card--cardio">
+                <div className="dc-icon-wrapper">
+                  <i className="dc-icon fa-solid fa-gauge-high" aria-hidden="true"></i>
+                </div>
+                <h3 className="dc-title">Cao Huyết Áp</h3>
+                <p className="dc-desc">Đánh giá rủi ro tăng huyết áp thông qua chỉ số huyết áp tâm thu, tâm trương và nhịp tim.</p>
+                <div className="dc-footer">
+                  <span className="dc-badge dc-badge--hybrid">ML + RULE ENGINE</span>
+                </div>
+              </div>
+
+              {/* 3. Tim mạch (Nhóm Tim mạch - Đỏ) */}
+              <div className="disease-card disease-card--cardio-red">
+                <div className="dc-icon-wrapper">
+                  <i className="dc-icon fa-solid fa-heart-pulse" aria-hidden="true"></i>
+                </div>
+                <h3 className="dc-title">Bệnh Tim Mạch</h3>
+                <p className="dc-desc">Phân tích toàn diện nguy cơ suy tim, nhồi máu cơ tim từ bộ hồ sơ lipid máu và lối sống.</p>
+                <div className="dc-footer">
+                  <span className="dc-badge dc-badge--hybrid">ML + RULE ENGINE</span>
+                </div>
+              </div>
+
+              {/* 4. Bệnh thận (Đã Fix Icon HealthIcons) */}
+              <div className="disease-card disease-card--renal">
+                <div className="dc-icon-wrapper">
+                  <i className="dc-icon fa-solid fa-hand-holding-medical" aria-hidden="true"></i>
+                </div>
+                <h3 className="dc-title">Bệnh Thận Mạn</h3>
+                <p className="dc-desc">Kiểm tra chức năng lọc của thận thông qua chỉ số Creatinine, huyết áp và protein niệu.</p>
+                <div className="dc-footer">
+                  <span className="dc-badge dc-badge--hybrid">ML + RULE ENGINE</span>
+                </div>
+              </div>
+
+              {/* 5. Đột quỵ (Nhóm Thần kinh/Tim mạch) */}
+              <div className="disease-card disease-card--stroke">
+                <div className="dc-icon-wrapper">
+                  <i className="dc-icon fa-solid fa-brain" aria-hidden="true"></i>
+                </div>
+                <h3 className="dc-title">Nguy Cơ Đột Quỵ</h3>
+                <p className="dc-desc">Phát hiện nguy cơ tắc nghẽn mạch máu não dựa trên các chỉ số y khoa chuẩn chuyên gia.</p>
+                <div className="dc-footer">
+                  <span className="dc-badge dc-badge--rule">RULE ENGINE</span>
+                </div>
+              </div>
+
+            </div>
+
+            {/* CTA Footer Section */}
+            <div className="diseases-cta text-center">
+              <button className="btn btn-outline-primary" onClick={() => navigate("risk")}>
+                Khám phá chi tiết hệ thống Plugin <i className="fa-solid fa-arrow-right"></i>
+              </button>
             </div>
           </div>
         </section>
@@ -7666,41 +7861,104 @@ export default function TrangChu({ setCurrentView, userName, onLogout, onGoToLog
         {/* ====================================================
             WORKFLOW SECTION
         ==================================================== */}
-        <section className="workflow" id="workflow">
+        <section className="process-section">
           <div className="container">
-            <div className="section-header">
-              <div className="section-badge">Quy Trình Đánh Giá</div>
+            <div className="section-header text-center" style={{ marginBottom: "48px" }}>
+              <div className="section-badge section-badge--eyebrow">QUY TRÌNH HỆ THỐNG</div>
               <h2 className="section-title">Từ hồ sơ đến kết quả phân tích</h2>
               <p className="section-desc">
-                Pipeline kết hợp Rule Engine và ML Engine — đảm bảo kết quả
-                luôn có, dù dữ liệu đầy đủ hay chưa.
+                Hệ thống xử lý luồng dữ liệu y tế qua 6 bước khép kín, đảm bảo tính chuẩn xác, minh bạch và cá nhân hóa cho từng người dùng.
               </p>
             </div>
 
-            <div className="workflow-timeline">
-              {WORKFLOW_STEPS.map((step) => (
-                <div
-                  key={step.id}
-                  className={`workflow-step${step.isLast ? " workflow-step--last" : ""}`}
-                >
-                  <div className="ws-icon-wrap">
-                    <div className={`ws-icon ${step.iconVariant}`}>
-                      {step.icon}
-                    </div>
-                    {!step.isLast && <div className="ws-connector" />}
-                  </div>
-                  <div className={`ws-card ${step.cardVariant}`}>
-                    <span className="ws-step-num">BƯỚC {String(step.id).padStart(2, "0")}</span>
-                    <h3 className="ws-title">{step.title}</h3>
-                    <p className="ws-desc">{step.desc}</p>
-                    <div className="ws-tags">
-                      {step.tags.map((t) => (
-                        <span key={t.label} className={`ws-tag ${t.cls}`}>{t.label}</span>
-                      ))}
-                    </div>
-                  </div>
+            {/* Dùng class process-grid để khớp với CSS bạn vừa gửi */}
+            <div className="process-grid">
+
+              {/* BƯỚC 01 */}
+              <div className="process-card">
+                <div className="proc-header">
+                  <span className="proc-step-badge">BƯỚC 01</span>
+                  <i className="proc-icon fa-solid fa-clipboard-list" aria-hidden="true"></i>
                 </div>
-              ))}
+                <h3 className="proc-title">Thu thập Hồ Sơ Sức Khỏe</h3>
+                <p className="proc-desc">Tiếp nhận các chỉ số lâm sàng cơ bản và chuyên sâu từ người dùng. Hệ thống hỗ trợ lưu trữ để không cần nhập lại nhiều lần.</p>
+                <div className="proc-tags">
+                  <span className="proc-tag tag-input">BMI</span>
+                  <span className="proc-tag tag-input">Huyết áp</span>
+                  <span className="proc-tag tag-input">Đường huyết</span>
+                </div>
+              </div>
+
+              {/* BƯỚC 02 */}
+              <div className="process-card">
+                <div className="proc-header">
+                  <span className="proc-step-badge">BƯỚC 02</span>
+                  <i className="proc-icon fa-solid fa-puzzle-piece" aria-hidden="true"></i>
+                </div>
+                <h3 className="proc-title">Ánh xạ Metadata Plugin</h3>
+                <p className="proc-desc">Đọc cấu hình JSON của bệnh lý tương ứng để xác định những trường dữ liệu nào là bắt buộc và những trường nào có thể bỏ qua.</p>
+                <div className="proc-tags">
+                  <span className="proc-tag tag-tech">Plugin-Based</span>
+                  <span className="proc-tag tag-tech">JSON Parser</span>
+                </div>
+              </div>
+
+              {/* BƯỚC 03 */}
+              <div className="process-card">
+                <div className="proc-header">
+                  <span className="proc-step-badge">BƯỚC 03</span>
+                  <i className="proc-icon fa-solid fa-filter" aria-hidden="true"></i>
+                </div>
+                <h3 className="proc-title">Tiền xử lý & Chuẩn hóa</h3>
+                <p className="proc-desc">Tự động điền khuyết các dữ liệu bị thiếu bằng thuật toán, sau đó chuẩn hóa thang đo (scaling) để mô hình AI có thể hiểu được.</p>
+                <div className="proc-tags">
+                  <span className="proc-tag tag-tech">Missing Imputation</span>
+                  <span className="proc-tag tag-tech">Standard Scaler</span>
+                </div>
+              </div>
+
+              {/* BƯỚC 04 */}
+              <div className="process-card">
+                <div className="proc-header">
+                  <span className="proc-step-badge">BƯỚC 04</span>
+                  <i className="proc-icon fa-solid fa-scale-balanced" aria-hidden="true"></i>
+                </div>
+                <h3 className="proc-title">Đánh giá Rule Engine</h3>
+                <p className="proc-desc">Đối chiếu dữ liệu với các bộ luật y khoa chuyên gia. Nếu phát hiện rủi ro rõ ràng dựa trên ngưỡng lâm sàng, hệ thống sẽ kết luận ngay.</p>
+                <div className="proc-tags">
+                  <span className="proc-tag tag-tech">Y khoa chuyên gia</span>
+                  <span className="proc-tag tag-tech">Ngưỡng lâm sàng</span>
+                </div>
+              </div>
+
+              {/* BƯỚC 05 */}
+              <div className="process-card">
+                <div className="proc-header">
+                  <span className="proc-step-badge">BƯỚC 05</span>
+                  <i className="proc-icon fa-solid fa-brain" aria-hidden="true"></i>
+                </div>
+                <h3 className="proc-title">Dự đoán ML Engine</h3>
+                <p className="proc-desc">Nếu Rule Engine không chắc chắn, dữ liệu sẽ được chuyển qua mô hình Machine Learning để tính toán xác suất rủi ro tiềm ẩn.</p>
+                <div className="proc-tags">
+                  <span className="proc-tag tag-tech">XGBoost & RF</span>
+                  <span className="proc-tag tag-tech">F-beta Optimized</span>
+                </div>
+              </div>
+
+              {/* BƯỚC 06 */}
+              <div className="process-card">
+                <div className="proc-header">
+                  <span className="proc-step-badge proc-step-badge--final">BƯỚC 06</span>
+                  <i className="proc-icon fa-solid fa-circle-check" aria-hidden="true"></i>
+                </div>
+                <h3 className="proc-title">Tổng hợp & Giải thích</h3>
+                <p className="proc-desc">Xuất báo cáo cuối cùng bao gồm mức độ rủi ro, giải thích lý do (những chỉ số nào gây ảnh hưởng) và đưa ra lời khuyên phù hợp.</p>
+                <div className="proc-tags">
+                  <span className="proc-tag tag-output">Risk Level</span>
+                  <span className="proc-tag tag-output">Explanation</span>
+                </div>
+              </div>
+
             </div>
           </div>
         </section>
@@ -7714,7 +7972,7 @@ export default function TrangChu({ setCurrentView, userName, onLogout, onGoToLog
               <div className="section-badge">Tính Năng</div>
               <h2 className="section-title">Thiết kế cho độ mở rộng và tin cậy</h2>
               <p className="section-desc">
-                Kiến trúc Plugin-Based với Metadata-Driven Design — 
+                Kiến trúc Plugin-Based với Metadata-Driven Design —
                 thêm bệnh mới không cần sửa code, hệ thống luôn có kết quả.
               </p>
             </div>
@@ -7742,6 +8000,7 @@ export default function TrangChu({ setCurrentView, userName, onLogout, onGoToLog
     </div>
   );
 }
+
 ```
 
 ### frontend\web\src\components\footer.jsx
@@ -7774,17 +8033,10 @@ const ACCOUNT_LINKS = [
 ];
 
 const CONTACT_ITEMS = [
-  { icon: "✉", text: "cict@ctu.edu.vn" },
-  { icon: "☎", text: "(0292) 3872 209" },
-  { icon: "⌖", text: "Khu II, đường 3/2, Q. Ninh Kiều, TP. Cần Thơ" },
-  { icon: "⊞", text: "Trường CNTT&TT – Đại học Cần Thơ" },
-];
-
-const TECH_BADGES = [
-  { dot: true, label: "Rule Engine" },
-  { dot: true, label: "ML Engine" },
-  { dot: false, label: "5 Bệnh Plugin" },
-  { dot: false, label: "NHANES Dataset" },
+  { iconClass: "fa-solid fa-envelope", text: "cict@ctu.edu.vn" },
+  { iconClass: "fa-solid fa-phone", text: "(0292) 3872 209" },
+  { iconClass: "fa-solid fa-location-dot", text: "Khu II, đường 3/2, Q. Ninh Kiều, TP. Cần Thơ" },
+  { iconClass: "fa-solid fa-building-columns", text: "Trường CNTT&TT - Đại học Cần Thơ" },
 ];
 
 export default function Footer({ setCurrentView }) {
@@ -7814,15 +8066,6 @@ export default function Footer({ setCurrentView }) {
             Nền tảng sàng lọc nguy cơ bệnh mạn tính kết hợp luật chuyên gia
             và học máy. Kiến trúc Plugin-Based — mở rộng không cần sửa code.
           </p>
-
-          <div className="footer-badges">
-            {TECH_BADGES.map((b, i) => (
-              <span key={i} className="footer-badge">
-                {b.dot && <span className="footer-badge-dot" />}
-                {b.label}
-              </span>
-            ))}
-          </div>
         </div>
 
         {/* ── Navigation column ── */}
@@ -7832,7 +8075,7 @@ export default function Footer({ setCurrentView }) {
             {NAV_LINKS.map((item) => (
               <li key={item.key}>
                 <button className="footer-link" onClick={() => handleNav(item.key)}>
-                  <span className="footer-link-arrow">›</span>
+                  <i className="footer-link-arrow fa-solid fa-chevron-right" aria-hidden="true"></i>
                   {item.label}
                 </button>
               </li>
@@ -7847,7 +8090,7 @@ export default function Footer({ setCurrentView }) {
             {DISEASE_LINKS.map((item) => (
               <li key={item.key}>
                 <button className="footer-link" onClick={() => handleNav(item.key)}>
-                  <span className="footer-link-arrow">›</span>
+                  <i className="footer-link-arrow fa-solid fa-chevron-right" aria-hidden="true"></i>
                   {item.label}
                 </button>
               </li>
@@ -7858,7 +8101,7 @@ export default function Footer({ setCurrentView }) {
             {ACCOUNT_LINKS.map((item) => (
               <li key={item.key}>
                 <button className="footer-link" onClick={() => handleNav(item.key)}>
-                  <span className="footer-link-arrow">›</span>
+                  <i className="footer-link-arrow fa-solid fa-chevron-right" aria-hidden="true"></i>
                   {item.label}
                 </button>
               </li>
@@ -7872,7 +8115,7 @@ export default function Footer({ setCurrentView }) {
           <ul className="footer-links footer-links--contact">
             {CONTACT_ITEMS.map((item, i) => (
               <li key={i} className="footer-contact-item">
-                <span className="footer-contact-icon">{item.icon}</span>
+                <i className={`footer-contact-icon ${item.iconClass}`} aria-hidden="true"></i>
                 <span className="footer-contact-text">{item.text}</span>
               </li>
             ))}
@@ -7888,7 +8131,7 @@ export default function Footer({ setCurrentView }) {
                 className="footer-social-btn"
                 aria-label="Facebook CICT"
               >
-                fb
+                <i className="fa-brands fa-facebook-f" aria-hidden="true"></i>
               </a>
               <a
                 href="https://cit.ctu.edu.vn"
@@ -7897,14 +8140,14 @@ export default function Footer({ setCurrentView }) {
                 className="footer-social-btn"
                 aria-label="Website CICT"
               >
-                web
+                <i className="fa-solid fa-globe" aria-hidden="true"></i>
               </a>
               <a
                 href="mailto:cict@ctu.edu.vn"
                 className="footer-social-btn"
                 aria-label="Email"
               >
-                mail
+                <i className="fa-solid fa-envelope" aria-hidden="true"></i>
               </a>
             </div>
           </div>
@@ -7931,6 +8174,7 @@ export default function Footer({ setCurrentView }) {
     </footer>
   );
 }
+
 ```
 
 ### frontend\web\src\components\header.jsx
@@ -7938,13 +8182,31 @@ export default function Footer({ setCurrentView }) {
 import { useState, useRef, useEffect } from "react";
 import "./header.css";
 
-export default function Header({ currentView, setCurrentView, userName, onLogout }) {
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const dropdownRef = useRef(null);
+const API_BASE_URL = "http://127.0.0.1:8000";
 
-  const initials = userName
-    ? userName.slice(0, 2).toUpperCase()
+function resolveAvatarUrl(url) {
+  if (!url) return "";
+  if (/^(https?:|data:|blob:)/i.test(url)) return url;
+  return `${API_BASE_URL}${url.startsWith("/") ? url : `/${url}`}`;
+}
+
+export default function Header({ currentView, setCurrentView, userName, userProfile, onLogout }) {
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
+  const dropdownRef = useRef(null);
+  
+  const displayName = userProfile?.hoTen || userName || userProfile?.tenDangNhap || "AI";
+  // Cập nhật fallback cho loginName để luôn lấy được tên đăng nhập
+  const loginName = userProfile?.tenDangNhap || userName || ""; 
+  const avatarUrl = !avatarFailed ? resolveAvatarUrl(userProfile?.anhDaiDien) : "";
+
+  const initials = displayName
+    ? displayName.trim().slice(0, 2).toUpperCase()
     : "AI";
+
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [userProfile?.anhDaiDien]);
 
   useEffect(() => {
     function handleClickOutside(e) {
@@ -7967,11 +8229,11 @@ export default function Header({ currentView, setCurrentView, userName, onLogout
   ];
 
   const menuItems = [
-    { icon: "👤", label: "Quản Lý Thông Tin", key: "thong-tin-nd" },
-    { icon: "🫀", label: "Hồ Sơ Sức Khỏe", key: "profile" },
-    { icon: "📈", label: "Lịch Sử Đánh Giá", key: "history" },
-    { icon: "⚙️", label: "Cài Đặt Tài Khoản", key: "cai-dat" },
-    { icon: "🔔", label: "Thông Báo", key: "thong-bao" },
+    { iconClass: "fa-solid fa-user-gear", label: "Quản Lý Thông Tin", key: "thong-tin-nd" },
+    { iconClass: "fa-solid fa-heart-pulse", label: "Hồ Sơ Sức Khỏe", key: "profile" },
+    { iconClass: "fa-solid fa-chart-line", label: "Lịch Sử Đánh Giá", key: "history" },
+    { iconClass: "fa-solid fa-gear", label: "Cài Đặt Tài Khoản", key: "cai-dat" },
+    { iconClass: "fa-solid fa-bell", label: "Thông Báo", key: "thong-bao" },
   ];
 
   function handleMenuItemClick(key) {
@@ -8013,18 +8275,40 @@ export default function Header({ currentView, setCurrentView, userName, onLogout
             aria-label="Mo menu nguoi dung"
             aria-expanded={dropdownOpen}
           >
-            <span className="avatar-initials">{initials}</span>
-            <span className="avatar-caret">{dropdownOpen ? "▲" : "▼"}</span>
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt="Anh dai dien"
+                className="avatar-img"
+                onError={() => setAvatarFailed(true)}
+              />
+            ) : (
+              <span className="avatar-initials">{initials}</span>
+            )}
+            <i className={`avatar-caret fa-solid ${dropdownOpen ? "fa-chevron-up" : "fa-chevron-down"}`} aria-hidden="true"></i>
           </button>
 
           {dropdownOpen && (
             <div className="avatar-dropdown">
               <div className="dropdown-header">
-                <div className="dropdown-avatar-lg">{initials}</div>
+                {avatarUrl ? (
+                  <img
+                    src={avatarUrl}
+                    alt="Anh dai dien"
+                    className="dropdown-avatar-img"
+                    onError={() => setAvatarFailed(true)}
+                  />
+                ) : (
+                  <div className="dropdown-avatar-lg">{initials}</div>
+                )}
+                
+                {/* ĐÃ CHỈNH SỬA Ở ĐÂY: Hiển thị tên đăng nhập thay cho "Người dùng" */}
                 <div className="dropdown-user-info">
-                  <span className="dropdown-username">{userName}</span>
-                  <span className="dropdown-role">Nguoi dung</span>
+                  <span className="dropdown-username">{displayName}</span>
+                  <span className="dropdown-role">{loginName}</span>
                 </div>
+                {/* KẾT THÚC CHỈNH SỬA */}
+
               </div>
 
               <div className="dropdown-divider" />
@@ -8036,7 +8320,7 @@ export default function Header({ currentView, setCurrentView, userName, onLogout
                       className="dropdown-item"
                       onClick={() => handleMenuItemClick(item.key)}
                     >
-                      <span className="dropdown-item-icon">{item.icon}</span>
+                      <i className={`dropdown-item-icon ${item.iconClass}`} aria-hidden="true"></i>
                       <span>{item.label}</span>
                     </button>
                   </li>
@@ -8046,7 +8330,7 @@ export default function Header({ currentView, setCurrentView, userName, onLogout
               <div className="dropdown-divider" />
 
               <button className="dropdown-logout" onClick={onLogout}>
-                <span>🚪</span>
+                <i className="fa-solid fa-right-from-bracket" aria-hidden="true"></i>
                 <span>Đăng Xuất</span>
               </button>
             </div>

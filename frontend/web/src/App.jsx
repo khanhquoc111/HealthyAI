@@ -1,5 +1,6 @@
 // frontend/src/App.jsx
 import { useState } from "react";
+import { BrowserRouter as Router, useNavigate, useLocation } from "react-router-dom"; // <-- IMPORT REACT ROUTER
 import PhanTichBenh from "./phan-tich-benh"; 
 import DangNhap from "./dang-nhap";
 import DangKy from "./dang-ky";
@@ -9,50 +10,101 @@ import GioiThieu from "./gioi-thieu";
 import TraThuoc from "./tra-thuoc";
 import ThongTinND from "./thongtin-nd.jsx";
 
-
 import Header from "./components/header.jsx";
-import Footer from "./components/footer.jsx"; // <-- ĐÃ THÊM IMPORT FOOTER
+import Footer from "./components/footer.jsx";
+
+function getStoredUserProfile() {
+  try {
+    const raw = localStorage.getItem("currentUser");
+    if (raw) return JSON.parse(raw);
+  } catch {
+    localStorage.removeItem("currentUser");
+  }
+
+  const tenDangNhap = localStorage.getItem("userName");
+  return tenDangNhap ? { tenDangNhap, hoTen: "", anhDaiDien: "" } : null;
+}
+
+function getUserDisplayName(userProfile) {
+  return userProfile?.hoTen || userProfile?.tenDangNhap || "";
+}
 
 // Đọc trạng thái auth từ localStorage ngay lúc khởi tạo state
 function getInitialAuth() {
   const token = localStorage.getItem("token");
-  const email = localStorage.getItem("userName");
-  if (token && email) {
-    return { isAuthenticated: true, userEmail: email };
+  const userProfile = getStoredUserProfile();
+  if (token && userProfile?.tenDangNhap) {
+    return { isAuthenticated: true, userProfile };
   }
   // Dọn sạch nếu thiếu một trong hai
   localStorage.removeItem("token");
   localStorage.removeItem("userName");
-  return { isAuthenticated: false, userEmail: "" };
+  localStorage.removeItem("currentUser");
+  return { isAuthenticated: false, userProfile: null };
 }
 
 const initialAuth = getInitialAuth();
 
-export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(initialAuth.isAuthenticated);
-  const [userEmail, setUserEmail] = useState(initialAuth.userEmail);
-  // ĐỂ MỞ TRANG ĐĂNG NHẬP ĐẦU TIÊN: Đổi trạng thái mặc định từ "welcome" thành "login"
-  const [authMode, setAuthMode] = useState("login");
-  const [currentView, setCurrentView] = useState("trang-chu");
+// Component nội dung chính sử dụng logic của Router
+function AppContent() {
+  const navigate = useNavigate();
+  const location = useLocation();
 
-  const handleLoginSuccess = (email) => {
+  const [isAuthenticated, setIsAuthenticated] = useState(initialAuth.isAuthenticated);
+  const [userProfile, setUserProfile] = useState(initialAuth.userProfile);
+  const [authMode, setAuthMode] = useState("login");
+  const displayName = getUserDisplayName(userProfile);
+
+  // ĐỒNG BỘ STATE VỚI URL: Lấy currentView từ URL hiện tại để khi reload không bị mất dấu
+  const currentView = location.pathname === "/" ? "trang-chu" : location.pathname.substring(1);
+
+  // MOCK FUNCTION: Bọc useNavigate lại bằng tên setCurrentView để tương thích ngược 
+  // 100% với các component Header, Footer, TrangChu cũ mà không cần sửa code của chúng.
+  const setCurrentView = (view) => {
+    if (view === "trang-chu") {
+      navigate("/");
+    } else {
+      navigate(`/${view}`);
+    }
+  };
+
+  const handleLoginSuccess = (profile) => {
+    const nextProfile = {
+      tenDangNhap: profile?.tenDangNhap || profile,
+      hoTen: profile?.hoTen || "",
+      anhDaiDien: profile?.anhDaiDien || "",
+    };
+
     setIsAuthenticated(true);
-    setUserEmail(email);
+    setUserProfile(nextProfile);
+    localStorage.setItem("userName", nextProfile.tenDangNhap);
+    localStorage.setItem("currentUser", JSON.stringify(nextProfile));
     setCurrentView("trang-chu");
-    // Đăng nhập thành công trả về trang chủ
+  };
+
+  const handleProfileUpdate = (profile) => {
+    setUserProfile((prev) => {
+      const nextProfile = {
+        ...(prev || {}),
+        ...(profile || {}),
+        tenDangNhap: profile?.tenDangNhap || prev?.tenDangNhap || localStorage.getItem("userName") || "",
+      };
+      localStorage.setItem("currentUser", JSON.stringify(nextProfile));
+      return nextProfile;
+    });
   };
 
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("userName");
+    localStorage.removeItem("currentUser");
     setIsAuthenticated(false);
-    setUserEmail("");
+    setUserProfile(null);
     setAuthMode("login");
-    // Khi đăng xuất, điều hướng quay lại màn hình đăng nhập
     setCurrentView("trang-chu");
   };
 
-  // Hàm quản lý render các màn hình theo currentView từ Header
+  // Hàm quản lý render các màn hình theo currentView từ URL
   const renderContent = () => {
     switch (currentView) {
       // 1. Các component đã có sẵn
@@ -62,13 +114,13 @@ export default function App() {
       case "profile":
         return <ChiSoSucKhoe />;
       case "thong-tin-nd":
-        return <ThongTinND />;
+        return <ThongTinND onProfileUpdate={handleProfileUpdate} />;
       case "trang-chu":
         return (
           <TrangChu
             currentView={currentView}
             setCurrentView={setCurrentView}
-            userName={userEmail}
+            userName={displayName}
             onLogout={handleLogout}
           />
         );
@@ -107,7 +159,7 @@ export default function App() {
           <TrangChu
             currentView={currentView}
             setCurrentView={setCurrentView}
-            userName={userEmail}
+            userName={displayName}
             onLogout={handleLogout}
           />
         );
@@ -115,7 +167,7 @@ export default function App() {
   };
 
   if (!isAuthenticated) {
-    // Khối hiển thị giao diện Khách xem trước (chỉ kích hoạt nếu thiết lập authMode về "welcome")
+    // Khối hiển thị giao diện Khách xem trước
     if (authMode === "welcome") {
       return (
         <div style={{ 
@@ -146,7 +198,7 @@ export default function App() {
             onLogout={() => setAuthMode("login")}
           />
           
-           <main style={{ 
+          <main style={{ 
             flex: 1, 
             display: "flex", 
             flexDirection: "column",
@@ -158,7 +210,6 @@ export default function App() {
             <TrangChu onGoToLogin={() => setAuthMode("login")} />
           </main>
 
-          {/* <-- ĐÃ THÊM FOOTER CHO CHẾ ĐỘ KHÁCH --> */}
           <Footer setCurrentView={() => setAuthMode("login")} />
         </div>
       );
@@ -197,15 +248,16 @@ export default function App() {
           max-width: 100% !important;
           overflow-x: hidden;
           background-color: #F8FAFC;
-         }
+        }
         * { box-sizing: border-box; }
       `}</style>
 
       {/* Header hệ thống */}
       <Header 
         currentView={currentView}
-        setCurrentView={setCurrentView}
-        userName={userEmail}
+        setCurrentView={setCurrentView} // Truyền mock function xuống Header
+        userName={displayName}
+        userProfile={userProfile}
         onLogout={handleLogout}
       />
 
@@ -223,9 +275,17 @@ export default function App() {
         {renderContent()}
       </main>
 
-      {/* <-- ĐÃ THÊM FOOTER CHO GIAO DIỆN ĐÃ ĐĂNG NHẬP --> */}
       <Footer setCurrentView={setCurrentView} />
 
     </div>
+  );
+}
+
+// Bọc Component bằng Router ở cấp cao nhất
+export default function App() {
+  return (
+    <Router>
+      <AppContent />
+    </Router>
   );
 }

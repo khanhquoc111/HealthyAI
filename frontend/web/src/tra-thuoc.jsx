@@ -14,7 +14,7 @@ const SEVERITY_CONFIG = {
     bullet: "tt-warning-bullet--danger",
     label: "tt-warning-label--danger",
     item: "tt-warning-item--danger",
-    icon: "!",
+    iconClass: "fa-solid fa-exclamation",
     accordionHeader: "tt-warnings-accordion-header--danger",
     accordionTitle: "tt-accordion-title--danger",
     listClass: "tt-warnings-list--danger",
@@ -24,7 +24,7 @@ const SEVERITY_CONFIG = {
     bullet: "tt-warning-bullet--warning",
     label: "tt-warning-label--warning",
     item: "tt-warning-item--warning",
-    icon: "!",
+    iconClass: "fa-solid fa-exclamation",
     accordionHeader: "tt-warnings-accordion-header--warning",
     accordionTitle: "tt-accordion-title--warning",
     listClass: "tt-warnings-list--warning",
@@ -34,7 +34,7 @@ const SEVERITY_CONFIG = {
     bullet: "tt-warning-bullet--info",
     label: "tt-warning-label--info",
     item: "tt-warning-item--info",
-    icon: "i",
+    iconClass: "fa-solid fa-info",
     accordionHeader: "tt-warnings-accordion-header--warning",
     accordionTitle: "tt-accordion-title--warning",
     listClass: "tt-warnings-list--warning",
@@ -68,7 +68,7 @@ function SearchBar({ value, onChange, onSearch, loading }) {
         onClick={onSearch}
         disabled={loading || !value.trim()}
       >
-        {loading ? "Đang tìm…" : "Tìm kiếm"}
+        {loading ? "Đang tìm…" : <><i className="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Tìm kiếm</>}
       </button>
     </div>
   );
@@ -192,7 +192,7 @@ function HealthWarnings({ warnings, profileAvailable, tenDangNhap }) {
   if (!tenDangNhap) {
     return (
       <div className="tt-warning-notice tt-warning-notice--neutral">
-        <span className="tt-notice-icon tt-notice-icon--neutral">i</span>
+        <i className="tt-notice-icon tt-notice-icon--neutral fa-solid fa-circle-info" aria-hidden="true"></i>
         <span>
           Đăng nhập để xem cảnh báo dựa trên hồ sơ sức khỏe cá nhân.
         </span>
@@ -204,7 +204,7 @@ function HealthWarnings({ warnings, profileAvailable, tenDangNhap }) {
   if (!profileAvailable) {
     return (
       <div className="tt-warning-notice tt-warning-notice--alert">
-        <span>⚠</span>
+        <i className="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
         <span>
           Chưa có hồ sơ sức khỏe. Vui lòng cập nhật hồ sơ sức khỏe để nhận
           cảnh báo phù hợp.
@@ -217,7 +217,7 @@ function HealthWarnings({ warnings, profileAvailable, tenDangNhap }) {
   if (warnings.length === 0) {
     return (
       <div className="tt-warning-notice tt-warning-notice--safe">
-        <span className="tt-notice-icon tt-notice-icon--safe">✓</span>
+        <i className="tt-notice-icon tt-notice-icon--safe fa-solid fa-circle-check" aria-hidden="true"></i>
         <span>
           Không có cảnh báo đặc biệt dựa trên hồ sơ sức khỏe hiện tại của bạn.
         </span>
@@ -279,7 +279,7 @@ function HealthWarnings({ warnings, profileAvailable, tenDangNhap }) {
             return (
               <div key={w.id || idx} className={`tt-warning-item ${cfg.item}`}>
                 <span className={`tt-warning-bullet ${cfg.bullet}`}>
-                  {cfg.icon}
+                  <i className={cfg.iconClass} aria-hidden="true"></i>
                 </span>
                 <div>
                   <div className={`tt-warning-label ${cfg.label}`}>
@@ -399,14 +399,14 @@ export default function TraThuoc() {
 
         {error && (
           <div className="tt-error-banner">
-            <span>⚠</span>
+            <i className="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
             <span>{error}</span>
           </div>
         )}
 
         {!tenDangNhap && (
           <div className="tt-login-hint">
-            <span className="tt-hint-icon">i</span>
+            <i className="tt-hint-icon fa-solid fa-circle-info" aria-hidden="true"></i>
             Đăng nhập để kích hoạt chức năng cảnh báo sức khỏe cá nhân.
           </div>
         )}
@@ -417,7 +417,7 @@ export default function TraThuoc() {
         <div ref={resultRef}>
           {medicines.length === 0 ? (
             <div className="tt-no-results">
-              <span className="tt-no-results-icon">🔍</span>
+              <i className="tt-no-results-icon fa-solid fa-magnifying-glass" aria-hidden="true"></i>
               <p className="tt-no-results-text">
                 Không tìm thấy thuốc nào khớp với từ khóa{" "}
                 <strong>"{query}"</strong>. Thử tìm với tên khác hoặc tên hoạt
@@ -468,7 +468,7 @@ export default function TraThuoc() {
                   </>
                 ) : (
                   <div className="tt-select-prompt">
-                    <span className="tt-select-prompt-icon">💊</span>
+                    <i className="tt-select-prompt-icon fa-solid fa-pills" aria-hidden="true"></i>
                     Chọn một thuốc từ danh sách bên trái để xem thông tin chi
                     tiết và cảnh báo sức khỏe.
                   </div>
@@ -482,7 +482,7 @@ export default function TraThuoc() {
       {/* Trang thai cho truoc khi tim kiem */}
       {!searchDone && !loading && (
         <div className="tt-empty-state">
-          <span className="tt-empty-icon">💊</span>
+          <i className="tt-empty-icon fa-solid fa-pills" aria-hidden="true"></i>
           <p className="tt-empty-text">
             Nhập tên thuốc hoặc hoạt chất và nhấn "Tìm kiếm" để bắt đầu.
           </p>

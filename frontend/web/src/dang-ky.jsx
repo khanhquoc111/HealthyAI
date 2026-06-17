@@ -48,7 +48,7 @@ export default function DangKy({ onSwitchToLogin }) {
       {/* Brand */}
       <div className="auth-brand">
         <div className="auth-brand-logo">
-          <div className="auth-brand-icon">🩺</div>
+          <div className="auth-brand-icon"><i className="fa-solid fa-heart-pulse" aria-hidden="true"></i></div>
           <span className="auth-brand-name">Healthy<span>AI</span></span>
         </div>
         <span className="auth-brand-tagline">Hệ thống đánh giá nguy cơ bệnh mãn tính</span>
@@ -69,7 +69,7 @@ export default function DangKy({ onSwitchToLogin }) {
           {/* Error banner */}
           {error && (
             <div className="auth-error">
-              <span className="auth-error-icon">⚠️</span>
+              <i className="auth-error-icon fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
               {error}
             </div>
           )}
@@ -84,7 +84,7 @@ export default function DangKy({ onSwitchToLogin }) {
                   <span className="auth-label-required">*</span>
                 </label>
                 <div className="auth-input-wrap">
-                  <span className="auth-input-icon">👤</span>
+                  <i className="auth-input-icon fa-solid fa-user" aria-hidden="true"></i>
                   <input
                     id="reg-username"
                     className="auth-input"
@@ -105,7 +105,7 @@ export default function DangKy({ onSwitchToLogin }) {
                   <span className="auth-label-optional">&nbsp;(tuỳ chọn)</span>
                 </label>
                 <div className="auth-input-wrap">
-                  <span className="auth-input-icon">🪪</span>
+                  <i className="auth-input-icon fa-solid fa-id-card" aria-hidden="true"></i>
                   <input
                     id="reg-hoten"
                     className="auth-input"
@@ -127,7 +127,7 @@ export default function DangKy({ onSwitchToLogin }) {
                 <span className="auth-label-required">*</span>
               </label>
               <div className="auth-input-wrap">
-                <span className="auth-input-icon">✉️</span>
+                <i className="auth-input-icon fa-solid fa-envelope" aria-hidden="true"></i>
                 <input
                   id="reg-email"
                   className="auth-input"
@@ -149,7 +149,7 @@ export default function DangKy({ onSwitchToLogin }) {
                 <span className="auth-label-required">*</span>
               </label>
               <div className="auth-input-wrap">
-                <span className="auth-input-icon">🔒</span>
+                <i className="auth-input-icon fa-solid fa-lock" aria-hidden="true"></i>
                 <input
                   id="reg-password"
                   className="auth-input"
@@ -167,7 +167,7 @@ export default function DangKy({ onSwitchToLogin }) {
                   onClick={() => setShowPassword((v) => !v)}
                   aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
                 >
-                  {showPassword ? "🙈" : "👁️"}
+                  <i className={`fa-solid ${showPassword ? "fa-eye-slash" : "fa-eye"}`} aria-hidden="true"></i>
                 </button>
               </div>
             </div>
@@ -184,7 +184,7 @@ export default function DangKy({ onSwitchToLogin }) {
                   Đang xử lý...
                 </>
               ) : (
-                <>✅ Tạo Tài Khoản</>
+                <><i className="fa-solid fa-circle-check" aria-hidden="true"></i> Tạo Tài Khoản</>
               )}
             </button>
           </form>

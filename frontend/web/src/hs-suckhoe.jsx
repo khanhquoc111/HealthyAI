@@ -62,16 +62,16 @@ export default function ChiSoSucKhoe() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!tenDangNhap) return setMessage("⚠️ Vui lòng đăng nhập trước!");
+    if (!tenDangNhap) return setMessage("Vui lòng đăng nhập trước!");
     try {
       setSaving(true);
       const payload = { tenDangNhap, ...formData };
       const numericFields = ["tuoi", "chieuCao", "canNang", "bmi", "vongEo", "huyetApTamThu", "huyetApTamTruong", "duongHuyet", "hba1c", "cholesterol", "ldl", "hdl", "triglyceride", "creatinine", "acidUric", "soPhutVanDongMoiTuan"];
       numericFields.forEach(k => { payload[k] = formData[k] ? Number(formData[k]) : null; });
       await axios.post(`${API_BASE_URL}/health-profile/`, payload);
-      setMessage("✅ Lưu dữ liệu chỉ số thành công!");
+      setMessage("Lưu dữ liệu chỉ số thành công!");
       setTimeout(() => setMessage(""), 3000);
-    } catch (error) { setMessage("❌ Lỗi khi lưu dữ liệu!"); } 
+    } catch (error) { setMessage("Lỗi khi lưu dữ liệu!"); } 
     finally { setSaving(false); }
   };
 
@@ -116,7 +116,7 @@ export default function ChiSoSucKhoe() {
           border-top: none;
         }
 
-        .tag-btn { padding: 10px 20px; border-radius: 20px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s; user-select: none; border: 1px solid #D1D5DB; background: white; color: #475569; }
+        .tag-btn { padding: 10px 20px; border-radius: 20px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s; user-select: none; border: 1px solid #D1D5DB; background: white; color: #475569; display: inline-flex; align-items: center; gap: 8px; }
         .tag-btn:hover { border-color: #2563EB; color: #2563EB; }
         .tag-btn.active { background: #DBEAFE; border-color: #2563EB; color: #1E3A8A; box-shadow: 0 2px 4px rgba(37,99,235,0.1); }
       `}</style>
@@ -137,13 +137,13 @@ export default function ChiSoSucKhoe() {
         )}
       </div>
 
-      {message && <div style={{ padding: "16px", marginBottom: "24px", borderRadius: "8px", backgroundColor: message.includes("✅") ? "#DCFCE7" : "#FEF2F2", color: message.includes("✅") ? "#166534" : "#991B1B", fontWeight: "600" }}>{message}</div>}
+      {message && <div style={{ padding: "16px", marginBottom: "24px", borderRadius: "8px", backgroundColor: message.includes("thành công") ? "#DCFCE7" : "#FEF2F2", color: message.includes("thành công") ? "#166534" : "#991B1B", fontWeight: "600" }}>{message}</div>}
 
       <form onSubmit={handleSubmit}>
         {/* KHỐI 1 */}
         <div className={`acc-header ${activeAccordion === 1 ? 'active' : ''}`} onClick={() => setActiveAccordion(activeAccordion === 1 ? 0 : 1)}>
-          <span>🫀 1. Thể chất & Sinh tồn</span>
-          <span>{activeAccordion === 1 ? '▼' : '▶'}</span>
+          <span><i className="fa-solid fa-heart-pulse" aria-hidden="true"></i> 1. Thể chất & Sinh tồn</span>
+          <span><i className={`fa-solid ${activeAccordion === 1 ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i></span>
         </div>
         <div className={`acc-wrapper ${activeAccordion === 1 ? 'open' : ''}`} style={{ background: "#EFF6FF" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
@@ -161,8 +161,8 @@ export default function ChiSoSucKhoe() {
 
         {/* KHỐI 2 */}
         <div className={`acc-header ${activeAccordion === 2 ? 'active' : ''}`} onClick={() => setActiveAccordion(activeAccordion === 2 ? 0 : 2)}>
-          <span>🧪 2. Chỉ số Sinh hóa chuyên sâu</span>
-          <span>{activeAccordion === 2 ? '▼' : '▶'}</span>
+          <span><i className="fa-solid fa-flask-vial" aria-hidden="true"></i> 2. Chỉ số Sinh hóa chuyên sâu</span>
+          <span><i className={`fa-solid ${activeAccordion === 2 ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i></span>
         </div>
         <div className={`acc-wrapper ${activeAccordion === 2 ? 'open' : ''}`} style={{ background: "#F0FDF4" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
@@ -178,8 +178,8 @@ export default function ChiSoSucKhoe() {
 
         {/* KHỐI 3 */}
         <div className={`acc-header ${activeAccordion === 3 ? 'active' : ''}`} onClick={() => setActiveAccordion(activeAccordion === 3 ? 0 : 3)}>
-          <span>🏃 3. Lối sống cá nhân</span>
-          <span>{activeAccordion === 3 ? '▼' : '▶'}</span>
+          <span><i className="fa-solid fa-person-running" aria-hidden="true"></i> 3. Lối sống cá nhân</span>
+          <span><i className={`fa-solid ${activeAccordion === 3 ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i></span>
         </div>
         <div className={`acc-wrapper ${activeAccordion === 3 ? 'open' : ''}`} style={{ background: "#FFF7ED" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
@@ -196,34 +196,34 @@ export default function ChiSoSucKhoe() {
 
         {/* KHỐI 4 */}
         <div className={`acc-header ${activeAccordion === 4 ? 'active' : ''}`} onClick={() => setActiveAccordion(activeAccordion === 4 ? 0 : 4)}>
-          <span>⚠️ 4. Tiền sử bệnh lý (Cá nhân & Gia đình)</span>
-          <span>{activeAccordion === 4 ? '▼' : '▶'}</span>
+          <span><i className="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> 4. Tiền sử bệnh lý (Cá nhân & Gia đình)</span>
+          <span><i className={`fa-solid ${activeAccordion === 4 ? 'fa-chevron-down' : 'fa-chevron-right'}`} aria-hidden="true"></i></span>
         </div>
         <div className={`acc-wrapper ${activeAccordion === 4 ? 'open' : ''}`} style={{ background: "#FEF2F2" }}>
           <div style={{ marginBottom: "28px" }}>
             <label style={{...lblStyle, marginBottom:"12px"}}>Tiền sử lâm sàng bản thân:</label>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
-              <div className={`tag-btn ${formData.caoHuyetAp ? 'active' : ''}`} onClick={() => toggleCheckbox('caoHuyetAp')}>{formData.caoHuyetAp ? '✓' : '+'} Cao huyết áp</div>
-              <div className={`tag-btn ${formData.tieuDuong ? 'active' : ''}`} onClick={() => toggleCheckbox('tieuDuong')}>{formData.tieuDuong ? '✓' : '+'} Tiểu đường</div>
-              <div className={`tag-btn ${formData.benhTimMach ? 'active' : ''}`} onClick={() => toggleCheckbox('benhTimMach')}>{formData.benhTimMach ? '✓' : '+'} Tim mạch</div>
-              <div className={`tag-btn ${formData.gout ? 'active' : ''}`} onClick={() => toggleCheckbox('gout')}>{formData.gout ? '✓' : '+'} Bệnh Gout</div>
+              <div className={`tag-btn ${formData.caoHuyetAp ? 'active' : ''}`} onClick={() => toggleCheckbox('caoHuyetAp')}><i className={`fa-solid ${formData.caoHuyetAp ? 'fa-check' : 'fa-plus'}`} aria-hidden="true"></i> Cao huyết áp</div>
+              <div className={`tag-btn ${formData.tieuDuong ? 'active' : ''}`} onClick={() => toggleCheckbox('tieuDuong')}><i className={`fa-solid ${formData.tieuDuong ? 'fa-check' : 'fa-plus'}`} aria-hidden="true"></i> Tiểu đường</div>
+              <div className={`tag-btn ${formData.benhTimMach ? 'active' : ''}`} onClick={() => toggleCheckbox('benhTimMach')}><i className={`fa-solid ${formData.benhTimMach ? 'fa-check' : 'fa-plus'}`} aria-hidden="true"></i> Tim mạch</div>
+              <div className={`tag-btn ${formData.gout ? 'active' : ''}`} onClick={() => toggleCheckbox('gout')}><i className={`fa-solid ${formData.gout ? 'fa-check' : 'fa-plus'}`} aria-hidden="true"></i> Bệnh Gout</div>
             </div>
           </div>
 
           <div>
             <label style={{...lblStyle, marginBottom:"12px"}}>Tiền sử di truyền gia đình cận huyết:</label>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
-              <div className={`tag-btn ${formData.giaDinhCaoHuyetAp ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhCaoHuyetAp')}>{formData.giaDinhCaoHuyetAp ? '✓' : '+'} Cao huyết áp GD</div>
-              <div className={`tag-btn ${formData.giaDinhTieuDuong ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhTieuDuong')}>{formData.giaDinhTieuDuong ? '✓' : '+'} Tiểu đường GD</div>
-              <div className={`tag-btn ${formData.giaDinhTimMach ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhTimMach')}>{formData.giaDinhTimMach ? '✓' : '+'} Tim mạch GD</div>
-              <div className={`tag-btn ${formData.giaDinhGout ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhGout')}>{formData.giaDinhGout ? '✓' : '+'} Gout GD</div>
+              <div className={`tag-btn ${formData.giaDinhCaoHuyetAp ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhCaoHuyetAp')}><i className={`fa-solid ${formData.giaDinhCaoHuyetAp ? 'fa-check' : 'fa-plus'}`} aria-hidden="true"></i> Cao huyết áp GD</div>
+              <div className={`tag-btn ${formData.giaDinhTieuDuong ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhTieuDuong')}><i className={`fa-solid ${formData.giaDinhTieuDuong ? 'fa-check' : 'fa-plus'}`} aria-hidden="true"></i> Tiểu đường GD</div>
+              <div className={`tag-btn ${formData.giaDinhTimMach ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhTimMach')}><i className={`fa-solid ${formData.giaDinhTimMach ? 'fa-check' : 'fa-plus'}`} aria-hidden="true"></i> Tim mạch GD</div>
+              <div className={`tag-btn ${formData.giaDinhGout ? 'active' : ''}`} onClick={() => toggleCheckbox('giaDinhGout')}><i className={`fa-solid ${formData.giaDinhGout ? 'fa-check' : 'fa-plus'}`} aria-hidden="true"></i> Gout GD</div>
             </div>
           </div>
         </div>
 
         {/* NÚT SUBMIT */}
         <button type="submit" disabled={saving} style={{ width: "100%", padding: "16px", backgroundColor: saving ? "#94A3B8" : "#2563EB", color: "white", fontSize: "16px", fontWeight: "700", border: "none", borderRadius: "12px", cursor: saving ? "not-allowed" : "pointer", marginTop: "24px", transition: "all 0.2s", boxShadow: "0 4px 6px -1px rgba(37, 99, 235, 0.2)" }}>
-          {saving ? "⏳ Đang kết nối dữ liệu đám mây..." : "💾 LƯU HỒ SƠ SỨC KHỎE CAN THIỆP"}
+          {saving ? <><i className="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Đang kết nối dữ liệu đám mây...</> : <><i className="fa-solid fa-floppy-disk" aria-hidden="true"></i> LƯU HỒ SƠ SỨC KHỎE CAN THIỆP</>}
         </button>
       </form>
     </div>

@@ -24,7 +24,11 @@ export default function DangNhap({ onLoginSuccess, onSwitchToRegister }) {
       const res = await axios.post(`${API_BASE_URL}/auth/login`, formData);
       localStorage.setItem("token", res.data.access_token);
       localStorage.setItem("userName", res.data.tenDangNhap);
-      onLoginSuccess(res.data.tenDangNhap);
+      onLoginSuccess({
+        tenDangNhap: res.data.tenDangNhap,
+        hoTen: res.data.hoTen,
+        anhDaiDien: res.data.anhDaiDien,
+      });
     } catch (err) {
       setError(err.response?.data?.detail || "Đã xảy ra lỗi kết nối với máy chủ!");
     } finally {
@@ -44,7 +48,7 @@ export default function DangNhap({ onLoginSuccess, onSwitchToRegister }) {
       {/* Brand */}
       <div className="auth-brand">
         <div className="auth-brand-logo">
-          <div className="auth-brand-icon">🩺</div>
+          <div className="auth-brand-icon"><i className="fa-solid fa-heart-pulse" aria-hidden="true"></i></div>
           <span className="auth-brand-name">Healthy<span>AI</span></span>
         </div>
         <span className="auth-brand-tagline">Hệ thống đánh giá nguy cơ bệnh mãn tính</span>
@@ -65,7 +69,7 @@ export default function DangNhap({ onLoginSuccess, onSwitchToRegister }) {
           {/* Error banner */}
           {error && (
             <div className="auth-error">
-              <span className="auth-error-icon">⚠️</span>
+              <i className="auth-error-icon fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
               {error}
             </div>
           )}
@@ -79,7 +83,7 @@ export default function DangNhap({ onLoginSuccess, onSwitchToRegister }) {
                 <span className="auth-label-required">*</span>
               </label>
               <div className="auth-input-wrap">
-                <span className="auth-input-icon">👤</span>
+                <i className="auth-input-icon fa-solid fa-user" aria-hidden="true"></i>
                 <input
                   id="login-username"
                   className="auth-input"
@@ -101,7 +105,7 @@ export default function DangNhap({ onLoginSuccess, onSwitchToRegister }) {
                 <span className="auth-label-required">*</span>
               </label>
               <div className="auth-input-wrap">
-                <span className="auth-input-icon">🔒</span>
+                <i className="auth-input-icon fa-solid fa-lock" aria-hidden="true"></i>
                 <input
                   id="login-password"
                   className="auth-input"
@@ -119,7 +123,7 @@ export default function DangNhap({ onLoginSuccess, onSwitchToRegister }) {
                   onClick={() => setShowPassword((v) => !v)}
                   aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
                 >
-                  {showPassword ? "🙈" : "👁️"}
+                  <i className={`fa-solid ${showPassword ? "fa-eye-slash" : "fa-eye"}`} aria-hidden="true"></i>
                 </button>
               </div>
             </div>
@@ -136,7 +140,7 @@ export default function DangNhap({ onLoginSuccess, onSwitchToRegister }) {
                   Đang xử lý...
                 </>
               ) : (
-                <>🚀 Đăng Nhập</>
+                <><i className="fa-solid fa-right-to-bracket" aria-hidden="true"></i> Đăng Nhập</>
               )}
             </button>
           </form>

@@ -6,6 +6,7 @@ from passlib.context import CryptContext
 
 from database.database import SessionLocal
 from database.nguoi_dung import NguoiDung
+from database.thongtin_nd import ThongTinNguoiDung
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -36,9 +37,14 @@ def login(user: UserLoginSchema, db: Session = Depends(get_db)):
         )
     
     # 3. Trả về thông tin (kèm tenDangNhap thay vì email)
+    extra = db.query(ThongTinNguoiDung).filter(
+        ThongTinNguoiDung.idNguoiDung == db_user.idNguoiDung
+    ).first()
+
     return {
         "access_token": f"fake-token-for-{db_user.tenDangNhap}",
         "token_type": "bearer",
         "tenDangNhap": db_user.tenDangNhap,
-        "hoTen": db_user.hoTen
+        "hoTen": db_user.hoTen,
+        "anhDaiDien": extra.anhDaiDien if extra else None,
     }

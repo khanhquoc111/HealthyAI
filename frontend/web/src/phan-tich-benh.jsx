@@ -47,7 +47,7 @@ function riskHexColor(score) {
 function EmptyResults() {
   return (
     <div className="ptb-results-empty">
-      <div className="ptb-empty-icon">🩺</div>
+      <div className="ptb-empty-icon"><i className="fa-solid fa-stethoscope" aria-hidden="true"></i></div>
       <p className="ptb-empty-title">Kết quả xuất hiện tại đây</p>
       <p className="ptb-empty-desc">
         Điền đầy đủ thông tin và nhấn <strong>Phân tích nguy cơ</strong> để
@@ -65,7 +65,7 @@ function RuleBasedCard({ data }) {
     <div className="ptb-result-card">
       <div className="ptb-result-card-header">
         <span className="ptb-result-engine-label">
-          <span className="ptb-result-engine-icon">📋</span>
+          <i className="ptb-result-engine-icon fa-solid fa-clipboard-list" aria-hidden="true"></i>
           Rule-based Engine
         </span>
         <span
@@ -118,7 +118,7 @@ function AIModelCard({ data }) {
     <div className="ptb-result-card">
       <div className="ptb-result-card-header">
         <span className="ptb-result-engine-label">
-          <span className="ptb-result-engine-icon">🧠</span>
+          <i className="ptb-result-engine-icon fa-solid fa-brain" aria-hidden="true"></i>
           AI Model
         </span>
         {isReady
@@ -154,7 +154,7 @@ function AIModelCard({ data }) {
           </>
         ) : (
           <div className="ptb-ai-partial">
-            <span className="ptb-ai-partial-icon">⚠️</span>
+            <i className="ptb-ai-partial-icon fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
             <p className="ptb-ai-partial-text">
               Cần điền đầy đủ các chỉ số sinh hóa nâng cao trong mục{" "}
               <strong>Hồ sơ sức khỏe</strong> để kích hoạt phân tích AI.
@@ -171,7 +171,7 @@ function RecommendationsCard({ recs }) {
   return (
     <div className="ptb-rec-card">
       <div className="ptb-rec-card-header">
-        <span style={{ fontSize: "1.1rem" }}>💡</span>
+        <i className="fa-solid fa-lightbulb" aria-hidden="true" style={{ fontSize: "1.1rem" }}></i>
         <h4 className="ptb-rec-title">Khuyến nghị cá nhân hóa</h4>
       </div>
       <div className="ptb-rec-body">
@@ -365,7 +365,7 @@ export default function MainRiskPage() {
       .map(f => f.label);
 
     if (missing.length > 0) {
-      alert(`⚠️ Thiếu thông tin bắt buộc:\n- ${missing.join("\n- ")}`);
+      alert(`Thiếu thông tin bắt buộc:\n- ${missing.join("\n- ")}`);
       return;
     }
 
@@ -518,9 +518,7 @@ export default function MainRiskPage() {
         <div className="ptb-form-card">
           <div className="ptb-form-card-header">
             <div className="ptb-form-title-row">
-              <div className="ptb-form-disease-icon">
-                {disease.icon || "🩺"}
-              </div>
+              <div className="ptb-form-disease-icon"><i className="fa-solid fa-stethoscope" aria-hidden="true"></i></div>
               <div>
                 <h2 className="ptb-form-title">
                   {disease.name || "Thông số đánh giá"}
@@ -538,7 +536,7 @@ export default function MainRiskPage() {
                   Hồ sơ đã tải
                 </>
               ) : (
-                <>⚠️ Chưa có hồ sơ</>
+                <><i className="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> Chưa có hồ sơ</>
               )}
             </div>
           </div>
@@ -552,7 +550,7 @@ export default function MainRiskPage() {
                 if (key === "bmi") return (
                   <div key="bmi_group" className="ptb-bmi-group ptb-field--full">
                     <p className="ptb-bmi-hint">
-                      <span>ℹ️</span>
+                      <i className="fa-solid fa-circle-info" aria-hidden="true"></i>
                       Chỉ số BMI được tính tự động từ chiều cao và cân nặng.
                     </p>
                     <div className="ptb-bmi-row">
@@ -606,7 +604,7 @@ export default function MainRiskPage() {
                         Kích hoạt yếu tố này
                       </span>
                     </label>
-                    {errors[key] && <span className="ptb-field-error">⚠ {errors[key]}</span>}
+                    {errors[key] && <span className="ptb-field-error"><i className="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {errors[key]}</span>}
                   </div>
                 );
 
@@ -628,7 +626,7 @@ export default function MainRiskPage() {
                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                       ))}
                     </select>
-                    {errors[key] && <span className="ptb-field-error">⚠ {errors[key]}</span>}
+                    {errors[key] && <span className="ptb-field-error"><i className="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {errors[key]}</span>}
                   </div>
                 );
 
@@ -652,7 +650,7 @@ export default function MainRiskPage() {
                         : e.target.value
                       )}
                     />
-                    {errors[key] && <span className="ptb-field-error">⚠ {errors[key]}</span>}
+                    {errors[key] && <span className="ptb-field-error"><i className="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {errors[key]}</span>}
                   </div>
                 );
               })}
@@ -664,8 +662,8 @@ export default function MainRiskPage() {
               disabled={isCalculating}
             >
               {isCalculating
-                ? <><span>⏳</span> Đang phân tích chỉ số liên tầng...</>
-                : <><span>🩺</span> Phân tích nguy cơ</>
+                ? <><i className="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Đang phân tích chỉ số liên tầng...</>
+                : <><i className="fa-solid fa-stethoscope" aria-hidden="true"></i> Phân tích nguy cơ</>
               }
             </button>
           </div>
