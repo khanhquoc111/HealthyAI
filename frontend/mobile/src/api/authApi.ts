@@ -6,6 +6,11 @@ export const login = async (tenDangNhap: string, password: string) => {
   const res = await api.post("/auth/login", { tenDangNhap, password });
   await AsyncStorage.setItem("token", res.data.access_token);
   await AsyncStorage.setItem("userName", res.data.tenDangNhap);
+
+  if (res.data.hoTen) {
+    await AsyncStorage.setItem("hoTen", res.data.hoTen);
+  }
+
   return res.data;
 };
 
@@ -17,6 +22,7 @@ export const register = async (formData: Record<string, any>) => {
 export const logout = async () => {
   await AsyncStorage.removeItem("token");
   await AsyncStorage.removeItem("userName");
+  await AsyncStorage.removeItem("hoTen");
 };
 
 export const getStoredUser = async () => {

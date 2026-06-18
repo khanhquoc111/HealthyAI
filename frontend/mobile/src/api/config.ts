@@ -4,7 +4,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Đổi IP này thành IP máy chạy backend khi test trên thiết bị thật
 // Giữ nguyên 127.0.0.1 nếu test trên emulator Android (dùng 10.0.2.2)
-export const API_BASE_URL = "http://192.168.0.31:8000"; // Android emulator
+export const API_BASE_URL = "http://10.0.2.2:8000"; // Android emulator
 // export const API_BASE_URL = "http://localhost:8000"; // iOS simulator
 // export const API_BASE_URL = "http://192.168.x.x:8000"; // Thiết bị thật
 

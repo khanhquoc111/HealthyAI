@@ -3,6 +3,8 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-nati
 import { router } from 'expo-router';
 import { useAuth } from '../context/AuthContext';
 import { COLORS, FONTS, RADIUS } from "../../constants/appTheme";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useState, useEffect } from "react";
 
 const FEATURES = [
   { icon: "🩺", title: "Phân tích Nguy cơ",  desc: "Đánh giá nguy cơ 5 bệnh mạn tính bằng AI",  screen: "PhanTichBenh" },
@@ -20,13 +22,21 @@ const DISEASES = [
 
 export default function TrangChuScreen() {
   const { user, logout } = useAuth();
+  const [hoTen, setHoTen] = useState<string | null>(null);
+
+  useEffect(() => {
+    AsyncStorage.getItem("hoTen").then((name) => {
+      // Nếu API có trả về họ tên thì dùng, nếu không thì hiện tên đăng nhập
+      setHoTen(name || user); 
+    });
+  }, [user]);
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
       {/* Greeting */}
       <View style={styles.greetCard}>
         <Text style={styles.greetHi}>Xin chào, 👋</Text>
-        <Text style={styles.greetName}>{user}</Text>
+        <Text style={styles.greetName}>{hoTen}</Text>
         <Text style={styles.greetSub}>Hãy theo dõi sức khỏe của bạn mỗi ngày</Text>
       </View>
 
