@@ -6,8 +6,9 @@ const NAV_LINKS = [
   { label: "Giới Thiệu", key: "gioi-thieu" },
   { label: "Phân Tích Bệnh", key: "phan-tich-benh" },
   { label: "Tư Vấn AI", key: "tu-van-ai" },
-  { label: "Tra Thuốc", key: "tra-thuoc" },
   { label: "Thực Đơn", key: "thuc-don" },
+  { label: "Tra Bệnh", key: "tra-benh" },
+  { label: "Tra Thuốc", key: "tra-thuoc" },
 ];
 
 const DISEASE_LINKS = [

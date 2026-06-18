@@ -1,11 +1,11 @@
 # ==================================================
-# Path: D:\CodeProject\LuanVanKTPM
+# Path: D:\CodeProject\ML_HealthyAI
 # Detected tech: c, cpp, javascript, python, react, typescript
 # ==================================================
 
 ## DIRECTORY STRUCTURE
 ```
-LuanVanKTPM/
+ML_HealthyAI/
 ├── .git/
 ├── backend/
 │   ├── __pycache__/
@@ -18,6 +18,7 @@ LuanVanKTPM/
 │   │   ├── plugin_loader.py
 │   │   ├── risk_stratification_engine.py
 │   │   ├── schema_validator.py
+│   │   ├── symptom_checker_engine.py
 │   │   ├── test_api_acceptance.py
 │   │   ├── test_plugin_compatibility.py
 │   │   ├── test_schema.py
@@ -27,6 +28,12 @@ LuanVanKTPM/
 │   │   ├── dang_ky.py
 │   │   └── dang_nhap.py
 │   ├── data/
+│   │   ├── trathuoc/
+│   │   │   ├── cham-soc.csv
+│   │   │   ├── dinh-duong.csv
+│   │   │   ├── mo-ta.csv
+│   │   │   ├── sinh-hoat.csv
+│   │   │   └── trieu-chung.csv
 │   │   ├── cardio_final.csv
 │   │   ├── ckd_final.csv
 │   │   ├── diabetes_final.csv
@@ -37,7 +44,9 @@ LuanVanKTPM/
 │   ├── function/
 │   │   ├── __pycache__/
 │   │   ├── cn_hs_suckhoe.py
+│   │   ├── cn_sotay_ykhoa.py
 │   │   ├── cn_thongtin_nguoidung.py
+│   │   ├── cn_tra_cuu_trieu_chung.py
 │   │   └── cn_tra_thuoc.py
 │   ├── ml/
 │   │   ├── __pycache__/
@@ -75,13 +84,12 @@ LuanVanKTPM/
 │   │       └── metadata.json
 │   ├── static/
 │   │   └── avatars/
-│   │       └── 1_6bb2b4b879274502a512d1db7e22b09c.png
+│   │       └── 1_7a690c0d03664680945f6d0954a4f46c.png
 │   ├── venv/
 │   ├── main.py
 │   ├── requirements.txt
 │   └── test_db.py
 ├── frontend/
-│   ├── mobile/
 │   ├── node_modules/
 │   └── web/
 │       ├── dist/
@@ -110,6 +118,7 @@ LuanVanKTPM/
 │       │   │   ├── gioi-thieu.css
 │       │   │   ├── phan-tich-benh.css
 │       │   │   ├── thongtin-nd.css
+│       │   │   ├── tra-benh.css
 │       │   │   ├── tra-thuoc.css
 │       │   │   └── trang-chu.css
 │       │   ├── App.css
@@ -119,9 +128,11 @@ LuanVanKTPM/
 │       │   ├── gioi-thieu.jsx
 │       │   ├── hs-suckhoe.jsx
 │       │   ├── index.css
+│       │   ├── lich-su-tra-cuu.jsx
 │       │   ├── main.jsx
 │       │   ├── phan-tich-benh.jsx
 │       │   ├── thongtin-nd.jsx
+│       │   ├── tra-benh.jsx
 │       │   ├── tra-thuoc.jsx
 │       │   └── trang-chu.jsx
 │       ├── .gitignore
@@ -161,7 +172,8 @@ from auth.dang_ky import router as register_router
 from auth.dang_nhap import router as login_router
 from function.cn_hs_suckhoe import router as health_router
 from function.cn_tra_thuoc import router as medicine_router
-from function.cn_thongtin_nguoidung import router as user_info_router  # <-- [THÊM DÒNG NÀY] Import API Thông Tin Người Dùng
+from function.cn_thongtin_nguoidung import router as user_info_router 
+from function.cn_tra_cuu_trieu_chung import router as trieu_chung_router # <-- [THÊM DÒNG NÀY] Import API Thông Tin Người Dùng
   # <-- [THÊM DÒNG NÀY] Import API Trả Thuốc
   # <-- [THÊM DÒNG NÀY] Import API Chỉ Số Sức Khỏe
 
@@ -187,6 +199,7 @@ app.include_router(login_router)
 app.include_router(health_router)  # <-- [THÊM DÒNG NÀY] Khai báo để FastAPI nhận diện router mới
 app.include_router(medicine_router)  # <-- [THÊM DÒNG NÀY] Khai báo để FastAPI nhận diện router mới
 app.include_router(user_info_router)  # <-- [THÊM DÒNG NÀY] Khai báo để FastAPI nhận diện router mới
+app.include_router(trieu_chung_router)  # <-- [THÊM DÒNG NÀY] Khai báo để FastAPI nhận diện router mới
 
 @app.get("/")
 def root():
@@ -1677,6 +1690,766 @@ class SchemaValidator:
         return len(errors) == 0, errors
 ```
 
+### backend\app\symptom_checker_engine.py
+```py
+# backend/app/symptom_checker_engine.py
+"""
+AI-Driven Symptom Checker Engine (NÂNG CẤP)
+- AI phân tích ngữ cảnh y khoa, gợi ý bệnh với confidence score
+- Loại trừ bệnh mạn tính khi không phù hợp
+- CSV dùng để kiểm chứng, không phải nguồn gốc gợi ý
+- HỖ TRỢ LÝ DO Y TẾ cho từng gợi ý
+- ✅ FỐI XỬ MATCHING BỆNH: Fuzzy match + Disease name mapping (Anh ↔ Việt)
+- ✅ LUÔN TRẢLẠI TIẾNG VIỆT: Normalize + translate fallback
+"""
+import difflib
+import json
+import re
+import unicodedata
+from pathlib import Path
+from typing import Any, Dict, List, Tuple, Optional
+
+import httpx
+import pandas as pd
+
+
+class SymptomCheckerEngine:
+    def __init__(
+        self,
+        ollama_url: str = "http://localhost:11434/api/generate",
+        model_name: str = "qwen2.5:7b",
+    ):
+        self.ollama_url = ollama_url
+        self.model_name = model_name
+
+        # ─────────────────────────────────────────────────────────────
+        # Load CSV files
+        # ─────────────────────────────────────────────────────────────
+        base_dir = Path(__file__).resolve().parent.parent / "data" / "trathuoc"
+        self.trieu_chung_df = pd.read_csv(base_dir / "trieu-chung.csv")
+        self.mo_ta_df = pd.read_csv(base_dir / "mo-ta.csv")
+        self.dinh_duong_df = pd.read_csv(base_dir / "dinh-duong.csv")
+        self.sinh_hoat_df = pd.read_csv(base_dir / "sinh-hoat.csv")
+        self.cham_soc_df = pd.read_csv(base_dir / "cham-soc.csv")
+
+        # Normalize column names
+        self.trieu_chung_df.columns = [
+            str(col).replace("\ufeff", "").strip().lower()
+            for col in self.trieu_chung_df.columns
+        ]
+        self.mo_ta_df.columns = [
+            str(col).replace("\ufeff", "").strip().lower()
+            for col in self.mo_ta_df.columns
+        ]
+        self.dinh_duong_df.columns = [
+            str(col).replace("\ufeff", "").strip().lower()
+            for col in self.dinh_duong_df.columns
+        ]
+        self.sinh_hoat_df.columns = [
+            str(col).replace("\ufeff", "").strip().lower()
+            for col in self.sinh_hoat_df.columns
+        ]
+        self.cham_soc_df.columns = [
+            str(col).replace("\ufeff", "").strip().lower()
+            for col in self.cham_soc_df.columns
+        ]
+
+        self.all_symptoms = self.trieu_chung_df.columns[1:].tolist()
+
+        # ─────────────────────────────────────────────────────────────
+        # Disease Name Mapping: Anh ↔ Việt + Alias variants
+        # Xây dựng từ tên bệnh có sẵn trong CSV
+        # ─────────────────────────────────────────────────────────────
+        self.disease_name_map = self._build_disease_name_map()
+        self.disease_aliases = self._build_disease_aliases()
+
+        # Danh sách bệnh mạn tính cần phát hiện ngữ cảnh
+        self.chronic_diseases = {
+            "tiểu đương", "đái tháo đường", "diabetes",
+            "cao huyết áp", "hypertension",
+            "tim mạch", "cardiovascular", "heart",
+            "bệnh thận", "kidney",
+            "đột quỵ", "stroke"
+        }
+        self.acute_disease_keywords = {
+            "cảm lạnh", "cold", "cơm", "influenza", "cúm", "flu",
+            "viêm họng", "pharyngitis", "viêm amidan", "tonsillitis",
+            "hội chứng cảm lạnh", "common cold syndrome"
+        }
+
+    def _normalize_string(self, text: str) -> str:
+        """
+        Normalize string: lowercase, trim, remove diacritics, extra spaces.
+        "  Tiểu Đường  " → "tieu duong"
+        """
+        if not text:
+            return ""
+        
+        # Loại bỏ diacritics (ả ă ơ ... → a)
+        nfd = unicodedata.normalize("NFD", text.strip().lower())
+        without_diacritic = "".join(
+            char for char in nfd if unicodedata.category(char) != "Mn"
+        )
+        
+        # Loại bỏ ký tự đặc biệt, giữ lại chữ cái + số + space
+        cleaned = re.sub(r"[^a-z0-9\s]", " ", without_diacritic)
+        
+        # Loại bỏ khoảng trắng dư thừa
+        return " ".join(cleaned.split())
+
+    def _build_disease_name_map(self) -> Dict[str, str]:
+        """
+        Xây dựng bản đồ tên bệnh từ CSV.
+        Key = normalized name, Value = tên bệnh gốc từ CSV (cho query sau này)
+        """
+        disease_map = {}
+        
+        # Lấy danh sách bệnh duy nhất từ các CSV (nếu có cột 'disease' hoặc 'Disease')
+        disease_sources = []
+        
+        # Từ trieu_chung_df
+        if "diseases" in self.trieu_chung_df.columns:
+            disease_sources.extend(self.trieu_chung_df["diseases"].unique())
+        
+        # Từ mo_ta_df
+        if "disease" in self.mo_ta_df.columns:
+            disease_sources.extend(self.mo_ta_df["disease"].unique())
+        
+        # Từ dinh_duong_df
+        if "disease" in self.dinh_duong_df.columns:
+            disease_sources.extend(self.dinh_duong_df["disease"].unique())
+        
+        # Từ sinh_hoat_df
+        if "disease" in self.sinh_hoat_df.columns:
+            disease_sources.extend(self.sinh_hoat_df["disease"].unique())
+        
+        # Từ cham_soc_df
+        if "disease" in self.cham_soc_df.columns:
+            disease_sources.extend(self.cham_soc_df["disease"].unique())
+
+        # Build map
+        for disease in disease_sources:
+            if pd.isna(disease) or not str(disease).strip():
+                continue
+            
+            disease_str = str(disease).strip()
+            normalized = self._normalize_string(disease_str)
+            
+            if normalized and normalized not in disease_map:
+                disease_map[normalized] = disease_str
+        
+        print(f"[DEBUG] Loaded {len(disease_map)} diseases from CSV")
+        return disease_map
+
+    def _build_disease_aliases(self) -> Dict[str, List[str]]:
+        """
+        Xây dựng các alias cho bệnh (thay thế cho nhau).
+        VD: "diabetes" = ["tiểu đương", "đái tháo đường", "diabetes mellitus"]
+        """
+        aliases = {
+            "diabetes": ["tiểu đương", "đái tháo đường", "diabetes mellitus", "blood sugar"],
+            "hypertension": ["cao huyết áp", "huyết áp cao", "high blood pressure"],
+            "cardiovascular": ["tim mạch", "bệnh tim", "heart disease", "bệnh tim mạch"],
+            "kidney": ["bệnh thận", "thận mạn", "kidney disease", "chronic kidney"],
+            "stroke": ["đột quỵ", "tai biến", "tai biến mạch máu", "cerebral"],
+            "asthma": ["hen suyễn", "xuyễn", "asthma"],
+            "arthritis": ["viêm khớp", "gout", "arthritis"],
+            "pneumonia": ["viêm phổi", "viêm phế quản", "pneumonia"],
+            "bronchitis": ["viêm phế quản", "viêm phế quản cấp", "bronchitis"],
+            "gastritis": ["viêm dạ dày", "viêm vị", "gastritis"],
+            "ulcer": ["loét dạ dày", "loét tá tràng", "peptic ulcer"],
+            "hepatitis": ["viêm gan", "hepatitis"],
+            "cirrhosis": ["xơ gan", "cirrhosis"],
+            "thyroid": ["tuyến giáp", "bệnh tuyến giáp", "thyroid disease"],
+            "anemia": ["thiếu máu", "anemia"],
+            "migraine": ["đau nửa đầu", "migraine", "đau đầu thần kinh"],
+            "depression": ["trầm cảm", "depression", "bệnh trầm cảm"],
+            "anxiety": ["lo âu", "anxiety", "bệnh lo âu"],
+        }
+        return aliases
+
+    def _find_best_disease_match(self, ai_disease_name: str) -> Tuple[str, float]:
+        """
+        Tìm tên bệnh tốt nhất từ CSV để query.
+        - Cố gắng exact match (với normalization)
+        - Fallback fuzzy match
+        - Return: (csv_disease_name, confidence_score)
+        """
+        ai_norm = self._normalize_string(ai_disease_name)
+        
+        # BƯỚC 1: Exact match với normalized name
+        if ai_norm in self.disease_name_map:
+            csv_name = self.disease_name_map[ai_norm]
+            print(f"[MATCH] '{ai_disease_name}' → '{csv_name}' (exact match, norm)")
+            return csv_name, 1.0
+        
+        # BƯỚC 2: Kiểm tra aliases
+        for key, aliases_list in self.disease_aliases.items():
+            for alias in aliases_list:
+                alias_norm = self._normalize_string(alias)
+                if alias_norm == ai_norm:
+                    # Tìm tên bệnh canonical từ disease_name_map
+                    for map_key, map_value in self.disease_name_map.items():
+                        if self._normalize_string(map_value) == ai_norm or key in map_key:
+                            print(f"[MATCH] '{ai_disease_name}' → '{map_value}' (via alias)")
+                            return map_value, 0.95
+                    # Nếu không tìm được, trả về key gốc
+                    print(f"[MATCH] '{ai_disease_name}' → '{key}' (alias key, fallback)")
+                    return key, 0.95
+        
+        # BƯỚC 3: Fuzzy match với disease_name_map keys
+        candidates = difflib.get_close_matches(
+            ai_norm,
+            list(self.disease_name_map.keys()),
+            n=1,
+            cutoff=0.6
+        )
+        
+        if candidates:
+            csv_name = self.disease_name_map[candidates[0]]
+            print(f"[MATCH] '{ai_disease_name}' → '{csv_name}' (fuzzy match, {candidates[0]})")
+            return csv_name, 0.75
+        
+        # BƯỚC 4: Fallback - trả về tên gốc từ AI (có thể không match CSV)
+        print(f"[NO MATCH] '{ai_disease_name}' → Sẽ sử dụng fallback description")
+        return ai_disease_name, 0.5
+
+    def _parse_list_value(self, raw_value: Any) -> List[str]:
+        """Parse list từ CSV cell"""
+        if raw_value is None or (isinstance(raw_value, float) and pd.isna(raw_value)):
+            return []
+        if isinstance(raw_value, list):
+            return [str(item).strip() for item in raw_value if str(item).strip()]
+
+        text = str(raw_value).strip()
+        if not text or text == "[]":
+            return []
+
+        candidates = [text, text.replace("'", '"')]
+        for candidate in candidates:
+            try:
+                parsed = json.loads(candidate)
+                if isinstance(parsed, list):
+                    return [str(item).strip() for item in parsed if str(item).strip()]
+            except Exception:
+                continue
+
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1]
+        return [item.strip().strip('"').strip("'") for item in text.split(",") if item.strip()]
+
+    def _extract_json_blob(self, raw_text: str) -> str:
+        """Extract JSON từ LLM response"""
+        text = (raw_text or "").strip()
+        if not text:
+            return ""
+
+        if text.startswith("{") or text.startswith("["):
+            return text
+
+        match = re.search(r"(\{.*\}|\[.*\])", text, re.DOTALL)
+        return match.group(1).strip() if match else text
+
+    def _to_json_safe(self, value: Any) -> Any:
+        """Convert object to JSON-serializable"""
+        if isinstance(value, dict):
+            return {str(k): self._to_json_safe(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._to_json_safe(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._to_json_safe(item) for item in value]
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        return str(value)
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # AI ANALYSIS
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    async def analyze_symptoms_with_ai(
+        self, selected_symptoms: List[str], mo_ta_them: str
+    ) -> Dict[str, Any]:
+        """
+        NÂNG CẤP: AI phân tích ngữ cảnh y khoa, gợi ý bệnh với confidence score.
+        
+        Returns:
+        {
+            "final_symptoms": [...],
+            "ai_diseases": [
+                {
+                    "disease": "diabetes",
+                    "confidence": 0.85,
+                    "reasoning": "...",
+                    "match_rate": 95,
+                    "csv_disease_name": "Diabetes"  # ← For CSV lookup
+                }
+            ],
+            "context": {...},
+            "disclaimer": "..."
+        }
+        """
+        safe_selected = [str(s).strip() for s in selected_symptoms if s and str(s).strip()]
+
+        # BƯỚC 1: AI phân tích ngữ cảnh + gợi ý bệnh
+        ai_result = await self._ai_analyze_context_and_diseases(safe_selected, mo_ta_them)
+        
+        if not ai_result:
+            return {
+                "final_symptoms": [],
+                "ai_diseases": [],
+                "context": {"is_acute": False, "is_chronic": False, "severity": "unknown"},
+                "disclaimer": "Hệ thống không thể phân tích. Vui lòng cung cấp thông tin chi tiết hơn.",
+            }
+
+        ai_diseases = ai_result.get("diseases", [])
+        final_symptoms = ai_result.get("symptoms", [])
+        context = ai_result.get("context", {})
+
+        # BƯỚC 2: Chuẩn hóa triệu chứng bằng fuzzy matching với CSV
+        normalized_symptoms = await self._normalize_symptoms_with_csv(final_symptoms)
+
+        # BƯỚC 3: Resolve tên bệnh + Calculate match_rate từ CSV
+        for disease in ai_diseases:
+            ai_disease_name = disease.get("disease", "")
+            disease_vi = disease.get("disease_vi", "")
+            
+            # GIẢI QUYẾT VĐ 1: Gộp tên Tiếng Anh (Tiếng Việt)
+            if disease_vi:
+                disease["display_name"] = f"{ai_disease_name} ({disease_vi})"
+            else:
+                disease["display_name"] = ai_disease_name
+                
+            csv_disease_name, match_confidence = self._find_best_disease_match(ai_disease_name)
+            
+            disease["csv_disease_name"] = csv_disease_name
+            
+            match_rate = self._calculate_match_rate_from_csv(csv_disease_name, normalized_symptoms)
+            disease["match_rate"] = match_rate
+
+        # BƯỚC 4: Sắp xếp theo confidence × match_rate
+        ai_diseases.sort(
+            key=lambda x: (x.get("confidence", 0) * (x.get("match_rate", 0) / 100)),
+            reverse=True
+        )
+
+        return {
+            "final_symptoms": normalized_symptoms,
+            "ai_diseases": ai_diseases[:5],
+            "context": context,
+            "disclaimer": "Đây là công cụ sàng lọc sơ bộ. Không thay thế chẩn đoán y khoa chính thức từ bác sĩ.",
+        }
+
+    async def _ai_analyze_context_and_diseases(
+        self, symptoms: List[str], description: str
+    ) -> Dict[str, Any]:
+        """
+        AI phân tích ngữ cảnh + gợi ý bệnh.
+        Trả về JSON với context (acute/chronic/severity) + diseases list.
+        """
+        prompt = f"""
+Bạn là chuyên gia y khoa sử dụng phương pháp sàng lọc lâm sàng.
+TRIỆU CHỨNG BỆNH NHÂN (Tiếng Việt): {", ".join(symptoms) if symptoms else "Không có"}
+MÔ TẢ CHI TIẾT: {description if description else "Không có"}
+
+HƯỚNG DẪN PHÂN TÍCH:
+1. Xác định NGỮ CẢNH: Cấp tính hay mạn tính? Mức độ nghiêm trọng?
+
+2. GỢI Ý BỆNH (Tối đa 5):
+   - Chỉ đề xuất bệnh PHÙ HỢP với triệu chứng.
+   - CHÚ Ý: Cung cấp 3 mảng lời khuyên CHUYÊN SÂU, CỤ THỂ cho TỪNG BỆNH (Không nói chung chung):
+     * ai_diet: 3-4 lời khuyên dinh dưỡng cực kỳ đặc thù cho bệnh này.
+     * ai_lifestyle: 3-4 lời khuyên sinh hoạt đặc thù.
+     * ai_care: 3-4 hướng dẫn theo dõi/chăm sóc y tế tại nhà.
+
+TRẢ VỀ JSON (không markdown, không preamble):
+{{
+    "context": {{
+        "is_acute": bool,
+        "is_chronic": bool,
+        "severity": "low|medium|high",
+        "analysis": "mô tả ngữ cảnh ngắn (tiếng Việt)"
+    }},
+    "symptoms": ["symptom1", "symptom2"],
+    "diseases": [
+        {{
+            "disease": "tên bệnh tiếng Anh (VD: influenza)",
+            "disease_vi": "tên bệnh tiếng Việt (VD: Cảm cúm)",
+            "confidence": 0.85,
+            "reasoning": "lý do y tế (tiếng Việt)",
+            "severity_risk": "medium",
+            "ai_description": "Giới thiệu ngắn gọn nhưng chuẩn xác về bệnh này (tiếng Việt)",
+            "ai_diet": ["lời khuyên ăn uống 1", "lời khuyên ăn uống 2"],
+            "ai_lifestyle": ["lời khuyên sinh hoạt 1", "lời khuyên sinh hoạt 2"],
+            "ai_care": ["lời khuyên chăm sóc 1", "lời khuyên chăm sóc 2"]
+        }}
+    ]
+}}
+"""
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.ollama_url,
+                    json={
+                        "model": self.model_name,
+                        "prompt": prompt,
+                        "format": "json",
+                        "stream": False,
+                    },
+                    timeout=60.0,
+                )
+
+                data = response.json()
+                raw_text = data.get("response", "").strip()
+                clean_json_str = self._extract_json_blob(raw_text)
+
+                try:
+                    result = json.loads(clean_json_str)
+                    return result if isinstance(result, dict) else {}
+                except json.JSONDecodeError:
+                    return {}
+        except Exception as e:
+            print(f"[Error] AI analysis error: {e}")
+            return {}
+
+    async def _normalize_symptoms_with_csv(self, ai_symptoms: List[str]) -> List[str]:
+        """
+        Chuẩn hóa triệu chứng từ AI bằng fuzzy matching với CSV.
+        """
+        normalized = []
+        for symptom in ai_symptoms:
+            symptom_lower = symptom.strip().lower()
+            
+            # Exact match
+            if symptom_lower in self.all_symptoms:
+                if symptom_lower not in normalized:
+                    normalized.append(symptom_lower)
+                continue
+            
+            # Fuzzy match
+            matches = difflib.get_close_matches(symptom_lower, self.all_symptoms, n=1, cutoff=0.75)
+            if matches and matches[0] not in normalized:
+                normalized.append(matches[0])
+        
+        return normalized
+
+    def _calculate_match_rate_from_csv(self, disease_name: str, normalized_symptoms: List[str]) -> float:
+        """
+        Tính match_rate: % triệu chứng user khớp với CSV.
+        """
+        if not normalized_symptoms:
+            return 0.0
+
+        # Tìm hàng bệnh trong CSV (với normalization)
+        disease_rows = []
+        for _, row in self.trieu_chung_df.iterrows():
+            if "diseases" in row.index:
+                csv_disease = str(row["diseases"]).strip()
+                if self._normalize_string(csv_disease) == self._normalize_string(disease_name):
+                    disease_rows.append(row)
+        
+        if not disease_rows:
+            return 0.0
+
+        # Đếm triệu chứng khớp
+        match_count = 0
+        for symptom in normalized_symptoms:
+            for row in disease_rows:
+                if symptom in row.index and row[symptom] == 1:
+                    match_count += 1
+                    break
+        
+        if not normalized_symptoms:
+            return 0.0
+        
+        match_rate = (match_count / len(normalized_symptoms)) * 100
+        return round(match_rate, 1)
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # GET DISEASE INFO (✅ CÁCH MỚI: LUÔN TRẢ VỀ DỮ LIỆU)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def get_disease_info(self, disease_name: str, ai_data: Dict = None) -> Dict[str, Any]:
+        """
+        Lấy thông tin chi tiết bệnh từ CSV. 
+        Nếu CSV không có, ưu tiên sử dụng tri thức chuyên sâu từ AI sinh ra (ai_data).
+        """
+        if ai_data is None:
+            ai_data = {}
+            
+        disease_norm = self._normalize_string(disease_name)
+        info = {"disease": disease_name}
+
+        # ────────────────────────────────────────────────────────────
+        # Tìm dòng dữ liệu bệnh trong mo_ta_df (Phần bị thiếu gây lỗi)
+        # ────────────────────────────────────────────────────────────
+        mo_ta_row = None
+        for _, row in self.mo_ta_df.iterrows():
+            if "disease" in row.index and self._normalize_string(str(row["disease"])) == disease_norm:
+                mo_ta_row = row
+                break
+
+        # ────────────────────────────────────────────────────────────
+        # Description (Mô tả bệnh)
+        # ────────────────────────────────────────────────────────────
+        if mo_ta_row is not None and "description" in mo_ta_row.index and pd.notna(mo_ta_row["description"]):
+            info["description"] = str(mo_ta_row["description"]).strip()
+        else:
+            # Dùng mô tả xịn của AI thay vì fallback chung chung
+            info["description"] = ai_data.get("ai_description", self._get_fallback_description(disease_name))
+
+        # ────────────────────────────────────────────────────────────
+        # Diet Recommendations (Dinh dưỡng)
+        # ────────────────────────────────────────────────────────────
+        dinh_duong_row = None
+        for _, row in self.dinh_duong_df.iterrows():
+            if "disease" in row.index and self._normalize_string(str(row["disease"])) == disease_norm:
+                dinh_duong_row = row
+                break
+        
+        if dinh_duong_row is not None and "diet" in dinh_duong_row.index and pd.notna(dinh_duong_row["diet"]):
+            info["diet_recommendations"] = self._parse_list_value(dinh_duong_row["diet"])
+        else:
+            # Dùng lời khuyên dinh dưỡng cực chi tiết của AI
+            info["diet_recommendations"] = ai_data.get("ai_diet", self._get_fallback_diet(disease_name))
+
+        # ────────────────────────────────────────────────────────────
+        # Lifestyle Recommendations (Sinh hoạt)
+        # ────────────────────────────────────────────────────────────
+        sinh_hoat_row = None
+        for _, row in self.sinh_hoat_df.iterrows():
+            if "disease" in row.index and self._normalize_string(str(row["disease"])) == disease_norm:
+                sinh_hoat_row = row
+                break
+        
+        if sinh_hoat_row is not None and "workouts" in sinh_hoat_row.index and pd.notna(sinh_hoat_row["workouts"]):
+            info["lifestyle_recommendations"] = self._parse_list_value(sinh_hoat_row["workouts"])
+        else:
+            info["lifestyle_recommendations"] = ai_data.get("ai_lifestyle", self._get_fallback_lifestyle(disease_name))
+
+        # ────────────────────────────────────────────────────────────
+        # Health Advice (Chăm sóc)
+        # ────────────────────────────────────────────────────────────
+        cham_soc_row = None
+        for _, row in self.cham_soc_df.iterrows():
+            if "disease" in row.index and self._normalize_string(str(row["disease"])) == disease_norm:
+                cham_soc_row = row
+                break
+        
+        health_advice = []
+        if cham_soc_row is not None:
+            for i in range(1, 5):
+                col_name = f"precaution_{i}"
+                if col_name in cham_soc_row.index and pd.notna(cham_soc_row[col_name]):
+                    advice_text = str(cham_soc_row[col_name]).strip()
+                    if advice_text:
+                        health_advice.append(advice_text)
+        
+        if not health_advice:
+            health_advice = ai_data.get("ai_care", self._get_fallback_health_advice(disease_name))
+        
+        info["health_advice"] = health_advice
+        info["reference_note"] = "Thông tin tham khảo từ hệ thống y tế và AI."
+        
+        return info
+
+    def _get_fallback_description(self, disease_name: str) -> str:
+        """
+        Fallback: Tạo mô tả tự động bằng tiếng Việt khi không tìm được CSV.
+        """
+        disease_lower = disease_name.lower()
+        
+        fallback_descriptions = {
+            "diabetes": "Bệnh tiểu đường là tình trạng rối loạn chuyển hóa glucose trong máu, dẫn đến tăng đường huyết cao. Cần kiểm soát chế độ ăn và theo dõi lượng đường huyết thường xuyên.",
+            "hypertension": "Cao huyết áp là tình trạng huyết áp cao hơn mức bình thường, có nguy cơ gây biến chứng tim mạch. Cần theo dõi huyết áp định kỳ và kiểm soát chế độ ăn mặn.",
+            "cardiovascular": "Bệnh tim mạch bao gồm các rối loạn hoạt động của tim và mạch máu. Cần tránh căng thẳng và duy trì hoạt động thể chất nhẹ nhàng.",
+            "heart": "Bệnh tim mạch bao gồm các rối loạn hoạt động của tim và mạch máu. Cần tránh căng thẳng và duy trì hoạt động thể chất nhẹ nhàng.",
+            "kidney": "Bệnh thận mạn là tình trạng thận không hoạt động bình thường, dẫn đến tích tụ chất thải trong cơ thể. Cần kiểm soát protein và nước trong chế độ ăn.",
+            "stroke": "Đột quỵ là tình trạng máu không lưu thông đến não, gây tổn thương não bộ. Đây là tình trạng cấp cứu y tế cần được can thiệp ngay.",
+            "asthma": "Hen suyễn là bệnh viêm đường hô hấp mạn tính, gây khó thở khi lối đi của không khí bị hẹp. Cần tránh những tác nhân kích thích như khí ô nhiễm.",
+            "pneumonia": "Viêm phổi là bệnh nhiễm trùng phổi gây ho, sốt và khó thở. Cần nghỉ ngơi đầy đủ và theo dõi sức khỏe.",
+            "gastritis": "Viêm dạ dày là bệnh viêm niêm mạc dạ dày gây đau, buồn nôn. Cần tránh thức ăn cay nóng và căng thẳng.",
+            "depression": "Trầm cảm là rối loạn tâm lý gây cảm xúc buồn bã kéo dài. Cần hỗ trợ tâm lý và có thể cần dùng thuốc.",
+        }
+        
+        for key, desc in fallback_descriptions.items():
+            if key in disease_lower:
+                return desc
+        
+        # Default fallback (tiếng Việt)
+        return f"Bệnh {disease_name} là một tình trạng y tế cần được theo dõi. Vui lòng tham khảo ý kiến bác sĩ để có chẩn đoán chính xác."
+
+    def _get_fallback_diet(self, disease_name: str) -> List[str]:
+        """Fallback: Lời khuyên dinh dưỡng tự động (tiếng Việt)"""
+        disease_lower = disease_name.lower()
+        
+        fallback_diet = {
+            "diabetes": ["Giảm tinh bột và đường", "Ăn nhiều rau xanh", "Chọn bánh mỳ nguyên cám", "Tránh đồ uống có chứa đường"],
+            "hypertension": ["Giảm muối ăn", "Tăng tiêu thụ kali (chuối, khoai tây)", "Tránh thực phẩm chế biến sẵn", "Ăn cá béo giàu omega-3"],
+            "cardiovascular": ["Giảm chất béo bão hòa", "Ăn nhiều chất xơ", "Tránh chất béo trans", "Chia nhỏ các bữa ăn"],
+            "kidney": ["Giới hạn protein", "Giảm muối", "Uống nước vừa phải", "Tránh thực phẩm giàu kali"],
+            "gastritis": ["Ăn nhiều bữa nhỏ", "Tránh thức ăn cay", "Tránh caffeine", "Tránh thức ăn nhiều dầu"],
+            "asthma": ["Tránh những thức ăn gây dị ứng", "Ăn các thực phẩm giàu kháng oxy hóa", "Tránh thức ăn chứa sulfite", "Uống nước đầy đủ"],
+        }
+        
+        for key, diet_list in fallback_diet.items():
+            if key in disease_lower:
+                return diet_list
+        
+        return ["Ăn cân bằng các nhóm dinh dưỡng", "Tăng tiêu thụ rau xanh", "Giảm thức ăn chế biến sẵn"]
+
+    def _get_fallback_lifestyle(self, disease_name: str) -> List[str]:
+        """Fallback: Lời khuyên sinh hoạt tự động (tiếng Việt)"""
+        disease_lower = disease_name.lower()
+        
+        fallback_lifestyle = {
+            "diabetes": ["Tập thể dục thường xuyên 30 phút/ngày", "Duy trì cân nặng lý tưởng", "Ngủ đủ 7-8 giờ/ngày", "Giảm căng thẳng"],
+            "hypertension": ["Tập thể dục nhẹ nhàng 30 phút/ngày", "Giảm căng thẳng", "Ngủ đủ 7-8 giờ/ngày", "Tránh rượu bia"],
+            "cardiovascular": ["Đi bộ hoặc tập yoga nhẹ", "Tránh tập luyện cường độ cao", "Giảm căng thẳng", "Ngủ đủ giấc"],
+            "kidney": ["Tập thể dục nhẹ nhàng", "Tránh nâng vật nặng", "Kiểm soát huyết áp", "Ngủ đủ 7-8 giờ/ngày"],
+            "gastritis": ["Tránh nằm ngay sau ăn cơm", "Ăn chậm và nhai kỹ", "Giảm căng thẳng", "Tránh hút thuốc"],
+            "asthma": ["Tránh những tác nhân kích thích", "Tập thể dục phù hợp (bơi lội)", "Tránh không khí ô nhiễm", "Kiểm soát allergen"],
+        }
+        
+        for key, lifestyle_list in fallback_lifestyle.items():
+            if key in disease_lower:
+                return lifestyle_list
+        
+        return ["Duy trì hoạt động thể chất nhẹ nhàng", "Giảm căng thẳng", "Ngủ đủ giấc", "Tránh thói quen xấu"]
+
+    def _get_fallback_health_advice(self, disease_name: str) -> List[str]:
+        """Fallback: Lời khuyên chăm sóc tự động (tiếng Việt)"""
+        disease_lower = disease_name.lower()
+        
+        fallback_advice = {
+            "diabetes": ["Kiểm tra đường huyết thường xuyên", "Khám định kỳ với bác sĩ", "Mang thẻ bệnh nhân", "Chuẩn bị insulin nếu cần"],
+            "hypertension": ["Đo huyết áp hàng ngày", "Dùng thuốc huyết áp đều đặn", "Khám định kỳ", "Ghi nhận huyết áp"],
+            "cardiovascular": ["Tránh hoạt động cường độ cao", "Ghi nhớ triệu chứng cảnh báo", "Luôn mang thuốc tim", "Khám tim định kỳ"],
+            "kidney": ["Kiểm tra chức năng thận định kỳ", "Theo dõi lượng nước uống", "Kiểm tra huyết áp", "Tính toán lượng protein"],
+            "asthma": ["Luôn mang bình xịt cứu cáp", "Tránh allergen đã biết", "Kiểm tra chức năng phổi định kỳ", "Ghi nhận những tác nhân kích thích"],
+            "depression": ["Tìm kiếm hỗ trợ tâm lý", "Duy trì liên lạc xã hội", "Tập thể dục thường xuyên", "Dùng thuốc theo đơn"],
+        }
+        
+        for key, advice_list in fallback_advice.items():
+            if key in disease_lower:
+                return advice_list
+        
+        return ["Tham khảo ý kiến bác sĩ định kỳ", "Theo dõi triệu chứng", "Ghi chép lịch sử bệnh", "Tuân thủ hướng dẫn điều trị"]
+
+    def _check_high_risk(self, disease_name: str) -> Dict[str, Any]:
+        """
+        Phát hiện bệnh nguy cơ cao.
+        ✅ NÂNG CẤP: Normalize disease_name trước khi check
+        """
+        name_norm = self._normalize_string(disease_name)
+        
+        risk_mapping = {
+            "diabetes": {"plugin": "diabetes", "name": "tiểu đường", "warning": "CẢNH BÁO: Triệu chứng gợi ý bệnh tiểu đường. Vui lòng khám ngay."},
+            "hypertension": {"plugin": "hypertension", "name": "cao huyết áp", "warning": "CẢNH BÁO: Triệu chứng gợi ý cao huyết áp. Vui lòng khám ngay."},
+            "cardiovascular": {"plugin": "cardiovascular", "name": "bệnh tim mạch", "warning": "CẢNH BÁO: Triệu chứng gợi ý bệnh tim mạch. Vui lòng khám ngay."},
+            "heart": {"plugin": "cardiovascular", "name": "bệnh tim mạch", "warning": "CẢNH BÁO: Triệu chứng gợi ý bệnh tim mạch. Vui lòng khám ngay."},
+            "kidney": {"plugin": "kidney", "name": "bệnh thận mạn", "warning": "CẢNH BÁO: Triệu chứng gợi ý bệnh thận. Vui lòng khám ngay."},
+            "stroke": {"plugin": "stroke", "name": "đột quỵ", "warning": "CẢNH BÁO: Triệu chứng gợi ý đột quỵ. ĐÂY LÀ TÌNH HUỐNG CẤP CỨU - Gọi 115 ngay!"},
+        }
+
+        for key, info in risk_mapping.items():
+            key_norm = self._normalize_string(key)
+            if key_norm in name_norm or key in name_norm:
+                return {
+                    "is_high_risk": True,
+                    "plugin_suggestion": info["plugin"],
+                    "risk_level": "high",
+                    "warning_message": info["warning"],
+                }
+
+        return {"is_high_risk": False, "risk_level": "common"}
+
+    async def enrich_disease_list(self, ai_diseases: List[Dict]) -> List[Dict]:
+        """
+        Bổ sung thông tin chi tiết cho từng bệnh từ CSV (hoặc từ chính AI sinh ra)
+        """
+        enriched = []
+        for disease_info in ai_diseases:
+            csv_lookup_name = disease_info.get("csv_disease_name", disease_info.get("disease", ""))
+            
+            # Truyền toàn bộ AI data vào để làm nguồn dự phòng chuyên sâu
+            detailed = self.get_disease_info(csv_lookup_name, ai_data=disease_info)
+            risk = self._check_high_risk(disease_info.get("disease", ""))
+            
+            enriched.append({
+                **disease_info,
+                **detailed,
+                **risk,
+                # Chốt xuất ra tên bệnh bằng tên đã gộp Anh (Việt)
+                "disease": disease_info.get("display_name", disease_info.get("disease", ""))
+            })
+        
+        return enriched
+
+    async def translate_response_to_vietnamese(
+        self, response_payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Việt hóa kết quả trả về cho người dùng.
+        ✅ NÂNG CẤP: Fallback vẫn trả về tiếng Việt
+        """
+        safe_payload = self._to_json_safe(response_payload)
+        prompt = f"""
+Bạn là công cụ dịch y khoa sang tiếng Việt.
+Hãy dịch toàn bộ nội dung người dùng nhìn thấy trong JSON bên dưới sang tiếng Việt tự nhiên, rõ ràng và ngắn gọn.
+
+RÀNG BUỘC:
+- Giữ nguyên tên khóa JSON.
+- Giữ nguyên các giá trị số, boolean và cấu trúc mảng/object.
+- Dịch các trường mô tả văn bản như final_symptoms, disease, reasoning, description, warning_message, health_advice, diet_recommendations, lifestyle_recommendations, context.analysis, disclaimer.
+- Nếu trường nào đã là tiếng Việt thì giữ nguyên.
+- Trả về DUY NHẤT JSON hợp lệ, không markdown, không giải thích.
+
+JSON CẦN DỊCH:
+{json.dumps(safe_payload, ensure_ascii=False)}
+"""
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.ollama_url,
+                    json={
+                        "model": self.model_name,
+                        "prompt": prompt,
+                        "format": "json",
+                        "stream": False,
+                    },
+                    timeout=60.0,
+                )
+
+                data = response.json()
+                raw_text = data.get("response", "").strip()
+                clean_json_str = self._extract_json_blob(raw_text)
+
+                try:
+                    translated = json.loads(clean_json_str)
+                    if isinstance(translated, dict):
+                        return translated
+                except json.JSONDecodeError:
+                    pass
+        except Exception as e:
+            print(f"[Error] Translate response error: {e}")
+
+        # ✅ FALLBACK: Nếu translation thất bại, vẫn trả về payload gốc (có thể đã là Việt)
+        print("[Fallback] Using original payload (may already be Vietnamese)")
+        return safe_payload
+
+
+_symptom_engine_instance = None
+
+
+def get_symptom_engine():
+    global _symptom_engine_instance
+    if _symptom_engine_instance is None:
+        _symptom_engine_instance = SymptomCheckerEngine()
+    return _symptom_engine_instance
+```
+
 ### backend\app\test_api_acceptance.py
 ```py
 """
@@ -2716,7 +3489,6 @@ def login(user: UserLoginSchema, db: Session = Depends(get_db)):
         "hoTen": db_user.hoTen,
         "anhDaiDien": extra.anhDaiDien if extra else None,
     }
-
 ```
 
 ### backend\function\cn_hs_suckhoe.py
@@ -2891,6 +3663,210 @@ def upsert_health_profile(profile_data: HealthProfileSchema, db: Session = Depen
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Lỗi lưu hồ sơ: {str(e)}")
+```
+
+### backend\function\cn_sotay_ykhoa.py
+```py
+from fastapi import APIRouter, Query, HTTPException
+from typing import Dict, Any, List, Optional
+from pydantic import BaseModel
+
+# Import engine
+from app.medical_handbook_engine import get_handbook_engine, DiseaseExplanation
+
+
+# ─────────────────── Pydantic Models ───────────────────
+class DiseaseExplanationResponse(BaseModel):
+    """Response model cho giải thích y khoa"""
+    tenbenhISO: str
+    tenbenh: str
+    tenkhoa: str
+    mota: str
+    trieuchinh: str
+    nguynhan: str
+    dieutri: str
+    phongngua: str
+
+
+class EnrichedAssessmentRequest(BaseModel):
+    """Request để match kết quả đánh giá với cẩm nang"""
+    disease: str
+    risk: Optional[str] = None
+    confidence: Optional[float] = None
+    additional_data: Optional[Dict[str, Any]] = None
+
+
+class EnrichedAssessmentResponse(BaseModel):
+    """Response cho assessment enriched với medical explanation"""
+    disease: str
+    risk: Optional[str] = None
+    confidence: Optional[float] = None
+    handbook_found: bool
+    y_te_explanation: Optional[DiseaseExplanationResponse] = None
+
+
+class DiseaseListItem(BaseModel):
+    """Item trong danh sách bệnh"""
+    tenbenhISO: str
+    tenbenh: str
+    tenkhoa: str
+
+
+# ─────────────────── Router ───────────────────
+router = APIRouter(prefix="/api/medical-handbook", tags=["Medical Handbook"])
+
+
+@router.get("/explanation/{disease_name}", 
+            response_model=Optional[DiseaseExplanationResponse],
+            summary="Lấy giải thích y khoa cho một bệnh")
+async def get_disease_explanation(disease_name: str):
+    """
+    Lấy giải thích y khoa chi tiết cho một bệnh cụ thể
+    
+    Args:
+        disease_name: Tên bệnh (ISO hoặc tiếng Việt)
+    
+    Returns:
+        DiseaseExplanationResponse hoặc None
+    
+    Example:
+        GET /api/medical-handbook/explanation/DIABETES
+        GET /api/medical-handbook/explanation/Tiểu đường
+    """
+    engine = get_handbook_engine()
+    explanation = engine.get_explanation(disease_name)
+    
+    if not explanation:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Không tìm thấy giải thích cho bệnh: {disease_name}"
+        )
+    
+    return explanation.to_dict()
+
+
+@router.get("/diseases", 
+            response_model=List[DiseaseListItem],
+            summary="Lấy danh sách tất cả bệnh")
+async def get_all_diseases():
+    """
+    Lấy danh sách tất cả các bệnh có trong cẩm nang y khoa
+    
+    Returns:
+        Danh sách DiseaseListItem
+    
+    Example:
+        GET /api/medical-handbook/diseases
+    """
+    engine = get_handbook_engine()
+    diseases = engine.get_all_diseases()
+    return diseases
+
+
+@router.get("/search", 
+            response_model=List[DiseaseExplanationResponse],
+            summary="Tìm kiếm bệnh theo từ khóa")
+async def search_diseases(keyword: str = Query(..., min_length=1)):
+    """
+    Tìm kiếm các bệnh theo từ khóa
+    
+    Args:
+        keyword: Từ khóa tìm kiếm (bắt buộc)
+    
+    Returns:
+        Danh sách DiseaseExplanationResponse
+    
+    Example:
+        GET /api/medical-handbook/search?keyword=tiểu
+        GET /api/medical-handbook/search?keyword=tim
+    """
+    engine = get_handbook_engine()
+    results = engine.search_diseases(keyword)
+    
+    if not results:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Không tìm thấy bệnh nào với từ khóa: {keyword}"
+        )
+    
+    return [result.to_dict() for result in results]
+
+
+@router.post("/enrich-assessment", 
+             response_model=EnrichedAssessmentResponse,
+             summary="Enriched kết quả đánh giá với giải thích y khoa")
+async def enrich_assessment(request: EnrichedAssessmentRequest):
+    """
+    Dùng để match kết quả dự đoán bệnh (từ rule-based hoặc ML engine)
+    với cẩm nang y khoa tự động
+    
+    Args:
+        request: EnrichedAssessmentRequest chứa disease name
+    
+    Returns:
+        EnrichedAssessmentResponse với y_te_explanation đính kèm
+    
+    Example:
+        POST /api/medical-handbook/enrich-assessment
+        {
+            "disease": "DIABETES",
+            "risk": "HIGH",
+            "confidence": 0.85
+        }
+    """
+    engine = get_handbook_engine()
+    
+    # Chuẩn bị dữ liệu
+    assessment_dict = {
+        "disease": request.disease,
+        "risk": request.risk,
+        "confidence": request.confidence,
+    }
+    
+    if request.additional_data:
+        assessment_dict.update(request.additional_data)
+    
+    # Enrich với handbook
+    enriched = engine.match_and_enrich(assessment_dict, disease_field="disease")
+    
+    # Build response
+    y_te_data = enriched.get("y_te_explanation")
+    
+    return EnrichedAssessmentResponse(
+        disease=enriched["disease"],
+        risk=enriched.get("risk"),
+        confidence=enriched.get("confidence"),
+        handbook_found=enriched.get("handbook_found", False),
+        y_te_explanation=y_te_data
+    )
+
+
+@router.get("/health", 
+            summary="Check sức khỏe của Medical Handbook Engine")
+async def health_check():
+    """
+    Kiểm tra xem engine có chạy bình thường không
+    và bao nhiêu bệnh đã được load
+    
+    Returns:
+        Status và số lượng bệnh
+    
+    Example:
+        GET /api/medical-handbook/health
+    """
+    try:
+        engine = get_handbook_engine()
+        num_diseases = len(engine.handbook_data)
+        return {
+            "status": "ok",
+            "diseases_loaded": num_diseases,
+            "message": f"Medical Handbook Engine hoạt động bình thường. Đã load {num_diseases} bệnh."
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Medical Handbook Engine lỗi: {str(e)}"
+        )
 ```
 
 ### backend\function\cn_thongtin_nguoidung.py
@@ -3135,6 +4111,8 @@ async def upload_avatar(
 # Verifies current password then sets new hash
 # ---------------------------------------------------------------------------
 
+# backend/function/cn_thongtin_nguoidung.py
+
 @router.post("/{ten_dang_nhap}/change-password")
 def change_password(
     ten_dang_nhap: str,
@@ -3148,7 +4126,12 @@ def change_password(
     if not user:
         raise HTTPException(status_code=404, detail="Khong tim thay nguoi dung")
 
-    if not pwd_context.verify(payload.currentPassword, user.matKhauHash):
+    # [BẢN VÁ]: Cắt mật khẩu hiện tại xuống 72 bytes để tránh ValueError của bcrypt
+    safe_current = payload.currentPassword
+    if len(safe_current.encode("utf-8")) > 72:
+        safe_current = safe_current[:72]
+
+    if not pwd_context.verify(safe_current, user.matKhauHash):
         raise HTTPException(status_code=400, detail="Mat khau hien tai khong chinh xac")
 
     safe_new = payload.newPassword
@@ -3163,7 +4146,407 @@ def change_password(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Loi luu mat khau: {str(e)}")
+```
 
+### backend\function\cn_tra_cuu_trieu_chung.py
+```py
+# backend/function/cn_tra_cuu_trieu_chung.py
+"""
+NÂNG CẤP: API Tra Cứu Triệu Chứng - AI-Driven (v2)
+- ✅ Sử dụng AI phân tích ngữ cảnh y khoa làm chính
+- ✅ CSV dùng để kiểm chứng + cung cấp thông tin chi tiết
+- ✅ FỐI XỬ MATCHING: Fuzzy match, normalize disease names, fallback descriptions
+- ✅ LUÔN TRẢLẠI TIẾNG VIỆT: Fallback Vietnamese descriptions khi CSV không tìm
+- ✅ Loại trừ bệnh không phù hợp dựa trên ngữ cảnh
+- ✅ Trả về lý do y tế cho từng gợi ý
+"""
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import desc
+from sqlalchemy.orm import Session
+
+from app.symptom_checker_engine import get_symptom_engine
+from database.database import SessionLocal
+from database.lich_su_tra_cuu import LichSuTraCuuTrieuChung
+from database.nguoi_dung import NguoiDung
+
+
+router = APIRouter(prefix="/symptom-checker", tags=["Tra Cuu Trieu Chung"])
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# ─────────────────────────────────────────────────────────────────
+# Pydantic Models
+# ─────────────────────────────────────────────────────────────────
+
+class TraCuuRequest(BaseModel):
+    tenDangNhap: str
+    trieuChung1: Optional[str] = None
+    trieuChung2: Optional[str] = None
+    trieuChung3: Optional[str] = None
+    trieuChung4: Optional[str] = None
+    moTaThem: Optional[str] = ""
+
+
+class AIDisease(BaseModel):
+    disease: str
+    confidence: float
+    reasoning: Optional[str] = None
+    match_rate: float
+    severity_risk: Optional[str] = None
+    description: Optional[str] = None
+    is_high_risk: bool = False
+    warning_message: Optional[str] = None
+    health_advice: List[str] = []
+    diet_recommendations: List[str] = []
+    lifestyle_recommendations: List[str] = []
+
+
+class TraCuuResponse(BaseModel):
+    final_symptoms: List[str]
+    potential_diseases: List[AIDisease]
+    context: Dict[str, Any] = {}
+    disclaimer: str
+
+
+class LichSuTraCuuResponse(BaseModel):
+    idTraCuu: int
+    ngayTraCuu: datetime
+    trieuChung: List[str]
+    moTaThem: str
+    ketQua: Dict[str, Any]
+
+
+# ─────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────
+
+def normalize_list(value):
+    """Chuẩn hóa list từ response"""
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(x).strip() for x in value if str(x).strip()]
+    return [str(value).strip()] if str(value).strip() else []
+
+
+# ─────────────────────────────────────────────────────────────────
+# Endpoints
+# ─────────────────────────────────────────────────────────────────
+
+@router.post("/analyze", response_model=TraCuuResponse)
+async def analyze_symptoms(request: TraCuuRequest, db: Session = Depends(get_db)):
+    """
+    NÂNG CẤP (v2): Tra cứu triệu chứng bằng AI-driven analysis.
+    
+    Quy trình:
+    1. AI phân tích ngữ cảnh + gợi ý bệnh (chính)
+    2. ✅ Resolve tên bệnh bằng fuzzy matching + normalize
+    3. CSV kiểm chứng + cung cấp thông tin chi tiết (hoặc fallback Việt)
+    4. ✅ Fallback mô tả tự động (tiếng Việt) khi CSV không tìm được
+    5. Loại trừ bệnh không phù hợp
+    6. Trả về lý do y tế cho mỗi gợi ý
+    7. ✅ LUÔN TRẢLẠI TIẾNG VIỆT
+    
+    Request:
+    {
+        "tenDangNhap": "user123",
+        "trieuChung1": "đau đầu",
+        "trieuChung2": "chóng mặt",
+        "trieuChung3": "",
+        "trieuChung4": "",
+        "moTaThem": "từ sáng sớm, sau khi ăn cơm không hoàn toàn chín"
+    }
+    
+    Response:
+    {
+        "final_symptoms": ["headache", "dizziness"],
+        "potential_diseases": [
+            {
+                "disease": "migraine",
+                "confidence": 0.92,
+                "reasoning": "Đau đầu + chóng mặt thường gặp trong chứng đau nửa đầu",
+                "match_rate": 85.5,
+                "severity_risk": "medium",
+                "description": "Bệnh đau nửa đầu là...",
+                "health_advice": ["Tránh ánh sáng sặc sỡ", "Nghỉ ngơi trong phòng tối"],
+                "diet_recommendations": ["Ăn các thực phẩm nhẹ", "Tránh caffeine"],
+                "lifestyle_recommendations": ["Ngủ đủ giấc", "Giảm căng thẳng"],
+                "is_high_risk": false
+            }
+        ],
+        "context": {
+            "is_acute": true,
+            "is_chronic": false,
+            "severity": "medium",
+            "analysis": "Bệnh cấp tính, khả năng cao là đau đầu thông thường hoặc migraine"
+        },
+        "disclaimer": "Đây là công cụ sàng lọc sơ bộ..."
+    }
+    """
+    
+    # ────────────────────────────────────────────────────────────
+    # Kiểm tra đăng nhập
+    # ────────────────────────────────────────────────────────────
+    user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == request.tenDangNhap).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng.")
+
+    # ────────────────────────────────────────────────────────────
+    # Chuẩn bị triệu chứng
+    # ────────────────────────────────────────────────────────────
+    selected_symptoms = [
+        s for s in [
+            request.trieuChung1,
+            request.trieuChung2,
+            request.trieuChung3,
+            request.trieuChung4,
+        ]
+        if s and str(s).strip()
+    ]
+    mo_ta_them = (request.moTaThem or "").strip()
+
+    print("📥 DEBUG - Request nhận được:")
+    print(f"   tenDangNhap: {request.tenDangNhap}")
+    print(f"   trieuChung: {selected_symptoms}")
+    print(f"   moTaThem: '{mo_ta_them}'")
+
+    # ────────────────────────────────────────────────────────────
+    # Kiểm tra dữ liệu đầu vào
+    # ────────────────────────────────────────────────────────────
+    if not selected_symptoms and not mo_ta_them:
+        print("❌ LỖI: Không có triệu chứng cũng không có mô tả")
+        raise HTTPException(
+            status_code=400,
+            detail="Vui lòng chọn ít nhất 1 triệu chứng hoặc nhập mô tả.",
+        )
+
+    if len(selected_symptoms) > 4:
+        raise HTTPException(status_code=400, detail="Chỉ được nhập tối đa 4 triệu chứng.")
+
+    # ────────────────────────────────────────────────────────────
+    # AI-driven analysis (chính)
+    # ────────────────────────────────────────────────────────────
+    engine = get_symptom_engine()
+    
+    # BƯỚC 1: AI phân tích + gợi ý bệnh (đã có csv_disease_name từ engine)
+    ai_result = await engine.analyze_symptoms_with_ai(selected_symptoms, mo_ta_them)
+    
+    if not ai_result or not ai_result.get("ai_diseases"):
+        raise HTTPException(
+            status_code=400,
+            detail="Hệ thống không thể phân tích. Vui lòng cung cấp thông tin chi tiết hơn.",
+        )
+
+    final_symptoms = ai_result.get("final_symptoms", [])
+    ai_diseases = ai_result.get("ai_diseases", [])
+    context = ai_result.get("context", {})
+
+    # BƯỚC 2: ✅ Bổ sung thông tin chi tiết từ CSV (hoặc fallback Việt)
+    # Engine sẽ tự động dùng fuzzy matching + fallback mô tả
+    enriched_diseases = await engine.enrich_disease_list(ai_diseases)
+
+    # BƯỚC 3: Sắp xếp theo confidence × match_rate
+    enriched_diseases.sort(
+        key=lambda x: (x.get("confidence", 0) * (x.get("match_rate", 0) / 100)),
+        reverse=True
+    )
+
+    # BƯỚC 4: Giới hạn top 3 kết quả
+    top_diseases = enriched_diseases[:3]
+
+    print(f"✅ AI gợi ý {len(top_diseases)} bệnh:")
+    for d in top_diseases:
+        print(f"   - {d['disease']}: confidence={d.get('confidence', 0)}, match={d.get('match_rate', 0)}%")
+        print(f"     description_length={len(d.get('description', ''))}")
+        print(f"     health_advice_count={len(d.get('health_advice', []))}")
+        print(f"     diet_count={len(d.get('diet_recommendations', []))}")
+        print(f"     lifestyle_count={len(d.get('lifestyle_recommendations', []))}")
+
+    # ────────────────────────────────────────────────────────────
+    # Chuẩn bị raw response
+    # ────────────────────────────────────────────────────────────
+    raw_response = {
+        "final_symptoms": final_symptoms,
+        "potential_diseases": [
+            {
+                "disease": d["disease"],
+                "confidence": d.get("confidence", 0),
+                "reasoning": d.get("reasoning", ""),
+                "match_rate": d.get("match_rate", 0),
+                "severity_risk": d.get("severity_risk", "medium"),
+                "description": d.get("description", ""),
+                "is_high_risk": d.get("is_high_risk", False),
+                "warning_message": d.get("warning_message", ""),
+                "health_advice": normalize_list(d.get("health_advice", [])),
+                "diet_recommendations": normalize_list(d.get("diet_recommendations", [])),
+                "lifestyle_recommendations": normalize_list(d.get("lifestyle_recommendations", [])),
+            }
+            for d in top_diseases
+        ],
+        "context": context,
+        "disclaimer": ai_result.get("disclaimer", ""),
+    }
+
+    # ────────────────────────────────────────────────────────────
+    # ✅ Dịch sang tiếng Việt (hoặc giữ nguyên nếu fallback đã Việt)
+    # ────────────────────────────────────────────────────────────
+    translated_response = await engine.translate_response_to_vietnamese(raw_response)
+    translated_final_symptoms = translated_response.get("final_symptoms", raw_response["final_symptoms"])
+    translated_potential_diseases = translated_response.get("potential_diseases", raw_response["potential_diseases"])
+    translated_context = translated_response.get("context", raw_response["context"])
+    translated_disclaimer = translated_response.get("disclaimer", raw_response["disclaimer"])
+
+    # ────────────────────────────────────────────────────────────
+    # Lưu lịch sử vào database
+    # ────────────────────────────────────────────────────────────
+    try:
+        lich_su = LichSuTraCuuTrieuChung(
+            idNguoiDung=user.idNguoiDung,
+            trieuChung1=request.trieuChung1,
+            trieuChung2=request.trieuChung2,
+            trieuChung3=request.trieuChung3,
+            trieuChung4=request.trieuChung4,
+            moTaThem=mo_ta_them,
+            ketQuaJSON={
+                "final_symptoms": translated_final_symptoms,
+                "potential_diseases": translated_potential_diseases,
+                "context": translated_context,
+                "disclaimer": translated_disclaimer,
+            },
+        )
+        db.add(lich_su)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Lỗi khi lưu lịch sử tra cứu: {e}")
+
+    # ────────────────────────────────────────────────────────────
+    # Trả về kết quả
+    # ────────────────────────────────────────────────────────────
+    return TraCuuResponse(
+        final_symptoms=translated_final_symptoms,
+        potential_diseases=[
+            AIDisease(
+                disease=d.get("disease", ""),
+                confidence=d.get("confidence", 0),
+                reasoning=d.get("reasoning", ""),
+                match_rate=d.get("match_rate", 0),
+                severity_risk=d.get("severity_risk", "medium"),
+                description=d.get("description", ""),
+                is_high_risk=d.get("is_high_risk", False),
+                warning_message=d.get("warning_message", ""),
+                health_advice=normalize_list(d.get("health_advice", [])),
+                diet_recommendations=normalize_list(d.get("diet_recommendations", [])),
+                lifestyle_recommendations=normalize_list(d.get("lifestyle_recommendations", [])),
+            )
+            for d in translated_potential_diseases
+        ],
+        context=translated_context,
+        disclaimer=translated_disclaimer,
+    )
+
+
+@router.get("/history/{ten_dang_nhap}", response_model=List[LichSuTraCuuResponse])
+async def get_search_history(
+    ten_dang_nhap: str,
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """
+    Lấy lịch sử tra cứu của người dùng.
+    
+    Response:
+    [
+        {
+            "idTraCuu": 1,
+            "ngayTraCuu": "2024-01-15T10:30:00",
+            "trieuChung": ["đau đầu", "chóng mặt"],
+            "moTaThem": "từ sáng sớm",
+            "ketQua": {
+                "final_symptoms": [...],
+                "potential_diseases": [...]
+            }
+        }
+    ]
+    """
+    user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == ten_dang_nhap).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng.")
+
+    records = (
+        db.query(LichSuTraCuuTrieuChung)
+        .filter(LichSuTraCuuTrieuChung.idNguoiDung == user.idNguoiDung)
+        .order_by(desc(LichSuTraCuuTrieuChung.ngayTraCuu))
+        .limit(limit)
+        .all()
+    )
+
+    return [
+        LichSuTraCuuResponse(
+            idTraCuu=record.idTraCuu,
+            ngayTraCuu=record.ngayTraCuu,
+            trieuChung=[
+                symptom
+                for symptom in [
+                    record.trieuChung1,
+                    record.trieuChung2,
+                    record.trieuChung3,
+                    record.trieuChung4,
+                ]
+                if symptom and symptom.strip()
+            ],
+            moTaThem=record.moTaThem or "",
+            ketQua=record.ketQuaJSON or {},
+        )
+        for record in records
+    ]
+
+
+@router.get("/health")
+async def health_check():
+    """
+    Kiểm tra sức khỏe của Symptom Checker Engine.
+    
+    Response:
+    {
+        "status": "ok",
+        "engine": "AI-Driven",
+        "features": ["context_detection", "disease_exclusion", "confidence_scoring"],
+        "message": "Engine hoạt động bình thường"
+    }
+    """
+    try:
+        engine = get_symptom_engine()
+        return {
+            "status": "ok",
+            "engine": "AI-Driven Symptom Checker (v2)",
+            "features": [
+                "Context Detection (acute vs chronic)",
+                "Disease Exclusion",
+                "Confidence Scoring",
+                "Fuzzy Disease Matching",
+                "Fallback Vietnamese Descriptions",
+                "Semantic Reasoning",
+                "CSV Verification",
+            ],
+            "message": "Symptom Checker Engine hoạt động bình thường.",
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Symptom Checker Engine lỗi: {str(e)}",
+        )
 ```
 
 ### backend\function\cn_tra_thuoc.py
@@ -4391,6 +5774,9 @@ import ChiSoSucKhoe from "./hs-suckhoe";
 import TrangChu from "./trang-chu";
 import GioiThieu from "./gioi-thieu";
 import TraThuoc from "./tra-thuoc";
+import TraBenh from "./tra-benh";
+import LichSuTraCuu from "./lich-su-tra-cuu";
+
 import ThongTinND from "./thongtin-nd.jsx";
 
 import Header from "./components/header.jsx";
@@ -4511,11 +5897,14 @@ function AppContent() {
         return <GioiThieu setCurrentView={setCurrentView} />;
       case "tra-thuoc":
         return <TraThuoc />;
+      case "tra-benh":
+        return <TraBenh />;
+      case "history":
+        return <LichSuTraCuu />;
       // 2. Các đường dẫn từ Header đang chờ phát triển (Placeholder)
       case "tu-van-ai":
       case "y-te":
       case "thuc-don":
-      case "history":
       case "cai-dat":
       case "thong-bao":
       case "dashboard":
@@ -5766,6 +7155,201 @@ const nextBtnStyle = { padding: "8px 16px", background: "#FFFFFF", border: "1px 
 
 ```
 
+### frontend\web\src\lich-su-tra-cuu.jsx
+```jsx
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import axios from "axios";
+
+const API_BASE_URL = "http://127.0.0.1:8000";
+
+function formatDate(value) {
+  try {
+    return new Intl.DateTimeFormat("vi-VN", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(value));
+  } catch {
+    return String(value || "");
+  }
+}
+
+function normalizeList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter(Boolean).map((item) => String(item).trim()).filter(Boolean);
+  return [];
+}
+
+export default function LichSuTraCuu() {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [history, setHistory] = useState([]);
+
+  useEffect(() => {
+    const currentUser = localStorage.getItem("userName");
+    if (!currentUser) {
+      setError("Vui lòng đăng nhập để xem lịch sử tra cứu.");
+      setLoading(false);
+      return;
+    }
+
+    let active = true;
+    async function loadHistory() {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/symptom-checker/history/${encodeURIComponent(currentUser)}?limit=20`);
+        if (!active) return;
+        setHistory(Array.isArray(response.data) ? response.data : []);
+      } catch (err) {
+        if (!active) return;
+        setError(err.response?.data?.detail || "Không thể tải lịch sử tra cứu.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    loadHistory();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return (
+    <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "20px" }}>
+      <div style={{ marginBottom: "18px" }}>
+        <h2 style={{ color: "#0F172A", margin: 0, fontSize: "28px" }}>
+          <i className="fa-solid fa-clock-rotate-left" style={{ color: "#2563EB", marginRight: "10px" }}></i>
+          Lịch Sử Tra Cứu
+        </h2>
+        <p style={{ color: "#64748B", marginTop: "8px" }}>
+          Các lần tra bệnh gần nhất của bạn được lưu tự động để xem lại khi cần.
+        </p>
+      </div>
+
+      {loading && (
+        <div style={{ background: "white", border: "1px solid #E2E8F0", borderRadius: "12px", padding: "20px", color: "#475569" }}>
+          Đang tải lịch sử...
+        </div>
+      )}
+
+      {error && !loading && (
+        <div style={{ background: "#FEF2F2", color: "#991B1B", padding: "16px", borderRadius: "12px", border: "1px solid #FECACA" }}>
+          <i className="fa-solid fa-triangle-exclamation"></i> {error}
+        </div>
+      )}
+
+      {!loading && !error && history.length === 0 && (
+        <div style={{ background: "white", border: "1px dashed #CBD5E1", borderRadius: "16px", padding: "32px", textAlign: "center" }}>
+          <div style={{ fontSize: "44px", color: "#94A3B8", marginBottom: "12px" }}>
+            <i className="fa-regular fa-folder-open"></i>
+          </div>
+          <h3 style={{ margin: "0 0 8px", color: "#0F172A" }}>Chưa có lịch sử tra cứu</h3>
+          <p style={{ color: "#64748B", marginBottom: "18px" }}>
+            Hãy thử chức năng tra bệnh để tạo các kết quả đầu tiên.
+          </p>
+          <button
+            onClick={() => navigate("/tra-benh")}
+            style={{ background: "#2563EB", color: "white", border: "none", borderRadius: "10px", padding: "10px 18px", fontWeight: "600", cursor: "pointer" }}
+          >
+            Đi tới Tra Bệnh
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && history.length > 0 && (
+        <div style={{ display: "grid", gap: "16px" }}>
+          {history.map((item) => {
+            const result = item.ketQua || {};
+            const diseases = Array.isArray(result.potential_diseases) ? result.potential_diseases : [];
+            const topDisease = diseases[0];
+            const symptoms = normalizeList(item.trieuChung);
+            const highRiskCount = diseases.filter((d) => d?.is_high_risk).length;
+
+            return (
+              <div
+                key={item.idTraCuu}
+                style={{
+                  background: "white",
+                  border: "1px solid #E2E8F0",
+                  borderRadius: "16px",
+                  boxShadow: "0 1px 3px rgba(15, 23, 42, 0.08)",
+                  overflow: "hidden",
+                }}
+              >
+                <div style={{ padding: "18px 20px", display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", borderBottom: "1px solid #E2E8F0", background: "#F8FAFC" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: "4px" }}>
+                      Lần tra cứu #{item.idTraCuu}
+                    </div>
+                    <div style={{ color: "#64748B", fontSize: "14px" }}>
+                      {formatDate(item.ngayTraCuu)}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ padding: "6px 12px", borderRadius: "999px", background: highRiskCount > 0 ? "#FEE2E2" : "#DCFCE7", color: highRiskCount > 0 ? "#991B1B" : "#166534", fontWeight: 700, fontSize: "13px" }}>
+                      {highRiskCount > 0 ? "Có nguy cơ cao" : "Dạng thường"}
+                    </span>
+                    {topDisease && (
+                      <span style={{ padding: "6px 12px", borderRadius: "999px", background: "#E0F2FE", color: "#075985", fontWeight: 700, fontSize: "13px" }}>
+                        Gợi ý: {topDisease.disease}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ padding: "20px" }}>
+                  <div style={{ marginBottom: "16px" }}>
+                    <strong style={{ color: "#0F172A", display: "block", marginBottom: "10px" }}>Triệu chứng đã nhập</strong>
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                      {symptoms.length > 0 ? symptoms.map((sym, idx) => (
+                        <span key={idx} style={{ background: "#EFF6FF", color: "#1D4ED8", borderRadius: "999px", padding: "6px 12px", fontSize: "13px" }}>
+                          {sym}
+                        </span>
+                      )) : <span style={{ color: "#64748B" }}>Không có.</span>}
+                    </div>
+                    {item.moTaThem && (
+                      <p style={{ marginTop: "12px", color: "#334155", lineHeight: 1.6 }}>
+                        <strong>Mô tả thêm:</strong> {item.moTaThem}
+                      </p>
+                    )}
+                  </div>
+
+                  {topDisease ? (
+                    <div style={{ background: topDisease.is_high_risk ? "#FEF2F2" : "#F8FAFC", border: `1px solid ${topDisease.is_high_risk ? "#FECACA" : "#E2E8F0"}`, borderRadius: "12px", padding: "16px" }}>
+                      <div style={{ fontWeight: 700, color: topDisease.is_high_risk ? "#991B1B" : "#0F172A", marginBottom: "8px" }}>
+                        {topDisease.disease}
+                      </div>
+                      <p style={{ margin: "0 0 12px", color: "#475569", lineHeight: 1.6 }}>
+                        {topDisease.is_high_risk
+                          ? topDisease.warning_message || "Kết quả có dấu hiệu nguy cơ cao, hãy đi khám sớm."
+                          : topDisease.description || "Không có mô tả tham khảo."}
+                      </p>
+                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                        <span style={{ padding: "6px 10px", borderRadius: "999px", background: "#FEF3C7", color: "#92400E", fontWeight: 700, fontSize: "12px" }}>
+                          Khớp: {topDisease.match_rate}%
+                        </span>
+                        {topDisease.is_high_risk && (
+                          <span style={{ padding: "6px 10px", borderRadius: "999px", background: "#991B1B", color: "white", fontWeight: 700, fontSize: "12px" }}>
+                            Nguy cơ cao
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ color: "#64748B" }}>Không có bệnh gợi ý phù hợp.</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+```
+
 ### frontend\web\src\main.jsx
 ```jsx
 import { StrictMode } from 'react'
@@ -6471,7 +8055,6 @@ export default function MainRiskPage() {
     </div>
   );
 }
-
 ```
 
 ### frontend\web\src\thongtin-nd.jsx
@@ -7066,6 +8649,489 @@ export default function ThongTinNguoiDung({ onProfileUpdate }) {
   );
 }
 
+```
+
+### frontend\web\src\tra-benh.jsx
+```jsx
+// frontend/web/src/tra-benh.jsx
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import axios from "axios";
+import "./css/tra-benh.css";
+
+const API_BASE_URL = "http://127.0.0.1:8000";
+
+function normalizeList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter(Boolean).map((item) => String(item).trim()).filter(Boolean);
+  if (typeof value !== "string") return [];
+
+  const text = value.trim();
+  if (!text || text === "[]") return [];
+
+  try {
+    const parsed = JSON.parse(text.replace(/'/g, '"'));
+    if (Array.isArray(parsed)) {
+      return parsed.filter(Boolean).map((item) => String(item).trim()).filter(Boolean);
+    }
+  } catch {
+    // fallback below
+  }
+
+  return text
+    .replace(/^\[/, "")
+    .replace(/\]$/, "")
+    .split(",")
+    .map((item) => item.trim().replace(/^['"]|['"]$/g, ""))
+    .filter(Boolean);
+}
+
+// ────────────────────────────────────────────────────────────
+// COMPONENT: SectionList - Hiển thị danh sách tư vấn
+// ────────────────────────────────────────────────────────────
+function SectionList({ title, iconClass, items, color = "#334155", background = "#F8FAFC", borderColor = "#E2E8F0" }) {
+  const list = normalizeList(items);
+  return (
+    <div className="tb-section-list" style={{ background, border: `1px solid ${borderColor}`, borderRadius: "12px", padding: "16px" }}>
+      <strong className="tb-section-title" style={{ color }}>
+        <i className={`${iconClass}`} style={{ marginRight: "8px" }}></i> {title}
+      </strong>
+      <ul className="tb-list-items" style={{ color }}>
+        {list.length > 0 ? list.map((item, idx) => (
+          <li key={idx} className="tb-list-item">
+            <i className="fa-solid fa-check tb-list-check"></i>
+            {item}
+          </li>
+        )) : <li className="tb-list-empty">Không có dữ liệu.</li>}
+      </ul>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// COMPONENT: DiseaseCard - Thẻ kết quả bệnh
+// ────────────────────────────────────────────────────────────
+function DiseaseCard({ disease, index, navigate }) {
+  const isHighRisk = disease.is_high_risk;
+  const advice = normalizeList(disease.health_advice);
+  const diets = normalizeList(disease.diet_recommendations);
+  const lifestyle = normalizeList(disease.lifestyle_recommendations);
+
+  return (
+    <div className={`tb-disease-card ${isHighRisk ? "tb-disease-card--high-risk" : ""}`}>
+      
+      {/* Header với tiêu đề và badge */}
+      <div className="tb-disease-card-header">
+        <div className="tb-disease-card-left">
+          <h3 className="tb-disease-name">{disease.disease.toUpperCase()}</h3>
+          <p className="tb-disease-confidence">
+            <i className="fa-solid fa-signal"></i> Độ tin cậy: {(disease.confidence * 100).toFixed(0)}%
+          </p>
+        </div>
+        <div className="tb-disease-badges">
+          
+          {isHighRisk && (
+            <span className="tb-badge tb-badge-danger">
+              <i className="fa-solid fa-triangle-exclamation"></i> Nguy Cơ Cao
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Phần nội dung chính */}
+      <div className="tb-disease-card-body">
+        {isHighRisk ? (
+          // Trường hợp nguy cơ cao
+          <div className="tb-high-risk-section">
+            <div className="tb-warning-box">
+              <i className="fa-solid fa-exclamation-triangle"></i>
+              <span className="tb-warning-text">{disease.warning_message}</span>
+            </div>
+            
+            {advice.length > 0 && (
+              <div style={{ marginTop: "16px" }}>
+                <SectionList
+                  title="Khuyến Nghị Cần Làm Ngay"
+                  iconClass="fa-solid fa-shield-heart"
+                  items={advice}
+                  color="#991B1B"
+                  background="#FEF2F2"
+                  borderColor="#FECACA"
+                />
+              </div>
+            )}
+
+            <button 
+              onClick={() => navigate("/phan-tich-benh")}
+              className="tb-btn tb-btn-danger"
+            >
+              <i className="fa-solid fa-notes-medical"></i> Chuyển sang Phân Tích Chuyên Sâu
+            </button>
+          </div>
+        ) : (
+          // Trường hợp nguy cơ thường
+          <div className="tb-normal-risk-section">
+            {disease.description && (
+              <div className="tb-description-box">
+                <strong><i className="fa-solid fa-book-medical"></i> Giới thiệu bệnh:</strong>
+                <p>{disease.description}</p>
+              </div>
+            )}
+
+            {disease.reasoning && (
+              <div className="tb-reasoning-box">
+                <strong><i className="fa-solid fa-lightbulb"></i> Lý do gợi ý:</strong>
+                <p>{disease.reasoning}</p>
+              </div>
+            )}
+
+            {/* Lưới 3 cột cho dinh dưỡng, sinh hoạt, chăm sóc */}
+            <div className="tb-recommendations-grid">
+              {diets.length > 0 && (
+                <SectionList
+                  title="Dinh Dưỡng"
+                  iconClass="fa-solid fa-utensils"
+                  items={diets}
+                  color="#166534"
+                  background="#F0FDF4"
+                  borderColor="#BBF7D0"
+                />
+              )}
+
+              {lifestyle.length > 0 && (
+                <SectionList
+                  title="Sinh Hoạt"
+                  iconClass="fa-solid fa-person-running"
+                  items={lifestyle}
+                  color="#1E40AF"
+                  background="#EFF6FF"
+                  borderColor="#BFDBFE"
+                />
+              )}
+
+              {advice.length > 0 && (
+                <SectionList
+                  title="Chăm Sóc"
+                  iconClass="fa-solid fa-shield-heart"
+                  items={advice}
+                  color="#854D0E"
+                  background="#FFFBEB"
+                  borderColor="#FEF08A"
+                />
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// MAIN COMPONENT: TraBenh
+// ────────────────────────────────────────────────────────────
+export default function TraBenh() {
+  const navigate = useNavigate();
+  
+  const [symptoms, setSymptoms] = useState(["", "", "", ""]);
+  const [moTaThem, setMoTaThem] = useState("");
+  
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState(null);
+  const [error, setError] = useState("");
+
+  const handleSymptomChange = (index, value) => {
+    const newSymptoms = [...symptoms];
+    newSymptoms[index] = value;
+    setSymptoms(newSymptoms);
+  };
+
+  const handleTraCuu = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    setResults(null);
+
+    const currentUser = localStorage.getItem("userName");
+    
+    if (!currentUser) {
+      setError("Vui lòng đăng nhập để sử dụng tính năng tra cứu triệu chứng.");
+      setLoading(false);
+      return;
+    }
+
+    const payload = {
+      tenDangNhap: currentUser,
+      trieuChung1: symptoms[0] || "",
+      trieuChung2: symptoms[1] || "",
+      trieuChung3: symptoms[2] || "",
+      trieuChung4: symptoms[3] || "",
+      moTaThem: moTaThem.trim() || ""
+    };
+
+    console.log("📤 Payload gửi đi:", payload);
+
+    try {
+      const response = await axios.post(`${API_BASE_URL}/symptom-checker/analyze`, payload);
+      console.log("✅ Response:", response.data);
+      setResults(response.data);
+      
+      // Cuộn đến kết quả
+      setTimeout(() => {
+        const resultsSection = document.getElementById("tb-results");
+        if (resultsSection) {
+          resultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }, 300);
+    } catch (err) {
+      console.error("❌ Error response:", err.response?.data);
+      setError(err.response?.data?.detail || "Có lỗi xảy ra khi phân tích triệu chứng.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="tb-page">
+
+      {/* ════════════════════════════════════════
+          HEADER / BANNER
+      ════════════════════════════════════════ */}
+      <div className="tb-banner">
+        <div className="tb-banner-mesh">
+          <div className="tb-mesh-blob tb-mesh-blob--1"></div>
+          <div className="tb-mesh-blob tb-mesh-blob--2"></div>
+        </div>
+
+        <div className="tb-banner-content">
+          <div className="tb-banner-badge">
+            <span className="tb-badge-dot"></span>
+            Tra Cứu Triệu Chứng Ban Đầu
+          </div>
+          <h1 className="tb-banner-title">
+            Phân Tích Triệu Chứng <em>Bằng AI</em>
+          </h1>
+          <p className="tb-banner-desc">
+            Sử dụng Luật Y Học, Dữ Liệu Y Tế và Trí Tuệ Nhân Tạo để phân tích triệu chứng bạn mô tả, 
+            từ đó gợi ý những bệnh lý có thể phù hợp kèm lời khuyên chăm sóc.
+          </p>
+        </div>
+      </div>
+
+      {/* ════════════════════════════════════════
+          MAIN CONTENT
+      ════════════════════════════════════════ */}
+      <div className="tb-container">
+
+        {/* ─────────────────────────────────────
+            KHUNG NHẬP LIỆU
+        ───────────────────────────────────── */}
+        <div className="tb-input-card">
+
+          <div className="tb-input-card-header">
+            <div className="tb-input-header-content">
+              <h2 className="tb-input-title">Nhập Triệu Chứng Của Bạn</h2>
+              <p className="tb-input-subtitle">
+                Vui lòng mô tả chi tiết các triệu chứng bạn đang gặp để hệ thống AI có thể phân tích chính xác.
+              </p>
+            </div>
+            <div className="tb-input-icon-wrapper">
+              <i className="fa-solid fa-stethoscope"></i>
+            </div>
+          </div>
+
+          <form onSubmit={handleTraCuu} className="tb-form">
+
+            {/* ─ Khối nhập triệu chứng ─ */}
+            <div className="tb-form-section">
+              <div className="tb-form-section-header">
+                <i className="fa-solid fa-list-check"></i>
+                <div>
+                  <h3 className="tb-section-heading">Chọn Triệu Chứng Chính (Tối Đa 4)</h3>
+                  <p className="tb-section-description">
+                    Nhập từng triệu chứng bạn đang gặp phải. Ví dụ: đau đầu, chóng mặt, buồn nôn, v.v.
+                  </p>
+                </div>
+              </div>
+
+              <div className="tb-symptoms-grid">
+                {symptoms.map((sym, index) => (
+                  <div key={index} className="tb-symptom-input-wrapper">
+                    <label className="tb-symptom-label">Triệu chứng {index + 1}</label>
+                    <input
+                      type="text"
+                      placeholder={`VD: Đau đầu, Chóng mặt, Buồn nôn...`}
+                      value={sym}
+                      onChange={(e) => handleSymptomChange(index, e.target.value)}
+                      className="tb-symptom-input"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ─ Khối mô tả thêm ─ */}
+            <div className="tb-form-section">
+              <div className="tb-form-section-header">
+                <i className="fa-solid fa-pen-to-square"></i>
+                <div>
+                  <h3 className="tb-section-heading">Mô Tả Chi Tiết (Rất Quan Trọng)</h3>
+                  <p className="tb-section-description">
+                    Hãy mô tả cụ thể: thời gian xuất hiện triệu chứng, mức độ nặng nhẹ, 
+                    các hoạt động gây ảnh hưởng, v.v. Càng chi tiết giúp AI phân tích chính xác hơn.
+                  </p>
+                </div>
+              </div>
+
+              <textarea
+                rows="4"
+                placeholder="Ví dụ: Tôi bị đau đầu từ chiều, chủ yếu vùng trán. Buồn nôn từ sáng khi ăn cơm chưa chín. Cảm thấy chóng mặt khi đứng dậy nhanh..."
+                value={moTaThem}
+                onChange={(e) => setMoTaThem(e.target.value)}
+                className="tb-description-textarea"
+              ></textarea>
+            </div>
+
+            {/* ─ Nút gửi ─ */}
+            <button 
+              type="submit" 
+              disabled={loading} 
+              className={`tb-btn tb-btn-primary ${loading ? "tb-btn--loading" : ""}`}
+            >
+              {loading ? (
+                <>
+                  <i className="fa-solid fa-spinner fa-spin"></i> 
+                  Đang phân tích bằng AI...
+                </>
+              ) : (
+                <>
+                  <i className="fa-solid fa-magnifying-glass"></i> 
+                  Bắt Đầu Phân Tích
+                </>
+              )}
+            </button>
+
+            {/* Error message */}
+            {error && (
+              <div className="tb-error-banner">
+                <i className="fa-solid fa-triangle-exclamation"></i>
+                <span>{error}</span>
+              </div>
+            )}
+          </form>
+        </div>
+
+        {/* ─────────────────────────────────────
+            KHU VỰC KẾT QUẢ
+        ───────────────────────────────────── */}
+        {results && (
+          <div id="tb-results" className="tb-results-section">
+
+            {/* Triệu chứng đã nhập */}
+            <div className="tb-confirmed-symptoms">
+              <div className="tb-confirmed-header">
+                <i className="fa-solid fa-circle-check"></i>
+                <strong>Hệ thống đã ghi nhận</strong>
+              </div>
+              <div className="tb-confirmed-tags">
+                {results.final_symptoms.map((symptom, idx) => (
+                  <span key={idx} className="tb-symptom-tag">
+                    {symptom}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Thời gian phân tích */}
+            <div className="tb-analysis-meta">
+              <span className="tb-meta-divider"></span>
+              <span className="tb-meta-item">
+                <i className="fa-solid fa-microchip"></i> 
+                Engine: {results.potential_diseases?.length > 0 ? "AI-Driven Analysis" : "Chưa có kết quả"}
+              </span>
+            </div>
+
+            {/* Danh sách bệnh gợi ý */}
+            {results.potential_diseases && results.potential_diseases.length > 0 ? (
+              <div className="tb-diseases-list">
+                <div className="tb-diseases-header">
+                  <h3 className="tb-diseases-title">
+                    <i className="fa-solid fa-stethoscope"></i> 
+                    Kết Quả Phân Tích ({results.potential_diseases.length})
+                  </h3>
+                  <p className="tb-diseases-subtitle">
+                    Các bệnh lý được gợi ý dựa trên triệu chứng và phân tích AI. 
+                    Xếp hạng theo độ tin cậy và khả năng khớp.
+                  </p>
+                </div>
+
+                <div className="tb-diseases-container">
+                  {results.potential_diseases.map((disease, index) => (
+                    <DiseaseCard 
+                      key={index} 
+                      disease={disease} 
+                      index={index}
+                      navigate={navigate}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="tb-no-results">
+                <i className="fa-solid fa-inbox"></i>
+                <p className="tb-no-results-text">
+                  Không tìm thấy bệnh lý phù hợp. Vui lòng mô tả chi tiết hơn hoặc thử lại.
+                </p>
+              </div>
+            )}
+
+            {/* Footer với disclaimer */}
+            <div className="tb-results-footer">
+              <div className="tb-disclaimer-box">
+                <i className="fa-solid fa-circle-info"></i>
+                <strong>Lưu Ý Quan Trọng:</strong>
+                <p>
+                  {results.disclaimer || 
+                  "Đây là công cụ sàng lọc sơ bộ dựa trên trí tuệ nhân tạo. Kết quả không thay thế chẩn đoán y khoa chính thức từ bác sĩ. Vui lòng liên hệ với cơ sở y tế để được khám xét chi tiết và chẩn đoán chính xác."}
+                </p>
+              </div>
+
+              <div className="tb-action-buttons">
+                <button 
+                  onClick={() => navigate("/phan-tich-benh")}
+                  className="tb-btn tb-btn-secondary"
+                >
+                  <i className="fa-solid fa-flask-vial"></i> Phân Tích Chuyên Sâu
+                </button>
+                <button 
+                  onClick={() => window.location.reload()}
+                  className="tb-btn tb-btn-outline"
+                >
+                  <i className="fa-solid fa-arrow-rotate-left"></i> Tra Cứu Lại
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Empty state - khi chưa có kết quả */}
+        {!results && !loading && (
+          <div className="tb-empty-state">
+            <div className="tb-empty-icon">
+              <i className="fa-solid fa-magnifying-glass"></i>
+            </div>
+            <h3 className="tb-empty-title">Chưa Có Kết Quả</h3>
+            <p className="tb-empty-text">
+              Nhập triệu chứng và mô tả chi tiết ở trên, 
+              sau đó nhấn nút "Bắt Đầu Phân Tích" để hệ thống AI 
+              phân tích và gợi ý những bệnh lý có khả năng.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 ```
 
 ### frontend\web\src\tra-thuoc.jsx
@@ -8013,8 +10079,9 @@ const NAV_LINKS = [
   { label: "Giới Thiệu", key: "gioi-thieu" },
   { label: "Phân Tích Bệnh", key: "phan-tich-benh" },
   { label: "Tư Vấn AI", key: "tu-van-ai" },
-  { label: "Tra Thuốc", key: "tra-thuoc" },
   { label: "Thực Đơn", key: "thuc-don" },
+  { label: "Tra Bệnh", key: "tra-benh" },
+  { label: "Tra Thuốc", key: "tra-thuoc" },
 ];
 
 const DISEASE_LINKS = [
@@ -8225,6 +10292,7 @@ export default function Header({ currentView, setCurrentView, userName, userProf
     { key: "tu-van-ai", label: "Tư Vấn AI" },
     { key: "y-te", label: "Y Tế" },
     { key: "thuc-don", label: "Thực Đơn" },
+    { key: "tra-benh", label: "Tra Bệnh" },
     { key: "tra-thuoc", label: "Tra Thuốc" },
   ];
 

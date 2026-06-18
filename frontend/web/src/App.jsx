@@ -8,6 +8,9 @@ import ChiSoSucKhoe from "./hs-suckhoe";
 import TrangChu from "./trang-chu";
 import GioiThieu from "./gioi-thieu";
 import TraThuoc from "./tra-thuoc";
+import TraBenh from "./tra-benh";
+import LichSuTraCuu from "./lich-su-tra-cuu";
+
 import ThongTinND from "./thongtin-nd.jsx";
 
 import Header from "./components/header.jsx";
@@ -128,11 +131,14 @@ function AppContent() {
         return <GioiThieu setCurrentView={setCurrentView} />;
       case "tra-thuoc":
         return <TraThuoc />;
+      case "tra-benh":
+        return <TraBenh />;
+      case "history":
+        return <LichSuTraCuu />;
       // 2. Các đường dẫn từ Header đang chờ phát triển (Placeholder)
       case "tu-van-ai":
       case "y-te":
       case "thuc-don":
-      case "history":
       case "cai-dat":
       case "thong-bao":
       case "dashboard":

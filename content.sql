@@ -127,3 +127,26 @@ CREATE TABLE canhBaoThuoc (
     ngayTao DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (idThuoc) REFERENCES thuoc(idThuoc) ON DELETE CASCADE
 );
+-- TRUNCATE TABLE lichSuTraCuuTrieuChung;
+CREATE TABLE lichSuTraCuuTrieuChung (
+    idTraCuu BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    idNguoiDung BIGINT NOT NULL,
+
+    trieuChung1 VARCHAR(255),
+    trieuChung2 VARCHAR(255),
+    trieuChung3 VARCHAR(255),
+    trieuChung4 VARCHAR(255),
+
+    moTaThem TEXT,
+
+    ketQuaJSON JSON,
+
+    ngayTraCuu DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_traCuu_nguoiDung
+        FOREIGN KEY (idNguoiDung)
+        REFERENCES nguoiDung(idNguoiDung)
+        ON DELETE CASCADE
+);
+

@@ -44,6 +44,7 @@ export default function Header({ currentView, setCurrentView, userName, userProf
     { key: "tu-van-ai", label: "Tư Vấn AI" },
     { key: "y-te", label: "Y Tế" },
     { key: "thuc-don", label: "Thực Đơn" },
+    { key: "tra-benh", label: "Tra Bệnh" },
     { key: "tra-thuoc", label: "Tra Thuốc" },
   ];
 
