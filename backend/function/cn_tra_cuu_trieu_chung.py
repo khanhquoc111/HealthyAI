@@ -1,13 +1,4 @@
 # backend/function/cn_tra_cuu_trieu_chung.py
-"""
-NÂNG CẤP: API Tra Cứu Triệu Chứng - AI-Driven (v2)
-- ✅ Sử dụng AI phân tích ngữ cảnh y khoa làm chính
-- ✅ CSV dùng để kiểm chứng + cung cấp thông tin chi tiết
-- ✅ FỐI XỬ MATCHING: Fuzzy match, normalize disease names, fallback descriptions
-- ✅ LUÔN TRẢLẠI TIẾNG VIỆT: Fallback Vietnamese descriptions khi CSV không tìm
-- ✅ Loại trừ bệnh không phù hợp dựa trên ngữ cảnh
-- ✅ Trả về lý do y tế cho từng gợi ý
-"""
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -80,7 +71,6 @@ class LichSuTraCuuResponse(BaseModel):
 # ─────────────────────────────────────────────────────────────────
 
 def normalize_list(value):
-    """Chuẩn hóa list từ response"""
     if not value:
         return []
     if isinstance(value, list):
@@ -94,65 +84,10 @@ def normalize_list(value):
 
 @router.post("/analyze", response_model=TraCuuResponse)
 async def analyze_symptoms(request: TraCuuRequest, db: Session = Depends(get_db)):
-    """
-    NÂNG CẤP (v2): Tra cứu triệu chứng bằng AI-driven analysis.
-    
-    Quy trình:
-    1. AI phân tích ngữ cảnh + gợi ý bệnh (chính)
-    2. ✅ Resolve tên bệnh bằng fuzzy matching + normalize
-    3. CSV kiểm chứng + cung cấp thông tin chi tiết (hoặc fallback Việt)
-    4. ✅ Fallback mô tả tự động (tiếng Việt) khi CSV không tìm được
-    5. Loại trừ bệnh không phù hợp
-    6. Trả về lý do y tế cho mỗi gợi ý
-    7. ✅ LUÔN TRẢLẠI TIẾNG VIỆT
-    
-    Request:
-    {
-        "tenDangNhap": "user123",
-        "trieuChung1": "đau đầu",
-        "trieuChung2": "chóng mặt",
-        "trieuChung3": "",
-        "trieuChung4": "",
-        "moTaThem": "từ sáng sớm, sau khi ăn cơm không hoàn toàn chín"
-    }
-    
-    Response:
-    {
-        "final_symptoms": ["headache", "dizziness"],
-        "potential_diseases": [
-            {
-                "disease": "migraine",
-                "confidence": 0.92,
-                "reasoning": "Đau đầu + chóng mặt thường gặp trong chứng đau nửa đầu",
-                "match_rate": 85.5,
-                "severity_risk": "medium",
-                "description": "Bệnh đau nửa đầu là...",
-                "health_advice": ["Tránh ánh sáng sặc sỡ", "Nghỉ ngơi trong phòng tối"],
-                "diet_recommendations": ["Ăn các thực phẩm nhẹ", "Tránh caffeine"],
-                "lifestyle_recommendations": ["Ngủ đủ giấc", "Giảm căng thẳng"],
-                "is_high_risk": false
-            }
-        ],
-        "context": {
-            "is_acute": true,
-            "is_chronic": false,
-            "severity": "medium",
-            "analysis": "Bệnh cấp tính, khả năng cao là đau đầu thông thường hoặc migraine"
-        },
-        "disclaimer": "Đây là công cụ sàng lọc sơ bộ..."
-    }
-    """
-    
-    # ────────────────────────────────────────────────────────────
-    # Kiểm tra đăng nhập
-    # ────────────────────────────────────────────────────────────
     user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == request.tenDangNhap).first()
     if not user:
         raise HTTPException(status_code=404, detail="Không tìm thấy người dùng.")
 
-    # ────────────────────────────────────────────────────────────
-    # Chuẩn bị triệu chứng
-    # ────────────────────────────────────────────────────────────
     selected_symptoms = [
         s for s in [
             request.trieuChung1,
@@ -169,11 +104,7 @@ async def analyze_symptoms(request: TraCuuRequest, db: Session = Depends(get_db)
     print(f"   trieuChung: {selected_symptoms}")
     print(f"   moTaThem: '{mo_ta_them}'")
 
-    # ────────────────────────────────────────────────────────────
-    # Kiểm tra dữ liệu đầu vào
-    # ────────────────────────────────────────────────────────────
     if not selected_symptoms and not mo_ta_them:
-        print("❌ LỖI: Không có triệu chứng cũng không có mô tả")
         raise HTTPException(
             status_code=400,
             detail="Vui lòng chọn ít nhất 1 triệu chứng hoặc nhập mô tả.",
@@ -182,12 +113,8 @@ async def analyze_symptoms(request: TraCuuRequest, db: Session = Depends(get_db)
     if len(selected_symptoms) > 4:
         raise HTTPException(status_code=400, detail="Chỉ được nhập tối đa 4 triệu chứng.")
 
-    # ────────────────────────────────────────────────────────────
-    # AI-driven analysis (chính)
-    # ────────────────────────────────────────────────────────────
     engine = get_symptom_engine()
     
-    # BƯỚC 1: AI phân tích + gợi ý bệnh (đã có csv_disease_name từ engine)
     ai_result = await engine.analyze_symptoms_with_ai(selected_symptoms, mo_ta_them)
     
     if not ai_result or not ai_result.get("ai_diseases"):
@@ -200,30 +127,19 @@ async def analyze_symptoms(request: TraCuuRequest, db: Session = Depends(get_db)
     ai_diseases = ai_result.get("ai_diseases", [])
     context = ai_result.get("context", {})
 
-    # BƯỚC 2: ✅ Bổ sung thông tin chi tiết từ CSV (hoặc fallback Việt)
-    # Engine sẽ tự động dùng fuzzy matching + fallback mô tả
-    enriched_diseases = await engine.enrich_disease_list(ai_diseases)
+    # Gộp toàn bộ văn bản người dùng nhập để quét từ khóa khẩn cấp
+    user_input_text = " ".join(selected_symptoms) + " " + mo_ta_them
 
-    # BƯỚC 3: Sắp xếp theo confidence × match_rate
+    # Truyền user_text vào để kích hoạt 3 lớp bảo vệ
+    enriched_diseases = await engine.enrich_disease_list(ai_diseases, user_text=user_input_text)
+
     enriched_diseases.sort(
         key=lambda x: (x.get("confidence", 0) * (x.get("match_rate", 0) / 100)),
         reverse=True
     )
 
-    # BƯỚC 4: Giới hạn top 3 kết quả
     top_diseases = enriched_diseases[:3]
 
-    print(f"✅ AI gợi ý {len(top_diseases)} bệnh:")
-    for d in top_diseases:
-        print(f"   - {d['disease']}: confidence={d.get('confidence', 0)}, match={d.get('match_rate', 0)}%")
-        print(f"     description_length={len(d.get('description', ''))}")
-        print(f"     health_advice_count={len(d.get('health_advice', []))}")
-        print(f"     diet_count={len(d.get('diet_recommendations', []))}")
-        print(f"     lifestyle_count={len(d.get('lifestyle_recommendations', []))}")
-
-    # ────────────────────────────────────────────────────────────
-    # Chuẩn bị raw response
-    # ────────────────────────────────────────────────────────────
     raw_response = {
         "final_symptoms": final_symptoms,
         "potential_diseases": [
@@ -247,17 +163,13 @@ async def analyze_symptoms(request: TraCuuRequest, db: Session = Depends(get_db)
     }
 
     # ────────────────────────────────────────────────────────────
-    # ✅ Dịch sang tiếng Việt (hoặc giữ nguyên nếu fallback đã Việt)
+    # BỎ QUA BƯỚC DỊCH LLM LẦN 2 (TỐI ƯU TỐC ĐỘ < 1 PHÚT)
     # ────────────────────────────────────────────────────────────
-    translated_response = await engine.translate_response_to_vietnamese(raw_response)
-    translated_final_symptoms = translated_response.get("final_symptoms", raw_response["final_symptoms"])
-    translated_potential_diseases = translated_response.get("potential_diseases", raw_response["potential_diseases"])
-    translated_context = translated_response.get("context", raw_response["context"])
-    translated_disclaimer = translated_response.get("disclaimer", raw_response["disclaimer"])
+    translated_final_symptoms = raw_response["final_symptoms"]
+    translated_potential_diseases = raw_response["potential_diseases"]
+    translated_context = raw_response["context"]
+    translated_disclaimer = raw_response["disclaimer"]
 
-    # ────────────────────────────────────────────────────────────
-    # Lưu lịch sử vào database
-    # ────────────────────────────────────────────────────────────
     try:
         lich_su = LichSuTraCuuTrieuChung(
             idNguoiDung=user.idNguoiDung,
@@ -279,9 +191,6 @@ async def analyze_symptoms(request: TraCuuRequest, db: Session = Depends(get_db)
         db.rollback()
         print(f"Lỗi khi lưu lịch sử tra cứu: {e}")
 
-    # ────────────────────────────────────────────────────────────
-    # Trả về kết quả
-    # ────────────────────────────────────────────────────────────
     return TraCuuResponse(
         final_symptoms=translated_final_symptoms,
         potential_diseases=[
@@ -311,23 +220,6 @@ async def get_search_history(
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    """
-    Lấy lịch sử tra cứu của người dùng.
-    
-    Response:
-    [
-        {
-            "idTraCuu": 1,
-            "ngayTraCuu": "2024-01-15T10:30:00",
-            "trieuChung": ["đau đầu", "chóng mặt"],
-            "moTaThem": "từ sáng sớm",
-            "ketQua": {
-                "final_symptoms": [...],
-                "potential_diseases": [...]
-            }
-        }
-    ]
-    """
     user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == ten_dang_nhap).first()
     if not user:
         raise HTTPException(status_code=404, detail="Không tìm thấy người dùng.")
@@ -363,17 +255,6 @@ async def get_search_history(
 
 @router.get("/health")
 async def health_check():
-    """
-    Kiểm tra sức khỏe của Symptom Checker Engine.
-    
-    Response:
-    {
-        "status": "ok",
-        "engine": "AI-Driven",
-        "features": ["context_detection", "disease_exclusion", "confidence_scoring"],
-        "message": "Engine hoạt động bình thường"
-    }
-    """
     try:
         engine = get_symptom_engine()
         return {
