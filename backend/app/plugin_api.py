@@ -16,9 +16,9 @@ from app.risk_stratification_engine import RiskStratificationEngine
 
 from database.database import SessionLocal
 from database.nguoi_dung import NguoiDung
-from database.lich_su_danh_gia import LichSuDanhGia
 from database.hs_suckhoe import HoSoSucKhoe
 from database.cs_suckhoe import ChiSoSucKhoe
+from function.cn_lichsu_trabenh import save_assessment_history
 
 router = APIRouter()
 
@@ -230,6 +230,21 @@ def _save_form_to_profile(user_id: int, form_data: dict, db: Session):
             db.add(ChiSoSucKhoe(idNguoiDung=user_id, maChiSo=key, giaTri=str_value))
 
 
+def _safe_json(value):
+    """Chuẩn hóa dữ liệu JSON để trả về an toàn cho frontend."""
+    if isinstance(value, dict):
+        return {k: _safe_json(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_safe_json(v) for v in value]
+    if isinstance(value, (np.float32, np.float64)):
+        return float(value)
+    if isinstance(value, (np.int32, np.int64)):
+        return int(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    return value
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/plugins")
@@ -336,20 +351,9 @@ def score_plugin_form(
         # ── 5. Lưu DB ─────────────────────────────────────────────────────────
         if user:
             # Ghi ngược form_data vào hồ sơ sức khỏe
-            _save_form_to_profile(user.idNguoiDung, form_data, db)
-
+            _save_form_to_profile(user.idNguoiDung, form_data, db)            
+            save_assessment_history(db, user.idNguoiDung, plugin_name, result, convert_to_serializable)
             # Lưu lịch sử đánh giá
-            lich_su = LichSuDanhGia(
-                idNguoiDung=user.idNguoiDung,
-                maBenh=plugin_name,
-                diemRule=float(result.get("rule_based", {}).get("score", 0.0)),
-                diemML=float(result.get("ai_based", {}).get("score", 0.0)),
-                diemTong=float(result.get("rule_based", {}).get("score", 0.0)),
-                mucNguyCo=str(result.get("rule_based", {}).get("risk_level", "low")),
-                ketQuaJSON=convert_to_serializable(result),
-            )
-            db.add(lich_su)
-            db.commit()
 
         return convert_to_serializable(result)
 

@@ -1,4 +1,3 @@
-// frontend/web/src/components/footer.jsx
 import "./footer.css";
 
 const NAV_LINKS = [
@@ -21,7 +20,7 @@ const DISEASE_LINKS = [
 
 const ACCOUNT_LINKS = [
   { label: "Hồ Sơ Sức Khỏe", key: "profile" },
-  { label: "Lịch Sử Đánh Giá", key: "history" },
+  { label: "Lịch Sử Tra Cứu", key: "history" },
   { label: "Quản Lý Thông Tin", key: "quan-ly-thong-tin" },
   { label: "Cài Đặt Tài Khoản", key: "cai-dat" },
 ];
@@ -41,13 +40,11 @@ export default function Footer({ setCurrentView }) {
   return (
     <footer className="footer">
       <div className="footer-upper">
-
-        {/* ── Brand column ── */}
         <div className="footer-brand">
           <div className="footer-logo-row">
             <img
               src="https://www.ctu.edu.vn/images/upload/logo.png"
-              alt="Logo Dai hoc Can Tho"
+              alt="Logo Đại học Cần Thơ"
               className="footer-logo"
             />
             <div className="footer-brand-name">
@@ -57,19 +54,18 @@ export default function Footer({ setCurrentView }) {
           </div>
 
           <p className="footer-tagline">
-            Nền tảng sàng lọc nguy cơ bệnh mạn tính kết hợp luật chuyên gia
-            và học máy. Kiến trúc Plugin-Based — mở rộng không cần sửa code.
+            Nền tảng sàng lọc nguy cơ bệnh mạn tính kết hợp luật chuyên gia và học máy.
+            Kiến trúc Plugin-Based giúp mở rộng mà không cần sửa code.
           </p>
         </div>
 
-        {/* ── Navigation column ── */}
         <div className="footer-col">
           <p className="footer-col-heading">Điều Hướng</p>
           <ul className="footer-links">
             {NAV_LINKS.map((item) => (
               <li key={item.key}>
                 <button className="footer-link" onClick={() => handleNav(item.key)}>
-                  <i className="footer-link-arrow fa-solid fa-chevron-right" aria-hidden="true"></i>
+                  <i className="footer-link-arrow fa-solid fa-chevron-right" aria-hidden="true" />
                   {item.label}
                 </button>
               </li>
@@ -77,25 +73,27 @@ export default function Footer({ setCurrentView }) {
           </ul>
         </div>
 
-        {/* ── Disease plugins column ── */}
         <div className="footer-col">
           <p className="footer-col-heading">Bệnh Mạn Tính</p>
           <ul className="footer-links">
             {DISEASE_LINKS.map((item) => (
               <li key={item.key}>
                 <button className="footer-link" onClick={() => handleNav(item.key)}>
-                  <i className="footer-link-arrow fa-solid fa-chevron-right" aria-hidden="true"></i>
+                  <i className="footer-link-arrow fa-solid fa-chevron-right" aria-hidden="true" />
                   {item.label}
                 </button>
               </li>
             ))}
           </ul>
-          <p className="footer-col-heading" style={{ marginTop: 24 }}>Tài Khoản</p>
+
+          <p className="footer-col-heading" style={{ marginTop: 24 }}>
+            Tài Khoản
+          </p>
           <ul className="footer-links">
             {ACCOUNT_LINKS.map((item) => (
               <li key={item.key}>
                 <button className="footer-link" onClick={() => handleNav(item.key)}>
-                  <i className="footer-link-arrow fa-solid fa-chevron-right" aria-hidden="true"></i>
+                  <i className="footer-link-arrow fa-solid fa-chevron-right" aria-hidden="true" />
                   {item.label}
                 </button>
               </li>
@@ -103,20 +101,21 @@ export default function Footer({ setCurrentView }) {
           </ul>
         </div>
 
-        {/* ── Contact column ── */}
         <div className="footer-col">
           <p className="footer-col-heading">Liên Hệ</p>
           <ul className="footer-links footer-links--contact">
             {CONTACT_ITEMS.map((item, i) => (
               <li key={i} className="footer-contact-item">
-                <i className={`footer-contact-icon ${item.iconClass}`} aria-hidden="true"></i>
+                <i className={`footer-contact-icon ${item.iconClass}`} aria-hidden="true" />
                 <span className="footer-contact-text">{item.text}</span>
               </li>
             ))}
           </ul>
 
           <div className="footer-social">
-            <p className="footer-col-heading" style={{ marginTop: 24 }}>Mạng Xã Hội</p>
+            <p className="footer-col-heading" style={{ marginTop: 24 }}>
+              Mạng Xã Hội
+            </p>
             <div className="footer-social-row">
               <a
                 href="https://www.facebook.com/CICT.CTU"
@@ -125,7 +124,7 @@ export default function Footer({ setCurrentView }) {
                 className="footer-social-btn"
                 aria-label="Facebook CICT"
               >
-                <i className="fa-brands fa-facebook-f" aria-hidden="true"></i>
+                <i className="fa-brands fa-facebook-f" aria-hidden="true" />
               </a>
               <a
                 href="https://cit.ctu.edu.vn"
@@ -134,14 +133,10 @@ export default function Footer({ setCurrentView }) {
                 className="footer-social-btn"
                 aria-label="Website CICT"
               >
-                <i className="fa-solid fa-globe" aria-hidden="true"></i>
+                <i className="fa-solid fa-globe" aria-hidden="true" />
               </a>
-              <a
-                href="mailto:cict@ctu.edu.vn"
-                className="footer-social-btn"
-                aria-label="Email"
-              >
-                <i className="fa-solid fa-envelope" aria-hidden="true"></i>
+              <a href="mailto:cict@ctu.edu.vn" className="footer-social-btn" aria-label="Email">
+                <i className="fa-solid fa-envelope" aria-hidden="true" />
               </a>
             </div>
           </div>
@@ -152,8 +147,7 @@ export default function Footer({ setCurrentView }) {
 
       <div className="footer-lower">
         <p className="footer-copy">
-          &copy; {new Date().getFullYear()} HealthyAI – CICT, Đại học Cần Thơ.
-          All rights reserved.
+          &copy; {new Date().getFullYear()} HealthyAI – CICT, Đại học Cần Thơ. All rights reserved.
         </p>
         <div className="footer-meta">
           <span className="footer-meta-item">FastAPI Backend</span>

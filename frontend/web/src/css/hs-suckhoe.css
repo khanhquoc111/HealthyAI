@@ -1,0 +1,829 @@
+/* =================================================================
+   hs-suckhoe.css  |  Healthy AI – Health Profile & Metrics Page
+   Design tokens khớp với phan-tich-benh.css / header.css / footer.css
+================================================================= */
+
+/* ----------------------------------------------------------------
+   CSS Variable fallbacks (Đồng bộ với phan-tich-benh.css)
+---------------------------------------------------------------- */
+:root {
+  --primary:      #2563eb;
+  --secondary:    #0f172a;
+  --accent:       #38bdf8;
+  --text-muted:   #64748b;
+  --text-light:   #94a3b8;
+  --border:       #e2e8f0;
+  --border-light: #f1f5f9;
+  --bg-subtle:    #eff6ff;
+  --bg:           #f8fafc;
+  --radius-sm:    8px;
+  --radius-md:    12px;
+  --radius-lg:    18px;
+  --shadow-sm:    0 1px 3px rgba(0, 0, 0, 0.07);
+  --shadow-md:    0 4px 16px rgba(0, 0, 0, 0.09);
+  --shadow-lg:    0 12px 40px rgba(15, 23, 42, 0.12);
+  --transition:   0.18s ease;
+  --font-display: "Segoe UI", system-ui, sans-serif;
+  --navy:         #0f172a;
+
+  /* Health status colors */
+  --status-good:   #22c55e;
+  --status-warn:   #f59e0b;
+  --status-alert:  #ef4444;
+  
+  /* Clinical section backgrounds */
+  --bg-vitals:     #eff6ff;
+  --bg-biochem:    #f0fdf4;
+  --bg-lifestyle:  #fff7ed;
+  --bg-history:    #fef2f2;
+}
+
+/* ================================================================
+   PAGE & CONTAINER
+================================================================ */
+
+.hsk-page {
+  width: 100%;
+  min-height: 100vh;
+  background: var(--bg);
+  font-family: var(--font-display);
+}
+
+.hsk-container {
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* ================================================================
+   MESSAGE ALERTS
+================================================================ */
+
+.hsk-message {
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  animation: hsk-slide-in 0.3s ease;
+}
+
+@keyframes hsk-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.hsk-message--success {
+  background-color: #dcfce7;
+  color: #166534;
+  border-left: 4px solid #22c55e;
+}
+
+.hsk-message--error {
+  background-color: #fef2f2;
+  color: #991b1b;
+  border-left: 4px solid #ef4444;
+}
+
+.hsk-message i {
+  font-size: 1.1rem;
+}
+
+/* ================================================================
+   SCORE CARD (Điểm Sức Khỏe Cá Nhân)
+================================================================ */
+
+/* ================================================================
+   SCORE CARD (Điểm Sức Khỏe Cá Nhân)
+================================================================ */
+
+.hsk-score-card {
+  background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); /* Nền gradient mượt hơn */
+  color: #ffffff;
+  padding: 32px;
+  border-radius: var(--radius-lg);
+  margin-bottom: 24px;
+  box-shadow: 0 10px 25px -5px rgba(37, 99, 235, 0.3);
+  overflow: hidden;
+  position: relative;
+}
+
+/* Họa tiết nền SVG mờ tạo chiều sâu */
+.hsk-score-card::before {
+  content: '';
+  position: absolute;
+  top: -50px;
+  right: -20px;
+  width: 250px;
+  height: 250px;
+  background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 70%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.hsk-score-card-content {
+  position: relative;
+  z-index: 1;
+}
+
+.hsk-score-header {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 24px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  letter-spacing: 0.5px;
+}
+
+.hsk-score-header i {
+  color: #93c5fd; /* Màu xanh nhạt để nổi trên nền tối */
+}
+
+.hsk-score-display {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  margin-bottom: 24px;
+}
+
+.hsk-score-number {
+  font-size: 72px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -2px;
+  text-shadow: 2px 4px 8px rgba(0,0,0,0.15);
+}
+
+.hsk-score-max {
+  font-size: 32px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: 0;
+}
+
+.hsk-score-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Badges cho trạng thái sức khỏe */
+.hsk-score-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 20px;
+  width: fit-content;
+}
+
+.hsk-score-status.status-good { background: rgba(74, 222, 128, 0.2); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); }
+.hsk-score-status.status-warn { background: rgba(250, 204, 21, 0.2); color: #fde047; border: 1px solid rgba(250, 204, 21, 0.3); }
+.hsk-score-status.status-alert{ background: rgba(248, 113, 113, 0.2); color: #fca5a5; border: 1px solid rgba(248, 113, 113, 0.3); }
+
+.hsk-score-previous {
+  margin: 0;
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.hsk-score-previous strong {
+  color: white;
+}
+
+/* Màu sắc Trend (Sáng hơn để dễ đọc trên nền xanh dương) */
+.hsk-score-trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.hsk-score-trend.trend-up { color: #4ade80; } /* Xanh lá sáng */
+.hsk-score-trend.trend-down { color: #fca5a5; } /* Đỏ sáng */
+.hsk-score-trend.trend-stable { color: #fde047; } /* Vàng sáng */
+
+.trend-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  font-size: 0.8rem;
+}
+
+/* Hộp Insight (Lời khuyên) - Dùng hiệu ứng kính (Glassmorphism) */
+.hsk-score-insight {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 24px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border-left: 4px solid #93c5fd;
+  border-radius: 0 8px 8px 0;
+  backdrop-filter: blur(10px);
+}
+
+.hsk-score-insight i {
+  color: #fef08a; /* Icon bóng đèn màu vàng */
+  font-size: 1.2rem;
+  margin-top: 2px;
+}
+
+.hsk-score-insight p {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+/* Responsive cho Score Card */
+@media (max-width: 600px) {
+  .hsk-score-display {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .hsk-score-number { font-size: 56px; }
+  .hsk-score-max { font-size: 24px; }
+}
+
+/* ================================================================
+   COMPLETION PROGRESS
+================================================================ */
+
+.hsk-completion-card {
+  background: white;
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  margin-bottom: 32px;
+  box-shadow: var(--shadow-sm);
+}
+
+.hsk-completion-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.hsk-completion-label {
+  font-weight: 700;
+  color: var(--navy);
+  font-size: 0.95rem;
+}
+
+.hsk-completion-percent {
+  font-weight: 800;
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.hsk-completion-percent--full {
+  color: var(--status-good);
+}
+
+.hsk-completion-percent--partial {
+  color: var(--primary);
+}
+
+.hsk-completion-bar-track {
+  width: 100%;
+  height: 10px;
+  background-color: var(--border-light);
+  border-radius: 5px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.hsk-completion-bar-fill {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  background-color: var(--primary);
+}
+
+.hsk-completion-bar-fill--full {
+  background-color: var(--status-good);
+}
+
+.hsk-missing-fields {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 12px;
+}
+
+.hsk-missing-label {
+  font-weight: 500;
+}
+
+.hsk-missing-list {
+  font-weight: 600;
+  color: var(--status-warn);
+  margin-left: 4px;
+}
+
+/* ================================================================
+   FORM STRUCTURE
+================================================================ */
+
+.hsk-form {
+  width: 100%;
+}
+
+/* Accordion header */
+.hsk-accordion-header {
+  padding: 20px 24px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin-bottom: 12px;
+  transition: all var(--transition);
+  color: var(--navy);
+}
+
+.hsk-accordion-header:hover {
+  border-color: var(--primary);
+  background-color: var(--bg-subtle);
+}
+
+.hsk-accordion-header.hsk-active {
+  border-color: var(--primary);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  margin-bottom: 0;
+  background: white;
+}
+
+.hsk-accordion-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  transition: transform var(--transition);
+}
+
+.hsk-accordion-header.hsk-active .hsk-accordion-icon {
+  transform: rotate(180deg);
+}
+
+/* Accordion body */
+.hsk-accordion-body {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.3s ease-in-out,
+              padding 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid transparent;
+  margin-bottom: 12px;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
+.hsk-accordion-body.hsk-open {
+  max-height: 1600px;
+  opacity: 1;
+  padding: 24px;
+  border-color: var(--border);
+  border-top: none;
+}
+
+.hsk-accordion-body--vitals {
+  background: var(--bg-vitals);
+}
+
+.hsk-accordion-body--biochem {
+  background: var(--bg-biochem);
+}
+
+.hsk-accordion-body--lifestyle {
+  background: var(--bg-lifestyle);
+}
+
+.hsk-accordion-body--history {
+  background: var(--bg-history);
+}
+
+/* Section navigation buttons */
+.hsk-nav-button {
+  padding: 8px 16px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hsk-nav-button:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--bg-subtle);
+}
+
+/* ================================================================
+   FORM FIELDS
+================================================================ */
+
+.hsk-fields-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.hsk-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hsk-field--full {
+  grid-column: 1 / -1;
+}
+
+.hsk-label {
+  display: block;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  font-size: 0.85rem;
+}
+
+.hsk-input,
+.hsk-select {
+  background-color: #ffffff;
+  color: var(--navy);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  transition: all var(--transition);
+  font-size: 0.9rem;
+  font-family: var(--font-display);
+}
+
+.hsk-input:focus,
+.hsk-select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.hsk-input:disabled {
+  background: var(--border-light);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.hsk-input[readonly] {
+  background: #f0fdf4;
+  color: #0f766e;
+  font-weight: 700;
+  border-color: rgba(34, 197, 94, 0.35);
+  cursor: default;
+}
+
+.hsk-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2394a3b8' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+}
+
+.hsk-select option {
+  color: var(--navy);
+  background-color: #ffffff;
+}
+
+/* ================================================================
+   TAG/BUTTON FIELDS (Checkboxes as Tags)
+================================================================ */
+
+.hsk-tags-group {
+  margin-bottom: 28px;
+}
+
+.hsk-tags-label {
+  display: block;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  font-size: 0.85rem;
+}
+
+.hsk-tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.hsk-tag-btn {
+  padding: 10px 20px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: all var(--transition);
+  user-select: none;
+  border: 1px solid var(--border);
+  background: white;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hsk-tag-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--bg-subtle);
+}
+
+.hsk-tag-btn.hsk-active {
+  background: #dbeafe;
+  border-color: var(--primary);
+  color: #1e3a8a;
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.1);
+}
+
+.hsk-tag-btn i {
+  font-size: 0.8rem;
+}
+
+/* ================================================================
+   SUBMIT BUTTON
+================================================================ */
+
+.hsk-submit-btn {
+  width: 100%;
+  padding: 16px;
+  background-color: var(--primary);
+  color: white;
+  font-size: 0.95rem;
+  font-weight: 700;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  margin-top: 24px;
+  transition: all var(--transition);
+  box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  letter-spacing: 0.01em;
+}
+
+.hsk-submit-btn:hover:not(:disabled) {
+  background-color: #1d4ed8;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.3);
+}
+
+.hsk-submit-btn:disabled {
+  background-color: var(--text-light);
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.hsk-submit-btn i {
+  font-size: 1rem;
+}
+
+/* ================================================================
+   TREND ANALYSIS SECTION
+================================================================ */
+
+.hsk-trends-section {
+  margin-top: 40px;
+  padding: 24px;
+  background-color: white;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.hsk-trends-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--navy);
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hsk-trend-item {
+  margin-bottom: 32px;
+  padding: 16px;
+  background-color: var(--bg);
+  border-radius: var(--radius-md);
+}
+
+.hsk-trend-item:last-child {
+  margin-bottom: 0;
+}
+
+.hsk-trend-metric-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.hsk-trend-chart {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  background: white;
+  margin-bottom: 12px;
+}
+
+.hsk-trend-data-points {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: var(--text-light);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.hsk-trend-data-point {
+  padding: 4px 8px;
+  background: var(--border-light);
+  border-radius: 4px;
+}
+
+.hsk-trend-insight {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  line-height: 1.6;
+}
+
+.hsk-trend-insight strong {
+  font-weight: 700;
+  color: var(--navy);
+}
+
+/* ================================================================
+   RESPONSIVE DESIGN
+================================================================ */
+
+@media (max-width: 900px) {
+  .hsk-container {
+    padding: 0 16px;
+  }
+
+  .hsk-score-card {
+    padding: 24px;
+  }
+
+  .hsk-score-display {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .hsk-score-number {
+    font-size: 48px;
+  }
+
+  .hsk-fields-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+@media (max-width: 600px) {
+  .hsk-container {
+    padding: 0 12px;
+  }
+
+  .hsk-score-card {
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+
+  .hsk-score-card-content {
+    padding: 0;
+  }
+
+  .hsk-score-header {
+    font-size: 0.95rem;
+    margin-bottom: 16px;
+  }
+
+  .hsk-score-number {
+    font-size: 40px;
+  }
+
+  .hsk-completion-card {
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+
+  .hsk-accordion-header {
+    padding: 16px;
+    font-size: 0.9rem;
+  }
+
+  .hsk-accordion-body.hsk-open {
+    padding: 16px;
+  }
+
+  .hsk-fields-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .hsk-tags-container {
+    gap: 8px;
+  }
+
+  .hsk-tag-btn {
+    padding: 8px 16px;
+    font-size: 0.8rem;
+  }
+
+  .hsk-submit-btn {
+    padding: 14px;
+    font-size: 0.9rem;
+  }
+
+  .hsk-trends-section {
+    padding: 16px;
+    margin-top: 24px;
+  }
+
+  .hsk-trend-item {
+    padding: 12px;
+    margin-bottom: 20px;
+  }
+}
+
+/* ================================================================
+   UTILITY & ANIMATION
+================================================================ */
+
+.hsk-spin {
+  animation: hsk-spin 1s linear infinite;
+}
+
+@keyframes hsk-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.hsk-hidden {
+  display: none !important;
+}
+
+/* Smooth transitions for dynamic content */
+.hsk-transition {
+  transition: all var(--transition);
+}

@@ -1,10 +1,8 @@
 # backend/function/cn_tra_cuu_trieu_chung.py
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.symptom_checker_engine import get_symptom_engine
@@ -58,15 +56,6 @@ class TraCuuResponse(BaseModel):
     disclaimer: str
 
 
-class LichSuTraCuuResponse(BaseModel):
-    idTraCuu: int
-    ngayTraCuu: datetime
-    trieuChung: List[str]
-    moTaThem: str
-    ketQua: Dict[str, Any]
-
-
-# ─────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────
 
@@ -212,45 +201,6 @@ async def analyze_symptoms(request: TraCuuRequest, db: Session = Depends(get_db)
         context=translated_context,
         disclaimer=translated_disclaimer,
     )
-
-
-@router.get("/history/{ten_dang_nhap}", response_model=List[LichSuTraCuuResponse])
-async def get_search_history(
-    ten_dang_nhap: str,
-    limit: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db),
-):
-    user = db.query(NguoiDung).filter(NguoiDung.tenDangNhap == ten_dang_nhap).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng.")
-
-    records = (
-        db.query(LichSuTraCuuTrieuChung)
-        .filter(LichSuTraCuuTrieuChung.idNguoiDung == user.idNguoiDung)
-        .order_by(desc(LichSuTraCuuTrieuChung.ngayTraCuu))
-        .limit(limit)
-        .all()
-    )
-
-    return [
-        LichSuTraCuuResponse(
-            idTraCuu=record.idTraCuu,
-            ngayTraCuu=record.ngayTraCuu,
-            trieuChung=[
-                symptom
-                for symptom in [
-                    record.trieuChung1,
-                    record.trieuChung2,
-                    record.trieuChung3,
-                    record.trieuChung4,
-                ]
-                if symptom and symptom.strip()
-            ],
-            moTaThem=record.moTaThem or "",
-            ketQua=record.ketQuaJSON or {},
-        )
-        for record in records
-    ]
 
 
 @router.get("/health")

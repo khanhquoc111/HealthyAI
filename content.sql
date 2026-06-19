@@ -128,6 +128,7 @@ CREATE TABLE canhBaoThuoc (
     FOREIGN KEY (idThuoc) REFERENCES thuoc(idThuoc) ON DELETE CASCADE
 );
 -- TRUNCATE TABLE lichSuTraCuuTrieuChung;
+-- TRUNCATE TABLE lichSuDanhGia;
 CREATE TABLE lichSuTraCuuTrieuChung (
     idTraCuu BIGINT AUTO_INCREMENT PRIMARY KEY,
 
