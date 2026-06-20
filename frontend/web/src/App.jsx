@@ -10,7 +10,7 @@ import GioiThieu from "./gioi-thieu";
 import TraThuoc from "./tra-thuoc";
 import TraBenh from "./tra-benh";
 import LichSuTraCuu from "./lich-su-tra-cuu";
-
+import SoYTe from './so-y-te';
 import ThongTinND from "./thongtin-nd.jsx";
 
 import Header from "./components/header.jsx";
@@ -135,9 +135,10 @@ function AppContent() {
         return <TraBenh />;
       case "history":
         return <LichSuTraCuu />;
+      case "so-y-te":
+        return <SoYTe />;
       // 2. Các đường dẫn từ Header đang chờ phát triển (Placeholder)
       case "tu-van-ai":
-      case "y-te":
       case "thuc-don":
       case "cai-dat":
       case "thong-bao":

@@ -1,0 +1,50 @@
+{
+  "id": "hba1c",
+  "name": "Chỉ số HbA1c",
+  "category": "blood_test",
+
+  "summary": "HbA1c phản ánh mức đường huyết trung bình trong khoảng 2 đến 3 tháng gần nhất.",
+
+  "description": "HbA1c (Hemoglobin A1c) là chỉ số đo tỷ lệ hemoglobin trong máu gắn với glucose. Xét nghiệm HbA1c được sử dụng để chẩn đoán và theo dõi bệnh đái tháo đường, đồng thời đánh giá hiệu quả kiểm soát đường huyết trong thời gian dài.",
+
+  "formula": null,
+
+  "importance": "HbA1c là một trong những chỉ số quan trọng nhất trong chẩn đoán và theo dõi bệnh đái tháo đường. Chỉ số này giúp đánh giá mức đường huyết trung bình trong khoảng 8 đến 12 tuần gần nhất thay vì chỉ phản ánh tại một thời điểm như xét nghiệm đường huyết thông thường.",
+
+  "images": [
+    "/static/knowledge/hba1c/cover.png",
+    "/static/knowledge/hba1c/range.png"
+  ],
+
+  "normal_ranges": [
+    {
+      "label": "Bình thường",
+      "min": 0,
+      "max": 5.6
+    },
+    {
+      "label": "Tiền đái tháo đường",
+      "min": 5.7,
+      "max": 6.4
+    },
+    {
+      "label": "Đái tháo đường",
+      "min": 6.5,
+      "max": 20
+    }
+  ],
+
+  "recommendations": [
+    "Kiểm tra HbA1c định kỳ theo hướng dẫn của bác sĩ.",
+    "Duy trì chế độ ăn lành mạnh, hạn chế đường và tinh bột hấp thu nhanh.",
+    "Tăng cường vận động thể chất ít nhất 150 phút mỗi tuần.",
+    "Kiểm soát cân nặng hợp lý.",
+    "Tuân thủ điều trị nếu đã được chẩn đoán đái tháo đường."
+  ],
+
+  "related_diseases": [
+    "Tiểu Đường"
+  ],
+
+  "source": "American Diabetes Association (ADA), World Health Organization (WHO)"
+}

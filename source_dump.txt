@@ -45,10 +45,17 @@ ML_HealthyAI/
 │   │   ├── __pycache__/
 │   │   ├── cn_hs_suckhoe.py
 │   │   ├── cn_lichsu_trabenh.py
-│   │   ├── cn_sotay_ykhoa.py
 │   │   ├── cn_thongtin_nguoidung.py
 │   │   ├── cn_tra_cuu_trieu_chung.py
 │   │   └── cn_tra_thuoc.py
+│   ├── knowledge/
+│   │   ├── __pycache__/
+│   │   ├── articles/
+│   │   │   ├── bmi.json
+│   │   │   └── hba1c.json
+│   │   ├── knowledge_api.py
+│   │   ├── knowledge_loader.py
+│   │   └── knowledge_schema.py
 │   ├── ml/
 │   │   ├── __pycache__/
 │   │   ├── models/
@@ -119,6 +126,7 @@ ML_HealthyAI/
 │       │   │   ├── hs-suckhoe.css
 │       │   │   ├── lich-su-tra-cuu.css
 │       │   │   ├── phan-tich-benh.css
+│       │   │   ├── so-y-te.css
 │       │   │   ├── thongtin-nguoidung.css
 │       │   │   ├── tra-benh.css
 │       │   │   ├── tra-thuoc.css
@@ -133,6 +141,7 @@ ML_HealthyAI/
 │       │   ├── lich-su-tra-cuu.jsx
 │       │   ├── main.jsx
 │       │   ├── phan-tich-benh.jsx
+│       │   ├── so-y-te.jsx
 │       │   ├── thongtin-nd.jsx
 │       │   ├── tra-benh.jsx
 │       │   ├── tra-thuoc.jsx
@@ -173,6 +182,8 @@ from function.cn_tra_thuoc import router as medicine_router
 from function.cn_thongtin_nguoidung import router as user_info_router 
 from function.cn_tra_cuu_trieu_chung import router as trieu_chung_router # <-- [THÊM DÒNG NÀY] Import API Thông Tin Người Dùng
 from function.cn_lichsu_trabenh import router as lich_su_trabenh_router # <-- [THÊM DÒNG NÀY] Import API Lịch Sử Tra Bệnh 
+from knowledge.knowledge_api import router as knowledge_router
+from function.cn_sotay_ykhoa import router as sotay_ykhoa_router
 
 app = FastAPI(title="LuanVanKTPM - Disease Risk Engine")
 
@@ -199,6 +210,8 @@ app.include_router(medicine_router)  # <-- [THÊM DÒNG NÀY] Khai báo để Fa
 app.include_router(user_info_router)  # <-- [THÊM DÒNG NÀY] Khai báo để FastAPI nhận diện router mới
 app.include_router(trieu_chung_router)  # <-- [THÊM DÒNG NÀY] Khai báo để FastAPI nhận diện router mới
 app.include_router(lich_su_trabenh_router)  # <-- [THÊM DÒNG NÀY] Khai báo để FastAPI nhận diện router mới
+app.include_router(knowledge_router)  # <-- [THÊM DÒNG NÀY] Khai báo để FastAPI nhận diện router mới
+app.include_router(sotay_ykhoa_router)  # <-- [THÊM DÒNG NÀY] Khai báo để FastAPI nhận diện router mới
 
 @app.get("/")
 def root():
@@ -4280,210 +4293,6 @@ def get_proactive_alerts(ten_dang_nhap: str, db: Session = Depends(get_db)):
     return alerts
 ```
 
-### backend\function\cn_sotay_ykhoa.py
-```py
-from fastapi import APIRouter, Query, HTTPException
-from typing import Dict, Any, List, Optional
-from pydantic import BaseModel
-
-# Import engine
-from app.medical_handbook_engine import get_handbook_engine, DiseaseExplanation
-
-
-# ─────────────────── Pydantic Models ───────────────────
-class DiseaseExplanationResponse(BaseModel):
-    """Response model cho giải thích y khoa"""
-    tenbenhISO: str
-    tenbenh: str
-    tenkhoa: str
-    mota: str
-    trieuchinh: str
-    nguynhan: str
-    dieutri: str
-    phongngua: str
-
-
-class EnrichedAssessmentRequest(BaseModel):
-    """Request để match kết quả đánh giá với cẩm nang"""
-    disease: str
-    risk: Optional[str] = None
-    confidence: Optional[float] = None
-    additional_data: Optional[Dict[str, Any]] = None
-
-
-class EnrichedAssessmentResponse(BaseModel):
-    """Response cho assessment enriched với medical explanation"""
-    disease: str
-    risk: Optional[str] = None
-    confidence: Optional[float] = None
-    handbook_found: bool
-    y_te_explanation: Optional[DiseaseExplanationResponse] = None
-
-
-class DiseaseListItem(BaseModel):
-    """Item trong danh sách bệnh"""
-    tenbenhISO: str
-    tenbenh: str
-    tenkhoa: str
-
-
-# ─────────────────── Router ───────────────────
-router = APIRouter(prefix="/api/medical-handbook", tags=["Medical Handbook"])
-
-
-@router.get("/explanation/{disease_name}", 
-            response_model=Optional[DiseaseExplanationResponse],
-            summary="Lấy giải thích y khoa cho một bệnh")
-async def get_disease_explanation(disease_name: str):
-    """
-    Lấy giải thích y khoa chi tiết cho một bệnh cụ thể
-    
-    Args:
-        disease_name: Tên bệnh (ISO hoặc tiếng Việt)
-    
-    Returns:
-        DiseaseExplanationResponse hoặc None
-    
-    Example:
-        GET /api/medical-handbook/explanation/DIABETES
-        GET /api/medical-handbook/explanation/Tiểu đường
-    """
-    engine = get_handbook_engine()
-    explanation = engine.get_explanation(disease_name)
-    
-    if not explanation:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Không tìm thấy giải thích cho bệnh: {disease_name}"
-        )
-    
-    return explanation.to_dict()
-
-
-@router.get("/diseases", 
-            response_model=List[DiseaseListItem],
-            summary="Lấy danh sách tất cả bệnh")
-async def get_all_diseases():
-    """
-    Lấy danh sách tất cả các bệnh có trong cẩm nang y khoa
-    
-    Returns:
-        Danh sách DiseaseListItem
-    
-    Example:
-        GET /api/medical-handbook/diseases
-    """
-    engine = get_handbook_engine()
-    diseases = engine.get_all_diseases()
-    return diseases
-
-
-@router.get("/search", 
-            response_model=List[DiseaseExplanationResponse],
-            summary="Tìm kiếm bệnh theo từ khóa")
-async def search_diseases(keyword: str = Query(..., min_length=1)):
-    """
-    Tìm kiếm các bệnh theo từ khóa
-    
-    Args:
-        keyword: Từ khóa tìm kiếm (bắt buộc)
-    
-    Returns:
-        Danh sách DiseaseExplanationResponse
-    
-    Example:
-        GET /api/medical-handbook/search?keyword=tiểu
-        GET /api/medical-handbook/search?keyword=tim
-    """
-    engine = get_handbook_engine()
-    results = engine.search_diseases(keyword)
-    
-    if not results:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Không tìm thấy bệnh nào với từ khóa: {keyword}"
-        )
-    
-    return [result.to_dict() for result in results]
-
-
-@router.post("/enrich-assessment", 
-             response_model=EnrichedAssessmentResponse,
-             summary="Enriched kết quả đánh giá với giải thích y khoa")
-async def enrich_assessment(request: EnrichedAssessmentRequest):
-    """
-    Dùng để match kết quả dự đoán bệnh (từ rule-based hoặc ML engine)
-    với cẩm nang y khoa tự động
-    
-    Args:
-        request: EnrichedAssessmentRequest chứa disease name
-    
-    Returns:
-        EnrichedAssessmentResponse với y_te_explanation đính kèm
-    
-    Example:
-        POST /api/medical-handbook/enrich-assessment
-        {
-            "disease": "DIABETES",
-            "risk": "HIGH",
-            "confidence": 0.85
-        }
-    """
-    engine = get_handbook_engine()
-    
-    # Chuẩn bị dữ liệu
-    assessment_dict = {
-        "disease": request.disease,
-        "risk": request.risk,
-        "confidence": request.confidence,
-    }
-    
-    if request.additional_data:
-        assessment_dict.update(request.additional_data)
-    
-    # Enrich với handbook
-    enriched = engine.match_and_enrich(assessment_dict, disease_field="disease")
-    
-    # Build response
-    y_te_data = enriched.get("y_te_explanation")
-    
-    return EnrichedAssessmentResponse(
-        disease=enriched["disease"],
-        risk=enriched.get("risk"),
-        confidence=enriched.get("confidence"),
-        handbook_found=enriched.get("handbook_found", False),
-        y_te_explanation=y_te_data
-    )
-
-
-@router.get("/health", 
-            summary="Check sức khỏe của Medical Handbook Engine")
-async def health_check():
-    """
-    Kiểm tra xem engine có chạy bình thường không
-    và bao nhiêu bệnh đã được load
-    
-    Returns:
-        Status và số lượng bệnh
-    
-    Example:
-        GET /api/medical-handbook/health
-    """
-    try:
-        engine = get_handbook_engine()
-        num_diseases = len(engine.handbook_data)
-        return {
-            "status": "ok",
-            "diseases_loaded": num_diseases,
-            "message": f"Medical Handbook Engine hoạt động bình thường. Đã load {num_diseases} bệnh."
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Medical Handbook Engine lỗi: {str(e)}"
-        )
-```
-
 ### backend\function\cn_thongtin_nguoidung.py
 ```py
 # backend/function/cn_thongtin_nguoidung.py
@@ -5580,6 +5389,141 @@ def get_warning_rules():
     }
 ```
 
+### backend\knowledge\knowledge_api.py
+```py
+from fastapi import APIRouter, HTTPException
+from knowledge.knowledge_loader import KnowledgeLoader
+
+router = APIRouter(
+    prefix="/knowledge",
+    tags=["Knowledge"]
+)
+
+knowledge_loader = KnowledgeLoader()
+
+@router.get("/")
+def list_knowledge_articles():
+    return {
+        "articles": knowledge_loader.list_articles()
+    }
+
+@router.get("/{article_id}")
+def get_knowledge_article(article_id: str):
+    try:
+        return knowledge_loader.load_article(article_id)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Article '{article_id}' not found"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+@router.post("/{article_id}/reload")
+def reload_knowledge_article(article_id: str):
+    try:
+        knowledge_loader.reload_article(article_id)
+        return {
+            "status": "success",
+            "message": f"Article '{article_id}' reloaded"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+```
+
+### backend\knowledge\knowledge_loader.py
+```py
+import json
+import time
+from pathlib import Path
+from typing import Dict, List
+
+from knowledge.knowledge_schema import KnowledgeArticle
+
+class KnowledgeLoader:
+    def __init__(self, articles_dir: Path = Path("knowledge/articles")):
+        self.articles_dir = articles_dir
+        self._cache = {}
+        self._last_modified = {}
+
+    def load_article(self, article_id: str, force_reload: bool = False) -> Dict:
+        article_path = self.articles_dir / f"{article_id}.json"
+
+        if not article_path.exists():
+            raise FileNotFoundError(f"Knowledge article '{article_id}' not found")
+
+        current_mtime = article_path.stat().st_mtime
+
+        if (
+            force_reload
+            or article_id not in self._cache
+            or self._last_modified.get(article_id) != current_mtime
+        ):
+            with open(article_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            validated = KnowledgeArticle(**data)
+            self._cache[article_id] = validated.model_dump()
+            self._last_modified[article_id] = current_mtime
+
+            print(f"🔄 Knowledge '{article_id}' loaded at {time.strftime('%H:%M:%S')}")
+
+        return self._cache[article_id]
+
+    def list_articles(self) -> List[Dict]:
+        articles = []
+        for file in self.articles_dir.glob("*.json"):
+            try:
+                article_id = file.stem
+                article = self.load_article(article_id)
+                articles.append({
+                    "id": article["id"],
+                    "name": article["name"],
+                    "category": article["category"],
+                    "summary": article["summary"]
+                })
+            except Exception:
+                continue
+
+        return sorted(articles, key=lambda x: x["name"])
+
+    def reload_article(self, article_id: str):
+        self.load_article(article_id, force_reload=True)
+
+    def clear_cache(self):
+        self._cache.clear()
+        self._last_modified.clear()
+```
+
+### backend\knowledge\knowledge_schema.py
+```py
+from typing import List, Optional
+from pydantic import BaseModel, Field
+
+class NormalRange(BaseModel):
+    label: str
+    min: Optional[float] = None
+    max: Optional[float] = None
+
+class KnowledgeArticle(BaseModel):
+    id: str
+    name: str
+    category: str
+    summary: str
+    description: str
+    formula: Optional[str] = None
+    images: List[str] = Field(default_factory=list)
+    normal_ranges: List[NormalRange] = Field(default_factory=list)
+    recommendations: List[str] = Field(default_factory=list)
+    related_diseases: List[str] = Field(default_factory=list)
+```
+
 ### backend\ml\train_cardiovascular_final.py
 ```py
 """
@@ -6223,7 +6167,7 @@ import GioiThieu from "./gioi-thieu";
 import TraThuoc from "./tra-thuoc";
 import TraBenh from "./tra-benh";
 import LichSuTraCuu from "./lich-su-tra-cuu";
-
+import SoYTe from './so-y-te';
 import ThongTinND from "./thongtin-nd.jsx";
 
 import Header from "./components/header.jsx";
@@ -6348,9 +6292,10 @@ function AppContent() {
         return <TraBenh />;
       case "history":
         return <LichSuTraCuu />;
+      case "so-y-te":
+        return <SoYTe />;
       // 2. Các đường dẫn từ Header đang chờ phát triển (Placeholder)
       case "tu-van-ai":
-      case "y-te":
       case "thuc-don":
       case "cai-dat":
       case "thong-bao":
@@ -7369,7 +7314,6 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import "./css/hs-suckhoe.css";
 
-
 const API_BASE_URL = "http://127.0.0.1:8000";
 
 export default function ChiSoSucKhoe() {
@@ -7387,10 +7331,8 @@ export default function ChiSoSucKhoe() {
   const [completionRate, setCompletionRate] = useState(0);
   const [missingFields, setMissingFields] = useState([]);
   const [activeAccordion, setActiveAccordion] = useState(1);
-
   const [healthScore, setHealthScore] = useState(null);
   const [loadingScore, setLoadingScore] = useState(false);
-
   const [trendData, setTrendData] = useState(null);
   const [loadingTrend, setLoadingTrend] = useState(false);
 
@@ -7401,8 +7343,8 @@ export default function ChiSoSucKhoe() {
       bmi: "Thể chất",
       huyetApTamThu: "Huyết áp",
       duongHuyet: "Đường huyết",
-      cholesterol: "Cholesterol toàn phần",
-      ldl: "Chỉ số LDL",
+      cholesterol: "Cholesterol",
+      ldl: "LDL",
       creatinine: "Creatinine"
     };
     let filled = 0;
@@ -7501,7 +7443,6 @@ export default function ChiSoSucKhoe() {
       await axios.post(`${API_BASE_URL}/health-profile/`, payload);
       setMessage("Lưu dữ liệu chỉ số thành công!");
       setTimeout(() => setMessage(""), 3000);
-
       setTimeout(() => {
         fetchHealthScore();
         fetchTrendData();
@@ -7516,36 +7457,37 @@ export default function ChiSoSucKhoe() {
 
   const renderTrendChart = (metric, records) => {
     if (!records || records.length === 0) return null;
-
     const maxValue = Math.max(...records.map(r => r.value));
     const minValue = Math.min(...records.map(r => r.value));
     const range = maxValue - minValue || 1;
     const chartHeight = 120;
-
     const points = records.map((record, idx) => {
       const x = (idx / (records.length - 1 || 1)) * 300;
       const normalizedValue = (record.value - minValue) / range;
       const y = chartHeight - normalizedValue * 100;
       return { x, y, ...record };
     });
-
     const pathData = points.map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 
     return (
-      <div style={{ marginBottom: "20px" }}>
-        <p style={{ fontSize: "14px", fontWeight: "600", color: "#475569", marginBottom: "8px" }}>
-          Biểu đồ xu hướng {metric}
-        </p>
-        <svg width="100%" height={chartHeight + 30} viewBox={`0 0 320 ${chartHeight + 30}`} style={{ border: "1px solid #E2E8F0", borderRadius: "8px", padding: "10px" }}>
-          <polyline points={pathData} fill="none" stroke="#2563EB" strokeWidth="2" />
+      <div className="hsk-trend-chart-container">
+        <h4 className="hsk-trend-chart-title">Biểu đồ xu hướng {metric}</h4>
+        <svg width="100%" height={chartHeight + 30} viewBox={`0 0 320 ${chartHeight + 30}`} className="hsk-trend-svg">
+          <polyline points={pathData} fill="none" stroke="url(#trendGradient)" strokeWidth="2" />
+          <defs>
+            <linearGradient id="trendGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#2563eb" />
+              <stop offset="100%" stopColor="#0f172a" />
+            </linearGradient>
+          </defs>
           {points.map((p, idx) => (
-            <circle key={idx} cx={p.x} cy={p.y} r="3" fill="#2563EB" />
+            <circle key={idx} cx={p.x} cy={p.y} r="3" fill="#2563eb" className="hsk-trend-point" />
           ))}
         </svg>
-        <div style={{ marginTop: "8px", fontSize: "12px", color: "#64748B" }}>
+        <div className="hsk-trend-values">
           {points.map((p, idx) => (
-            <span key={idx} style={{ marginRight: "16px" }}>
-              {p.date}: {p.value.toFixed(1)}
+            <span key={idx} className="hsk-trend-value">
+              {p.date}: <strong>{p.value.toFixed(1)}</strong>
             </span>
           ))}
         </div>
@@ -7554,562 +7496,356 @@ export default function ChiSoSucKhoe() {
   };
 
   return (
-    <div style={{ width: "100%", maxWidth: "1000px", margin: "0 auto", padding: "0 20px" }}>
-      <style>{`
-        .custom-input { 
-          background-color: #FFFFFF !important; 
-          color: #1E293B !important; 
-          border: 1px solid #D1D5DB; 
-          border-radius: 8px; 
-          padding: 12px; 
-          width: 100%; 
-          box-sizing: border-box; 
-          transition: all 0.2s; 
-          font-size: 15px;
-        }
-        .custom-input:focus { outline: none; border-color: #2563EB; box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
-        select.custom-input option { color: #1E293B !important; background-color: #FFFFFF !important; }
-        
-        .acc-header { 
-          padding: 20px 24px; background: white; border: 1px solid #E2E8F0; 
-          border-radius: 12px; cursor: pointer; display: flex; justify-content: space-between; 
-          align-items: center; font-weight: 700; font-size: 16px; margin-bottom: 12px; 
-          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); 
-        }
-        .acc-header:hover { border-color: #2563EB; background-color: #F8FAFC; }
-        .acc-header.active { border-color: #2563EB; border-bottom-left-radius: 0; border-bottom-right-radius: 0; margin-bottom: 0; }
-        
-        .acc-wrapper {
-          max-height: 0;
-          opacity: 0;
-          overflow: hidden;
-          transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease-in-out, padding 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-          padding: 0 24px;
-          border: 1px solid transparent;
-          margin-bottom: 12px;
-          border-radius: 0 0 12px 12px;
-        }
-        .acc-wrapper.open {
-          max-height: 1200px;
-          opacity: 1;
-          padding: 24px;
-          border-color: #E2E8F0;
-          border-top: none;
-        }
-
-        .tag-btn { 
-          padding: 10px 20px; border-radius: 20px; cursor: pointer; font-size: 14px; 
-          font-weight: 600; transition: all 0.2s; user-select: none; border: 1px solid #D1D5DB; 
-          background: white; color: #475569; display: inline-flex; align-items: center; gap: 8px; 
-        }
-        .tag-btn:hover { border-color: #2563EB; color: #2563EB; }
-        .tag-btn.active { background: #DBEAFE; border-color: #2563EB; color: #1E3A8A; box-shadow: 0 2px 4px rgba(37,99,235,0.1); }
-
-        .score-card {
-          background: linear-gradient(135deg, #2563EB 0%, #1E40AF 100%);
-          color: white;
-          padding: 28px;
-          border-radius: 16px;
-          margin-bottom: 24px;
-          box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
-        }
-
-        .score-display {
-          display: flex;
-          align-items: center;
-          gap: 20px;
-          margin-bottom: 16px;
-        }
-
-        .score-number {
-          font-size: 56px;
-          font-weight: 800;
-          line-height: 1;
-        }
-
-        .score-info {
-          flex: 1;
-        }
-
-        .trend-up { color: #10B981; font-weight: 600; }
-        .trend-down { color: #EF4444; font-weight: 600; }
-        .trend-stable { color: #F59E0B; font-weight: 600; }
-      `}</style>
-
+    <div className="hsk-wrapper">
       {message && (
-        <div style={{
-          padding: "16px",
-          marginBottom: "24px",
-          borderRadius: "8px",
-          backgroundColor: message.includes("thành công") ? "#DCFCE7" : "#FEF2F2",
-          color: message.includes("thành công") ? "#166534" : "#991B1B",
-          fontWeight: "600"
-        }}>
-          {message}
+        <div className={`hsk-message ${message.includes("thành công") ? "hsk-message--success" : "hsk-message--error"}`}>
+          <i className={`fa-solid ${message.includes("thành công") ? "fa-check-circle" : "fa-exclamation-circle"}`}></i>
+          <span>{message}</span>
         </div>
       )}
 
-      {/* ĐIỂM SỨC KHỎE CÁ NHÂN */}
       {healthScore && (
-        <div className="hsk-score-card">
-          <div className="hsk-score-card-content">
-            <h2 className="hsk-score-header">
-              <i className="fa-solid fa-heart-circle-check"></i>
-              Điểm Sức Khỏe Cá Nhân
-            </h2>
-            
-            <div className="hsk-score-display">
-              <div className="hsk-score-number">
-                {healthScore.current_score}<span className="hsk-score-max">/{healthScore.max_score}</span>
+        <div className="hsk-score-section">
+          <div className="hsk-score-card">
+            <div className="hsk-score-card-bg"></div>
+            <div className="hsk-score-content">
+              <div className="hsk-score-header">
+                <i className="fa-solid fa-heart-pulse"></i>
+                <span>Điểm Sức Khỏe Cá Nhân</span>
               </div>
               
-              <div className="hsk-score-info">
-                <div className={`hsk-score-status ${healthScore.current_score >= 70 ? 'status-good' : healthScore.current_score >= 50 ? 'status-warn' : 'status-alert'}`}>
-                  {healthScore.current_score >= 70 ? (
-                    <><i className="fa-solid fa-circle-check"></i> Sức khỏe tốt</>
-                  ) : healthScore.current_score >= 50 ? (
-                    <><i className="fa-solid fa-triangle-exclamation"></i> Cần cải thiện</>
-                  ) : (
-                    <><i className="fa-solid fa-circle-xmark"></i> Cần kiểm tra ngay</>
-                  )}
+              <div className="hsk-score-body">
+                <div className="hsk-score-display">
+                  <div className="hsk-score-number">
+                    {healthScore.current_score}
+                    <span className="hsk-score-denominator">/{healthScore.max_score}</span>
+                  </div>
+                  
+                  <div className="hsk-score-detail">
+                    <div className={`hsk-status-badge hsk-status-${healthScore.current_score >= 70 ? "good" : healthScore.current_score >= 50 ? "warn" : "alert"}`}>
+                      <i className={`fa-solid ${healthScore.current_score >= 70 ? "fa-circle-check" : healthScore.current_score >= 50 ? "fa-triangle-exclamation" : "fa-circle-xmark"}`}></i>
+                      <span>{healthScore.current_score >= 70 ? "Sức khỏe tốt" : healthScore.current_score >= 50 ? "Cần cải thiện" : "Cần kiểm tra ngay"}</span>
+                    </div>
+                    
+                    <p className="hsk-score-previous">
+                      Lần đánh giá trước: <strong>{healthScore.previous_score ?? "--"}/{healthScore.max_score}</strong>
+                    </p>
+                    
+                    {healthScore?.trend?.percentage !== undefined && (
+                      <div className={`hsk-trend-indicator hsk-trend-${healthScore.trend.percentage > 0 ? "up" : healthScore.trend.percentage < 0 ? "down" : "stable"}`}>
+                        <i className={`fa-solid fa-arrow-${healthScore.trend.percentage > 0 ? "up" : healthScore.trend.percentage < 0 ? "down" : "right"}`}></i>
+                        <span>{Math.abs(healthScore.trend.percentage)}% so với tháng trước</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 
-                <p className="hsk-score-previous">
-                  Lần đánh giá trước: <strong>{healthScore.previous_score ?? "--"}/{healthScore.max_score}</strong>
-                </p>
-                
-                {/* Kiểm tra nếu có dữ liệu trend mới hiển thị phần % */}
-                {healthScore?.trend?.percentage !== undefined && (
-                  <div className={`hsk-score-trend ${healthScore.trend.percentage > 0 ? "trend-up" : healthScore.trend.percentage < 0 ? "trend-down" : "trend-stable"}`}>
-                    <span className="trend-icon">
-                      {healthScore.trend.percentage > 0 ? "↑" : healthScore.trend.percentage < 0 ? "↓" : "→"}
-                    </span>
-                    {Math.abs(healthScore.trend.percentage)}% so với tháng trước
+                {healthScore?.trend?.insight && (
+                  <div className="hsk-score-insight">
+                    <i className="fa-solid fa-lightbulb"></i>
+                    <p>{healthScore.trend.insight}</p>
                   </div>
                 )}
               </div>
             </div>
-            
-            {/* Kiểm tra nếu có insight thì mới hiển thị */}
-            {healthScore?.trend?.insight && (
-              <div className="hsk-score-insight">
-                <i className="fa-solid fa-lightbulb"></i>
-                <p>{healthScore.trend.insight}</p>
-              </div>
-            )}
           </div>
         </div>
       )}
 
-      {/* HỒ SƠ HOÀN THIỆN */}
-      <div style={{
-        background: "white",
-        padding: "24px",
-        borderRadius: "16px",
-        border: "1px solid #E2E8F0",
-        marginBottom: "32px"
-      }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "12px" }}>
-          <span style={{ fontWeight: "700", color: "#334155" }}>Độ hoàn thiện dữ liệu lâm sàng</span>
-          <span style={{
-            fontWeight: "bold",
-            color: completionRate === 100 ? "#22C55E" : "#2563EB"
-          }}>
+      <div className="hsk-completion-section">
+        <div className="hsk-completion-header">
+          <span className="hsk-completion-title">Độ hoàn thiện dữ liệu lâm sàng</span>
+          <span className={`hsk-completion-percentage ${completionRate === 100 ? "hsk-complete" : ""}`}>
             {completionRate}%
           </span>
         </div>
-        <div style={{
-          width: "100%",
-          height: "10px",
-          backgroundColor: "#F1F5F9",
-          borderRadius: "5px",
-          overflow: "hidden"
-        }}>
-          <div style={{
-            height: "100%",
-            width: `${completionRate}%`,
-            backgroundColor: completionRate === 100 ? "#22C55E" : "#2563EB",
-            transition: "width 0.5s ease"
-          }} />
+        <div className="hsk-completion-track">
+          <div className="hsk-completion-bar" style={{ width: `${completionRate}%` }}></div>
         </div>
         {missingFields.length > 0 && (
-          <div style={{ marginTop: "12px", fontSize: "14px", color: "#64748B" }}>
-            Trường AI đề xuất thêm: <span style={{ color: "#F59E0B", fontWeight: "600" }}>
-              {missingFields.join(", ")}
-            </span>
-          </div>
+          <p className="hsk-completion-hint">
+            <span className="hsk-hint-label">Đề xuất:</span>
+            <span className="hsk-hint-fields">{missingFields.join(", ")}</span>
+          </p>
         )}
       </div>
 
-      <form onSubmit={handleSubmit}>
-        {/* KHỐI 1: THỂ CHẤT & SINH TỒN */}
-        <div
-          className={`acc-header ${activeAccordion === 1 ? "active" : ""}`}
-          onClick={() => setActiveAccordion(activeAccordion === 1 ? 0 : 1)}
-        >
-          <span>
-            <i className="fa-solid fa-heart-pulse" style={{ marginRight: "8px" }}></i>
-            1. Thể chất & Sinh tồn
-          </span>
-          <span>
-            <i className={`fa-solid ${activeAccordion === 1 ? "fa-chevron-down" : "fa-chevron-right"}`}></i>
-          </span>
-        </div>
-        <div className={`acc-wrapper ${activeAccordion === 1 ? "open" : ""}`} style={{ background: "#EFF6FF" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Tuổi</label>
-              <input type="number" name="tuoi" value={formData.tuoi} onChange={handleChange} className="custom-input" />
+      <form onSubmit={handleSubmit} className="hsk-form">
+        {/* SECTION 1 */}
+        <div className={`hsk-section ${activeAccordion === 1 ? "hsk-active" : ""}`}>
+          <button
+            type="button"
+            className={`hsk-section-header ${activeAccordion === 1 ? "hsk-open" : ""}`}
+            onClick={() => setActiveAccordion(activeAccordion === 1 ? 0 : 1)}
+          >
+            <div className="hsk-section-title">
+              <i className="fa-solid fa-heart-pulse"></i>
+              <span>1. Thể chất & Sinh tồn</span>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Giới tính</label>
-              <select name="gioiTinh" value={formData.gioiTinh} onChange={handleChange} className="custom-input">
-                <option value="Nam">Nam</option>
-                <option value="Nữ">Nữ</option>
-              </select>
+            <i className={`fa-solid fa-chevron-down ${activeAccordion === 1 ? "hsk-rotate" : ""}`}></i>
+          </button>
+          <div className={`hsk-section-body hsk-section-vitals ${activeAccordion === 1 ? "hsk-open" : ""}`}>
+            <div className="hsk-grid-2">
+              <div className="hsk-input-group">
+                <label>Tuổi</label>
+                <input type="number" name="tuoi" value={formData.tuoi} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>Giới tính</label>
+                <select name="gioiTinh" value={formData.gioiTinh} onChange={handleChange} className="hsk-input">
+                  <option value="Nam">Nam</option>
+                  <option value="Nữ">Nữ</option>
+                </select>
+              </div>
+              <div className="hsk-input-group">
+                <label>Chiều cao (cm)</label>
+                <input type="number" name="chieuCao" value={formData.chieuCao} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>Cân nặng (kg)</label>
+                <input type="number" name="canNang" value={formData.canNang} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>BMI chỉ số</label>
+                <input type="number" name="bmi" value={formData.bmi} readOnly className="hsk-input hsk-input--readonly" />
+              </div>
+              <div className="hsk-input-group">
+                <label>Vòng eo (cm)</label>
+                <input type="number" name="vongEo" value={formData.vongEo} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>HA Tâm thu (mmHg)</label>
+                <input type="number" name="huyetApTamThu" value={formData.huyetApTamThu} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>HA Tâm trương (mmHg)</label>
+                <input type="number" name="huyetApTamTruong" value={formData.huyetApTamTruong} onChange={handleChange} className="hsk-input" />
+              </div>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Chiều cao (cm)</label>
-              <input type="number" name="chieuCao" value={formData.chieuCao} onChange={handleChange} className="custom-input" />
+            <div className="hsk-section-nav">
+              <button type="button" onClick={() => setActiveAccordion(2)} className="hsk-next-btn">
+                Tiếp theo
+                <i className="fa-solid fa-arrow-right"></i>
+              </button>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Cân nặng (kg)</label>
-              <input type="number" name="canNang" value={formData.canNang} onChange={handleChange} className="custom-input" />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>BMI chỉ số</label>
-              <input type="number" name="bmi" value={formData.bmi} readOnly className="custom-input" style={{ background: "#E2E8F0" }} />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Vòng eo (cm)</label>
-              <input type="number" name="vongEo" value={formData.vongEo} onChange={handleChange} className="custom-input" />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>HA Tâm thu (mmHg)</label>
-              <input type="number" name="huyetApTamThu" value={formData.huyetApTamThu} onChange={handleChange} className="custom-input" />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>HA Tâm trương (mmHg)</label>
-              <input type="number" name="huyetApTamTruong" value={formData.huyetApTamTruong} onChange={handleChange} className="custom-input" />
-            </div>
-          </div>
-          <div style={{ textAlign: "right", marginTop: "20px" }}>
-            <button
-              type="button"
-              onClick={() => setActiveAccordion(2)}
-              style={{
-                padding: "8px 16px",
-                background: "#FFFFFF",
-                border: "1px solid #CBD5E1",
-                borderRadius: "8px",
-                color: "#475569",
-                fontWeight: "600",
-                cursor: "pointer",
-                transition: "all 0.2s"
-              }}
-            >
-              Tiếp theo ▶
-            </button>
           </div>
         </div>
 
-        {/* KHỐI 2: CHỈ SỐ SINH HÓA CHUYÊN SÂU */}
-        <div
-          className={`acc-header ${activeAccordion === 2 ? "active" : ""}`}
-          onClick={() => setActiveAccordion(activeAccordion === 2 ? 0 : 2)}
-        >
-          <span>
-            <i className="fa-solid fa-flask-vial" style={{ marginRight: "8px" }}></i>
-            2. Chỉ số Sinh hóa chuyên sâu
-          </span>
-          <span>
-            <i className={`fa-solid ${activeAccordion === 2 ? "fa-chevron-down" : "fa-chevron-right"}`}></i>
-          </span>
-        </div>
-        <div className={`acc-wrapper ${activeAccordion === 2 ? "open" : ""}`} style={{ background: "#F0FDF4" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Đường huyết đói (mg/dL)</label>
-              <input type="number" name="duongHuyet" value={formData.duongHuyet} onChange={handleChange} className="custom-input" />
+        {/* SECTION 2 */}
+        <div className={`hsk-section ${activeAccordion === 2 ? "hsk-active" : ""}`}>
+          <button
+            type="button"
+            className={`hsk-section-header ${activeAccordion === 2 ? "hsk-open" : ""}`}
+            onClick={() => setActiveAccordion(activeAccordion === 2 ? 0 : 2)}
+          >
+            <div className="hsk-section-title">
+              <i className="fa-solid fa-flask-vial"></i>
+              <span>2. Chỉ số Sinh hóa chuyên sâu</span>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>HbA1c (%)</label>
-              <input type="number" step="0.1" name="hba1c" value={formData.hba1c} onChange={handleChange} className="custom-input" />
+            <i className={`fa-solid fa-chevron-down ${activeAccordion === 2 ? "hsk-rotate" : ""}`}></i>
+          </button>
+          <div className={`hsk-section-body hsk-section-biochem ${activeAccordion === 2 ? "hsk-open" : ""}`}>
+            <div className="hsk-grid-2">
+              <div className="hsk-input-group">
+                <label>Đường huyết đói (mg/dL)</label>
+                <input type="number" name="duongHuyet" value={formData.duongHuyet} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>HbA1c (%)</label>
+                <input type="number" step="0.1" name="hba1c" value={formData.hba1c} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>Cholesterol toàn phần (mg/dL)</label>
+                <input type="number" name="cholesterol" value={formData.cholesterol} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>LDL-Cholesterol (mg/dL)</label>
+                <input type="number" name="ldl" value={formData.ldl} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>HDL-Cholesterol (mg/dL)</label>
+                <input type="number" name="hdl" value={formData.hdl} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>Triglyceride (mg/dL)</label>
+                <input type="number" name="triglyceride" value={formData.triglyceride} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>Creatinine máu (mg/dL)</label>
+                <input type="number" step="0.01" name="creatinine" value={formData.creatinine} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>Acid Uric (mg/dL)</label>
+                <input type="number" step="0.1" name="acidUric" value={formData.acidUric} onChange={handleChange} className="hsk-input" />
+              </div>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Cholesterol toàn phần</label>
-              <input type="number" name="cholesterol" value={formData.cholesterol} onChange={handleChange} className="custom-input" />
+            <div className="hsk-section-nav">
+              <button type="button" onClick={() => setActiveAccordion(3)} className="hsk-next-btn">
+                Tiếp theo
+                <i className="fa-solid fa-arrow-right"></i>
+              </button>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>LDL-Cholesterol</label>
-              <input type="number" name="ldl" value={formData.ldl} onChange={handleChange} className="custom-input" />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>HDL-Cholesterol</label>
-              <input type="number" name="hdl" value={formData.hdl} onChange={handleChange} className="custom-input" />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Triglyceride</label>
-              <input type="number" name="triglyceride" value={formData.triglyceride} onChange={handleChange} className="custom-input" />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Creatinine máu</label>
-              <input type="number" step="0.01" name="creatinine" value={formData.creatinine} onChange={handleChange} className="custom-input" />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Acid Uric</label>
-              <input type="number" step="0.1" name="acidUric" value={formData.acidUric} onChange={handleChange} className="custom-input" />
-            </div>
-          </div>
-          <div style={{ textAlign: "right", marginTop: "20px" }}>
-            <button
-              type="button"
-              onClick={() => setActiveAccordion(3)}
-              style={{
-                padding: "8px 16px",
-                background: "#FFFFFF",
-                border: "1px solid #CBD5E1",
-                borderRadius: "8px",
-                color: "#475569",
-                fontWeight: "600",
-                cursor: "pointer",
-                transition: "all 0.2s"
-              }}
-            >
-              Tiếp theo ▶
-            </button>
           </div>
         </div>
 
-        {/* KHỐI 3: LỐI SỐNG CÁ NHÂN */}
-        <div
-          className={`acc-header ${activeAccordion === 3 ? "active" : ""}`}
-          onClick={() => setActiveAccordion(activeAccordion === 3 ? 0 : 3)}
-        >
-          <span>
-            <i className="fa-solid fa-person-running" style={{ marginRight: "8px" }}></i>
-            3. Lối sống cá nhân
-          </span>
-          <span>
-            <i className={`fa-solid ${activeAccordion === 3 ? "fa-chevron-down" : "fa-chevron-right"}`}></i>
-          </span>
-        </div>
-        <div className={`acc-wrapper ${activeAccordion === 3 ? "open" : ""}`} style={{ background: "#FFF7ED" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Tần suất hút thuốc</label>
-              <select name="hutThuoc" value={formData.hutThuoc} onChange={handleChange} className="custom-input">
-                <option value="Không">Không</option>
-                <option value="Đã bỏ">Đã bỏ</option>
-                <option value="Đang hút">Đang hút</option>
-              </select>
+        {/* SECTION 3 */}
+        <div className={`hsk-section ${activeAccordion === 3 ? "hsk-active" : ""}`}>
+          <button
+            type="button"
+            className={`hsk-section-header ${activeAccordion === 3 ? "hsk-open" : ""}`}
+            onClick={() => setActiveAccordion(activeAccordion === 3 ? 0 : 3)}
+          >
+            <div className="hsk-section-title">
+              <i className="fa-solid fa-person-running"></i>
+              <span>3. Lối sống cá nhân</span>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Sử dụng rượu bia</label>
-              <select name="uongRuouBia" value={formData.uongRuouBia} onChange={handleChange} className="custom-input">
-                <option value="Không">Không</option>
-                <option value="Thỉnh thoảng">Thỉnh thoảng</option>
-                <option value="Thường xuyên">Thường xuyên</option>
-              </select>
+            <i className={`fa-solid fa-chevron-down ${activeAccordion === 3 ? "hsk-rotate" : ""}`}></i>
+          </button>
+          <div className={`hsk-section-body hsk-section-lifestyle ${activeAccordion === 3 ? "hsk-open" : ""}`}>
+            <div className="hsk-grid-2">
+              <div className="hsk-input-group">
+                <label>Tần suất hút thuốc</label>
+                <select name="hutThuoc" value={formData.hutThuoc} onChange={handleChange} className="hsk-input">
+                  <option value="Không">Không</option>
+                  <option value="Đã bỏ">Đã bỏ</option>
+                  <option value="Đang hút">Đang hút</option>
+                </select>
+              </div>
+              <div className="hsk-input-group">
+                <label>Sử dụng rượu bia</label>
+                <select name="uongRuouBia" value={formData.uongRuouBia} onChange={handleChange} className="hsk-input">
+                  <option value="Không">Không</option>
+                  <option value="Thỉnh thoảng">Thỉnh thoảng</option>
+                  <option value="Thường xuyên">Thường xuyên</option>
+                </select>
+              </div>
+              <div className="hsk-input-group">
+                <label>Khẩu vị ăn mặn</label>
+                <select name="anMan" value={formData.anMan} onChange={handleChange} className="hsk-input">
+                  <option value="Nhạt">Nhạt</option>
+                  <option value="Vừa">Vừa</option>
+                  <option value="Mặn">Mặn</option>
+                </select>
+              </div>
+              <div className="hsk-input-group">
+                <label>Vận động thể chất (phút/tuần)</label>
+                <input type="number" name="soPhutVanDongMoiTuan" value={formData.soPhutVanDongMoiTuan} onChange={handleChange} className="hsk-input" />
+              </div>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Khẩu vị ăn mặn</label>
-              <select name="anMan" value={formData.anMan} onChange={handleChange} className="custom-input">
-                <option value="Nhạt">Nhạt</option>
-                <option value="Vừa">Vừa</option>
-                <option value="Mặn">Mặn</option>
-              </select>
+            <div className="hsk-section-nav">
+              <button type="button" onClick={() => setActiveAccordion(4)} className="hsk-next-btn">
+                Tiếp theo
+                <i className="fa-solid fa-arrow-right"></i>
+              </button>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Vận động thể chất (phút/tuần)</label>
-              <input type="number" name="soPhutVanDongMoiTuan" value={formData.soPhutVanDongMoiTuan} onChange={handleChange} className="custom-input" />
-            </div>
-          </div>
-          <div style={{ textAlign: "right", marginTop: "20px" }}>
-            <button
-              type="button"
-              onClick={() => setActiveAccordion(4)}
-              style={{
-                padding: "8px 16px",
-                background: "#FFFFFF",
-                border: "1px solid #CBD5E1",
-                borderRadius: "8px",
-                color: "#475569",
-                fontWeight: "600",
-                cursor: "pointer",
-                transition: "all 0.2s"
-              }}
-            >
-              Tiếp theo ▶
-            </button>
           </div>
         </div>
 
-        {/* KHỐI 4: TIỀN SỬ BỆNH LÝ */}
-        <div
-          className={`acc-header ${activeAccordion === 4 ? "active" : ""}`}
-          onClick={() => setActiveAccordion(activeAccordion === 4 ? 0 : 4)}
-        >
-          <span>
-            <i className="fa-solid fa-triangle-exclamation" style={{ marginRight: "8px" }}></i>
-            4. Tiền sử bệnh lý (Cá nhân & Gia đình)
-          </span>
-          <span>
-            <i className={`fa-solid ${activeAccordion === 4 ? "fa-chevron-down" : "fa-chevron-right"}`}></i>
-          </span>
-        </div>
-        <div className={`acc-wrapper ${activeAccordion === 4 ? "open" : ""}`} style={{ background: "#FEF2F2" }}>
-          <div style={{ marginBottom: "28px" }}>
-            <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "12px", fontSize: "14px" }}>
-              Tiền sử lâm sàng bản thân:
-            </label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
-              <div
-                className={`tag-btn ${formData.caoHuyetAp ? "active" : ""}`}
-                onClick={() => toggleCheckbox("caoHuyetAp")}
-              >
-                <i className={`fa-solid ${formData.caoHuyetAp ? "fa-check" : "fa-plus"}`}></i>
-                Cao huyết áp
-              </div>
-              <div
-                className={`tag-btn ${formData.tieuDuong ? "active" : ""}`}
-                onClick={() => toggleCheckbox("tieuDuong")}
-              >
-                <i className={`fa-solid ${formData.tieuDuong ? "fa-check" : "fa-plus"}`}></i>
-                Tiểu đường
-              </div>
-              <div
-                className={`tag-btn ${formData.benhTimMach ? "active" : ""}`}
-                onClick={() => toggleCheckbox("benhTimMach")}
-              >
-                <i className={`fa-solid ${formData.benhTimMach ? "fa-check" : "fa-plus"}`}></i>
-                Tim mạch
-              </div>
-              <div
-                className={`tag-btn ${formData.gout ? "active" : ""}`}
-                onClick={() => toggleCheckbox("gout")}
-              >
-                <i className={`fa-solid ${formData.gout ? "fa-check" : "fa-plus"}`}></i>
-                Bệnh Gout
+        {/* SECTION 4 */}
+        <div className={`hsk-section ${activeAccordion === 4 ? "hsk-active" : ""}`}>
+          <button
+            type="button"
+            className={`hsk-section-header ${activeAccordion === 4 ? "hsk-open" : ""}`}
+            onClick={() => setActiveAccordion(activeAccordion === 4 ? 0 : 4)}
+          >
+            <div className="hsk-section-title">
+              <i className="fa-solid fa-triangle-exclamation"></i>
+              <span>4. Tiền sử bệnh lý (Cá nhân & Gia đình)</span>
+            </div>
+            <i className={`fa-solid fa-chevron-down ${activeAccordion === 4 ? "hsk-rotate" : ""}`}></i>
+          </button>
+          <div className={`hsk-section-body hsk-section-history ${activeAccordion === 4 ? "hsk-open" : ""}`}>
+            <div className="hsk-tags-section">
+              <h4 className="hsk-tags-title">Tiền sử lâm sàng bản thân:</h4>
+              <div className="hsk-tags-group">
+                {[
+                  { name: "caoHuyetAp", label: "Cao huyết áp" },
+                  { name: "tieuDuong", label: "Tiểu đường" },
+                  { name: "benhTimMach", label: "Tim mạch" },
+                  { name: "gout", label: "Bệnh Gout" }
+                ].map(item => (
+                  <button
+                    key={item.name}
+                    type="button"
+                    className={`hsk-tag ${formData[item.name] ? "hsk-tag--active" : ""}`}
+                    onClick={() => toggleCheckbox(item.name)}
+                  >
+                    <i className={`fa-solid ${formData[item.name] ? "fa-check" : "fa-plus"}`}></i>
+                    {item.label}
+                  </button>
+                ))}
               </div>
             </div>
-          </div>
 
-          <div>
-            <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "12px", fontSize: "14px" }}>
-              Tiền sử di truyền gia đình cận huyết:
-            </label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
-              <div
-                className={`tag-btn ${formData.giaDinhCaoHuyetAp ? "active" : ""}`}
-                onClick={() => toggleCheckbox("giaDinhCaoHuyetAp")}
-              >
-                <i className={`fa-solid ${formData.giaDinhCaoHuyetAp ? "fa-check" : "fa-plus"}`}></i>
-                Cao huyết áp GD
-              </div>
-              <div
-                className={`tag-btn ${formData.giaDinhTieuDuong ? "active" : ""}`}
-                onClick={() => toggleCheckbox("giaDinhTieuDuong")}
-              >
-                <i className={`fa-solid ${formData.giaDinhTieuDuong ? "fa-check" : "fa-plus"}`}></i>
-                Tiểu đường GD
-              </div>
-              <div
-                className={`tag-btn ${formData.giaDinhTimMach ? "active" : ""}`}
-                onClick={() => toggleCheckbox("giaDinhTimMach")}
-              >
-                <i className={`fa-solid ${formData.giaDinhTimMach ? "fa-check" : "fa-plus"}`}></i>
-                Tim mạch GD
-              </div>
-              <div
-                className={`tag-btn ${formData.giaDinhGout ? "active" : ""}`}
-                onClick={() => toggleCheckbox("giaDinhGout")}
-              >
-                <i className={`fa-solid ${formData.giaDinhGout ? "fa-check" : "fa-plus"}`}></i>
-                Gout GD
+            <div className="hsk-tags-section">
+              <h4 className="hsk-tags-title">Tiền sử di truyền gia đình:</h4>
+              <div className="hsk-tags-group">
+                {[
+                  { name: "giaDinhCaoHuyetAp", label: "Cao huyết áp" },
+                  { name: "giaDinhTieuDuong", label: "Tiểu đường" },
+                  { name: "giaDinhTimMach", label: "Tim mạch" },
+                  { name: "giaDinhGout", label: "Gout" }
+                ].map(item => (
+                  <button
+                    key={item.name}
+                    type="button"
+                    className={`hsk-tag ${formData[item.name] ? "hsk-tag--active" : ""}`}
+                    onClick={() => toggleCheckbox(item.name)}
+                  >
+                    <i className={`fa-solid ${formData[item.name] ? "fa-check" : "fa-plus"}`}></i>
+                    {item.label}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
         </div>
 
-        {/* NÚT SUBMIT */}
-        <button
-          type="submit"
-          disabled={saving}
-          style={{
-            width: "100%",
-            padding: "16px",
-            backgroundColor: saving ? "#94A3B8" : "#2563EB",
-            color: "white",
-            fontSize: "16px",
-            fontWeight: "700",
-            border: "none",
-            borderRadius: "12px",
-            cursor: saving ? "not-allowed" : "pointer",
-            marginTop: "24px",
-            transition: "all 0.2s",
-            boxShadow: "0 4px 6px -1px rgba(37, 99, 235, 0.2)"
-          }}
-        >
+        <button type="submit" disabled={saving} className="hsk-submit-btn">
           {saving ? (
             <>
-              <i className="fa-solid fa-spinner fa-spin" style={{ marginRight: "8px" }}></i>
-              Đang kết nối dữ liệu đám mây...
+              <i className="fa-solid fa-spinner fa-spin"></i>
+              <span>Đang kết nối dữ liệu đám mây...</span>
             </>
           ) : (
             <>
-              <i className="fa-solid fa-floppy-disk" style={{ marginRight: "8px" }}></i>
-              LƯU HỒ SƠ SỨC KHỎE CAN THIỆP
+              <i className="fa-solid fa-floppy-disk"></i>
+              <span>LƯU HỒ SƠ SỨC KHỎE CAN THIỆP</span>
             </>
           )}
         </button>
       </form>
 
-      {/* XU HƯỚNG CHỈ SỐ */}
       {trendData && Object.keys(trendData).length > 0 && (
-        <div style={{
-          marginTop: "40px",
-          padding: "24px",
-          backgroundColor: "white",
-          borderRadius: "16px",
-          border: "1px solid #E2E8F0"
-        }}>
-          <h2 style={{ fontSize: "20px", fontWeight: "700", color: "#1E293B", marginBottom: "24px" }}>
-            Phân tích Xu hướng Chỉ số
-          </h2>
-
+        <div className="hsk-trends-section">
+          <h2 className="hsk-trends-title">Phân tích Xu hướng Chỉ số</h2>
+          
           {trendData.bmi && (
-            <div style={{ marginBottom: "32px", padding: "16px", backgroundColor: "#F8FAFC", borderRadius: "12px" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: "600", color: "#334155", marginBottom: "12px" }}>BMI</h3>
+            <div className="hsk-trend-item">
+              <h3 className="hsk-trend-metric">BMI</h3>
               {renderTrendChart("BMI", trendData.bmi.chart_data)}
               {trendData.bmi.has_insight && (
-                <p style={{ fontSize: "14px", color: "#64748B", margin: "12px 0 0 0" }}>
-                  <strong>Insight:</strong> {trendData.bmi.insight}
-                </p>
+                <p className="hsk-trend-description"><strong>Insight:</strong> {trendData.bmi.insight}</p>
               )}
             </div>
           )}
 
           {trendData.duongHuyet && (
-            <div style={{ marginBottom: "32px", padding: "16px", backgroundColor: "#F8FAFC", borderRadius: "12px" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: "600", color: "#334155", marginBottom: "12px" }}>Đường Huyết</h3>
+            <div className="hsk-trend-item">
+              <h3 className="hsk-trend-metric">Đường Huyết</h3>
               {renderTrendChart("Đường Huyết", trendData.duongHuyet.chart_data)}
               {trendData.duongHuyet.has_insight && (
-                <p style={{ fontSize: "14px", color: "#64748B", margin: "12px 0 0 0" }}>
-                  <strong>Insight:</strong> {trendData.duongHuyet.insight}
-                </p>
+                <p className="hsk-trend-description"><strong>Insight:</strong> {trendData.duongHuyet.insight}</p>
               )}
             </div>
           )}
 
           {trendData.huyetApTamThu && (
-            <div style={{ marginBottom: "32px", padding: "16px", backgroundColor: "#F8FAFC", borderRadius: "12px" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: "600", color: "#334155", marginBottom: "12px" }}>Huyết Áp Tâm Thu</h3>
+            <div className="hsk-trend-item">
+              <h3 className="hsk-trend-metric">Huyết Áp Tâm Thu</h3>
               {renderTrendChart("Huyết Áp Tâm Thu", trendData.huyetApTamThu.chart_data)}
               {trendData.huyetApTamThu.has_insight && (
-                <p style={{ fontSize: "14px", color: "#64748B", margin: "12px 0 0 0" }}>
-                  <strong>Insight:</strong> {trendData.huyetApTamThu.insight}
-                </p>
+                <p className="hsk-trend-description"><strong>Insight:</strong> {trendData.huyetApTamThu.insight}</p>
               )}
             </div>
           )}
@@ -8118,11 +7854,12 @@ export default function ChiSoSucKhoe() {
     </div>
   );
 }
+
 ```
 
 ### frontend\web\src\lich-su-tra-cuu.jsx
 ```jsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import "./css/lich-su-tra-cuu.css";
@@ -8130,67 +7867,53 @@ import "./css/lich-su-tra-cuu.css";
 const API_BASE_URL = "http://127.0.0.1:8000";
 
 const HISTORY_TABS = [
-  {
-    key: "tra-benh",
-    label: "Lịch sử tra bệnh",
-    iconClass: "fa-solid fa-stethoscope",
-  },
-  {
-    key: "phan-tich",
-    label: "Lịch sử phân tích chuyên sâu",
-    iconClass: "fa-solid fa-chart-column",
-  },
-  {
-    key: "canh-bao",
-    label: "Cảnh báo chủ động",
-    iconClass: "fa-solid fa-bell",
-  },
+  { key: "tra-benh", label: "Tra bệnh", icon: "fa-stethoscope" },
+  { key: "phan-tich", label: "Phân tích", icon: "fa-chart-column" },
+  { key: "canh-bao", label: "Cảnh báo", icon: "fa-bell" },
 ];
 
-function formatDate(value) {
-  try {
-    return new Intl.DateTimeFormat("vi-VN", {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(value));
-  } catch {
-    return String(value || "");
-  }
-}
+const FORMATTERS = {
+  date: (value) => {
+    try {
+      return new Intl.DateTimeFormat("vi-VN", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(new Date(value));
+    } catch {
+      return String(value || "");
+    }
+  },
+  number: (value, digits = 1) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? num.toFixed(digits) : "0.0";
+  },
+  disease: (value) => {
+    if (!value) return "Chưa xác định";
+    return String(value)
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/^\w/, (m) => m.toUpperCase());
+  },
+  risk: (level) => {
+    const normalized = String(level || "").trim().toLowerCase();
+    const riskMap = {
+      high: "Nguy cơ cao",
+      medium: "Nguy cơ trung bình",
+      low: "Nguy cơ thấp",
+    };
+    return riskMap[normalized] || (normalized || "Chưa xác định");
+  },
+  list: (value) => {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+      return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+    }
+    return [];
+  },
+};
 
-function formatNumber(value, digits = 1) {
-  const num = Number(value);
-  return Number.isFinite(num) ? num.toFixed(digits) : "0.0";
-}
-
-function normalizeList(value) {
-  if (!value) return [];
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item ?? "").trim()).filter(Boolean);
-  }
-  return [];
-}
-
-function diseaseLabel(value) {
-  if (!value) return "Chưa xác định";
-  return String(value)
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^\w/, (m) => m.toUpperCase());
-}
-
-function riskLabel(level) {
-  const normalized = String(level || "")
-    .trim()
-    .toLowerCase();
-  if (normalized === "high") return "Nguy cơ cao";
-  if (normalized === "medium") return "Nguy cơ trung bình";
-  if (normalized === "low") return "Nguy cơ thấp";
-  return normalized ? normalized : "Chưa xác định";
-}
-
-function extractAssessmentSummary(item) {
+const extractAssessmentSummary = (item) => {
   const result = item?.ketQua || {};
   const ruleBased = result?.rule_based || {};
   const aiBased = result?.ai_based || {};
@@ -8214,77 +7937,83 @@ function extractAssessmentSummary(item) {
     matchedRules,
     summary: result?.summary || result?.explanations?.[0] || "",
   };
-}
+};
 
-function pickTopDisease(result) {
+const pickTopDisease = (result) => {
   const diseases = Array.isArray(result?.potential_diseases)
     ? result.potential_diseases
     : [];
   return diseases.length > 0 ? diseases[0] : null;
-}
+};
 
-// ═══════════════════════════════════════════════════════════════════════════
-// COMPONENT: Symptom History Card
-// ═══════════════════════════════════════════════════════════════════════════
 function SymptomHistoryCard({ item }) {
   const [expanded, setExpanded] = useState(false);
   const result = item?.ketQua || {};
-  const topDisease = pickTopDisease(result);
-  const symptoms = normalizeList(item?.trieuChung);
-  const highRiskCount = Array.isArray(result?.potential_diseases)
-    ? result.potential_diseases.filter((d) => d?.is_high_risk).length
-    : 0;
+  const topDisease = useMemo(() => pickTopDisease(result), [result]);
+  const symptoms = useMemo(
+    () => FORMATTERS.list(item?.trieuChung),
+    [item?.trieuChung]
+  );
 
-  const allDiseases = Array.isArray(result?.potential_diseases)
-    ? result.potential_diseases
-    : [];
+  const highRiskCount = useMemo(
+    () =>
+      Array.isArray(result?.potential_diseases)
+        ? result.potential_diseases.filter((d) => d?.is_high_risk).length
+        : 0,
+    [result?.potential_diseases]
+  );
+
+  const allDiseases = useMemo(
+    () => (Array.isArray(result?.potential_diseases) ? result.potential_diseases : []),
+    [result?.potential_diseases]
+  );
 
   return (
-    <article className="history-card history-card--symptom">
-      <div className="history-card-header">
-        <div>
-          <div className="history-card-title">Lần tra cứu #{item.idTraCuu}</div>
-          <div className="history-card-subtitle">
-            {formatDate(item.ngayTraCuu)}
-          </div>
+    <article className="history-card">
+      <div className="history-card__header">
+        <div className="history-card__title-group">
+          <h3 className="history-card__title">Lần tra cứu #{item.idTraCuu}</h3>
+          <p className="history-card__date">{FORMATTERS.date(item.ngayTraCuu)}</p>
         </div>
-        <div className="history-card-badges">
+        <div className="history-card__badges">
           <span
-            className={`history-pill ${highRiskCount > 0 ? "history-pill--danger" : "history-pill--success"}`}
+            className={`badge badge--${highRiskCount > 0 ? "danger" : "success"}`}
           >
-            {highRiskCount > 0 ? "⚠️ Có nguy cơ cao" : "✅ Mức độ thường"}
+            {highRiskCount > 0 ? "⚠️ Nguy cơ cao" : "✓ Bình thường"}
           </span>
           {topDisease && (
-            <span className="history-pill history-pill--info">
-              💊 {topDisease.disease}
-            </span>
+            <span className="badge badge--primary">{topDisease.disease}</span>
           )}
         </div>
       </div>
 
-      <div className="history-card-body">
-        <div className="history-block">
-          <h4>Triệu chứng đã nhập</h4>
-          <div className="history-chip-list">
+      <div className="history-card__body">
+        <div className="history-section">
+          <h4 className="history-section__title">Triệu chứng</h4>
+          <div className="tag-group">
             {symptoms.length > 0 ? (
               symptoms.map((symptom) => (
-                <span key={symptom} className="history-chip">
+                <span key={symptom} className="tag tag--symptom">
                   {symptom}
                 </span>
               ))
             ) : (
-              <span className="history-muted">Không có dữ liệu.</span>
+              <span className="text-muted">Không có dữ liệu</span>
             )}
           </div>
-          {item?.moTaThem && <p className="history-note">📝 {item.moTaThem}</p>}
+          {item?.moTaThem && (
+            <p className="history-note">📝 {item.moTaThem}</p>
+          )}
         </div>
 
         {topDisease && (
           <div
-            className={`history-result ${topDisease?.is_high_risk ? "history-result--danger" : ""}`}
+            className={`result-box ${
+              topDisease?.is_high_risk ? "result-box--danger" : ""
+            }`}
           >
-            <div className="history-result-title">{topDisease.disease}</div>
-            <p className="history-result-text">
+            <div className="result-box__title">{topDisease.disease}</div>
+            <p className="result-box__text">
               {topDisease.is_high_risk
                 ? topDisease.warning_message ||
                   "Kết quả có dấu hiệu nguy cơ cao."
@@ -8292,40 +8021,41 @@ function SymptomHistoryCard({ item }) {
                   "Kết quả tham khảo từ hệ thống tra cứu."}
             </p>
             {topDisease.confidence && (
-              <div className="history-confidence">
-                Độ tin cậy: {formatNumber(topDisease.confidence * 100)}%
+              <div className="result-box__confidence">
+                Độ tin cậy: {FORMATTERS.number(topDisease.confidence * 100)}%
               </div>
             )}
           </div>
         )}
 
         {allDiseases.length > 1 && (
-          <div className="history-expandable">
+          <div className="expandable-section">
             <button
-              className="history-expand-btn"
+              className="expand-btn"
               onClick={() => setExpanded(!expanded)}
+              aria-expanded={expanded}
             >
               <i
                 className={`fa-solid fa-chevron-${expanded ? "up" : "down"}`}
               />
               {expanded
-                ? "Ẩn các bệnh khác"
-                : `Xem thêm (${allDiseases.length - 1} bệnh khác)`}
+                ? "Ẩn bệnh khác"
+                : `Xem thêm (${allDiseases.length - 1} bệnh)`}
             </button>
             {expanded && (
-              <div className="history-disease-list">
+              <div className="disease-list">
                 {allDiseases.slice(1).map((disease, idx) => (
-                  <div key={idx} className="history-disease-item">
-                    <div className="history-disease-header">
-                      <span className="history-disease-name">
+                  <div key={idx} className="disease-item">
+                    <div className="disease-item__header">
+                      <span className="disease-item__name">
                         {disease.disease}
                       </span>
-                      <span className="history-disease-confidence">
-                        {formatNumber(disease.confidence * 100)}%
+                      <span className="disease-item__confidence">
+                        {FORMATTERS.number(disease.confidence * 100)}%
                       </span>
                     </div>
                     {disease.description && (
-                      <p className="history-disease-desc">
+                      <p className="disease-item__desc">
                         {disease.description}
                       </p>
                     )}
@@ -8340,103 +8070,112 @@ function SymptomHistoryCard({ item }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// COMPONENT: Assessment History Card with Trend Analysis
-// ═══════════════════════════════════════════════════════════════════════════
 function AssessmentHistoryCard({ item }) {
   const [expanded, setExpanded] = useState(false);
-  const summary = extractAssessmentSummary(item);
-  const scorePillClass =
-    String(summary.riskLevel || "").toLowerCase() === "high"
-      ? "history-pill--danger"
-      : String(summary.riskLevel || "").toLowerCase() === "medium"
-        ? "history-pill--warning"
-        : "history-pill--success";
+  const summary = useMemo(
+    () => extractAssessmentSummary(item),
+    [item]
+  );
 
-  const trend = item?.trend_analysis || {};
+  const riskClass = useMemo(() => {
+    const level = String(summary.riskLevel || "").toLowerCase();
+    return level === "high" ? "danger" : level === "medium" ? "warning" : "success";
+  }, [summary.riskLevel]);
+
+  const trend = useMemo(() => item?.trend_analysis || {}, [item?.trend_analysis]);
 
   return (
-    <article className="history-card history-card--analysis">
-      <div className="history-card-header">
-        <div>
-          <div className="history-card-title">
-            Phân tích #{item.idDanhGia} - {diseaseLabel(item.maBenh)}
-          </div>
-          <div className="history-card-subtitle">
-            {formatDate(item.ngayDanhGia)}
-          </div>
+    <article className="history-card">
+      <div className="history-card__header">
+        <div className="history-card__title-group">
+          <h3 className="history-card__title">
+            Phân tích #{item.idDanhGia} - {FORMATTERS.disease(item.maBenh)}
+          </h3>
+          <p className="history-card__date">{FORMATTERS.date(item.ngayDanhGia)}</p>
         </div>
-        <div className="history-card-badges">
-          <span className={`history-pill ${scorePillClass}`}>
-            {riskLabel(summary.riskLevel)}
+        <div className="history-card__badges">
+          <span className={`badge badge--${riskClass}`}>
+            {FORMATTERS.risk(summary.riskLevel)}
           </span>
-          <span className="history-pill history-pill--info">
-            📊 {formatNumber(summary.totalScore)}
+          <span className="badge badge--info">
+            {FORMATTERS.number(summary.totalScore)}
           </span>
         </div>
       </div>
 
-      <div className="history-card-body">
-        <div className="history-analysis-grid">
-          <div className="history-analysis-metric">
-            <span>Rule-based</span>
-            <strong>{formatNumber(summary.ruleScore)}</strong>
+      <div className="history-card__body">
+        <div className="metrics-grid">
+          <div className="metric-card">
+            <span className="metric-card__label">Rule-based</span>
+            <strong className="metric-card__value">
+              {FORMATTERS.number(summary.ruleScore)}
+            </strong>
           </div>
-          <div className="history-analysis-metric">
-            <span>AI-based</span>
-            <strong>{formatNumber(summary.aiScore)}</strong>
+          <div className="metric-card">
+            <span className="metric-card__label">AI-based</span>
+            <strong className="metric-card__value">
+              {FORMATTERS.number(summary.aiScore)}
+            </strong>
           </div>
-          <div className="history-analysis-metric">
-            <span>Tổng điểm</span>
-            <strong>{formatNumber(summary.totalScore)}</strong>
+          <div className="metric-card">
+            <span className="metric-card__label">Tổng điểm</span>
+            <strong className="metric-card__value">
+              {FORMATTERS.number(summary.totalScore)}
+            </strong>
           </div>
-          <div className="history-analysis-metric">
-            <span>Nguy cơ</span>
-            <strong>{riskLabel(summary.riskLevel)}</strong>
+          <div className="metric-card">
+            <span className="metric-card__label">Nguy cơ</span>
+            <strong className="metric-card__value">
+              {FORMATTERS.risk(summary.riskLevel)}
+            </strong>
           </div>
         </div>
 
         {trend?.trend && (
-          <div className={`history-trend-box history-trend--${trend.trend}`}>
-            <div className="history-trend-header">
-              <span className="history-trend-label">
+          <div className={`trend-box trend-box--${trend.trend}`}>
+            <div className="trend-box__header">
+              <span className="trend-box__label">
                 {trend.trend === "increase"
                   ? "📈 Tăng"
                   : trend.trend === "decrease"
                     ? "📉 Giảm"
                     : "➡️ Ổn định"}
               </span>
-              <span className="history-trend-value">
-                {formatNumber(Math.abs(trend.change))} (
-                {formatNumber(Math.abs(trend.change_percent))}%)
+              <span className="trend-box__value">
+                {FORMATTERS.number(Math.abs(trend.change))} (
+                {FORMATTERS.number(Math.abs(trend.change_percent))}%)
               </span>
             </div>
             {trend.volatility > 0 && (
-              <div className="history-trend-volatility">
-                Biến động: {formatNumber(trend.volatility)}
+              <div className="trend-box__volatility">
+                Biến động: {FORMATTERS.number(trend.volatility)}
               </div>
             )}
             {trend.insight && (
-              <p className="history-trend-insight">{trend.insight}</p>
+              <p className="trend-box__insight">{trend.insight}</p>
             )}
           </div>
         )}
 
-        {summary.summary && <p className="history-note">{summary.summary}</p>}
+        {summary.summary && (
+          <p className="history-note">{summary.summary}</p>
+        )}
 
-        <div className="history-analysis-footer">
+        <div className="analysis-footer">
           {summary.recommendations.length > 0 && (
-            <div className="history-recommendations">
-              <h5>💡 Khuyến nghị ({summary.recommendations.length})</h5>
-              <div className="history-chip-list">
+            <div className="insights-box">
+              <h5 className="insights-box__title">
+                💡 Khuyến nghị ({summary.recommendations.length})
+              </h5>
+              <div className="tag-group">
                 {summary.recommendations.slice(0, 3).map((rec, idx) => (
-                  <span key={idx} className="history-chip history-chip--soft">
+                  <span key={idx} className="tag tag--recommendation">
                     {typeof rec === "object" ? rec.text || rec.id : rec}
                   </span>
                 ))}
                 {summary.recommendations.length > 3 && (
-                  <span className="history-chip history-chip--muted">
-                    +{summary.recommendations.length - 3} khác
+                  <span className="tag tag--muted">
+                    +{summary.recommendations.length - 3}
                   </span>
                 )}
               </div>
@@ -8444,22 +8183,21 @@ function AssessmentHistoryCard({ item }) {
           )}
 
           {summary.matchedRules.length > 0 && (
-            <div className="history-matched-rules">
-              <h5>✓ Quy tắc khớp ({summary.matchedRules.length})</h5>
-              <div className="history-chip-list">
+            <div className="insights-box">
+              <h5 className="insights-box__title">
+                ✓ Quy tắc ({summary.matchedRules.length})
+              </h5>
+              <div className="tag-group">
                 {summary.matchedRules.slice(0, 3).map((rule, idx) => (
-                  <span
-                    key={idx}
-                    className="history-chip history-chip--outline"
-                  >
+                  <span key={idx} className="tag tag--rule">
                     {typeof rule === "object"
                       ? rule.description || rule.id
                       : rule}
                   </span>
                 ))}
                 {summary.matchedRules.length > 3 && (
-                  <span className="history-chip history-chip--muted">
-                    +{summary.matchedRules.length - 3} khác
+                  <span className="tag tag--muted">
+                    +{summary.matchedRules.length - 3}
                   </span>
                 )}
               </div>
@@ -8468,19 +8206,20 @@ function AssessmentHistoryCard({ item }) {
         </div>
 
         <button
-          className="history-expand-btn"
+          className="expand-btn"
           onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
         >
           <i className={`fa-solid fa-chevron-${expanded ? "up" : "down"}`} />
           {expanded ? "Ẩn chi tiết" : "Xem chi tiết"}
         </button>
 
         {expanded && (
-          <div className="history-detail-panel">
+          <div className="detail-panel">
             {summary.recommendations.length > 0 && (
-              <div className="history-detail-section">
+              <div className="detail-section">
                 <h6>Tất cả khuyến nghị</h6>
-                <ul className="history-detail-list">
+                <ul className="detail-list">
                   {summary.recommendations.map((rec, idx) => (
                     <li key={idx}>
                       {typeof rec === "object" ? rec.text || rec.id : rec}
@@ -8490,9 +8229,9 @@ function AssessmentHistoryCard({ item }) {
               </div>
             )}
             {summary.matchedRules.length > 0 && (
-              <div className="history-detail-section">
+              <div className="detail-section">
                 <h6>Tất cả quy tắc khớp</h6>
-                <ul className="history-detail-list">
+                <ul className="detail-list">
                   {summary.matchedRules.map((rule, idx) => (
                     <li key={idx}>
                       {typeof rule === "object"
@@ -8510,41 +8249,39 @@ function AssessmentHistoryCard({ item }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// COMPONENT: Insights Panel
-// ═══════════════════════════════════════════════════════════════════════════
 function InsightsPanel({ insights }) {
-  if (!insights || insights.length === 0) {
-    return null;
-  }
+  if (!insights || insights.length === 0) return null;
 
   return (
-    <div className="history-insights-section">
-      <h3 className="history-insights-title">
-        <i className="fa-solid fa-lightbulb" /> Phân tích và cảnh báo thông minh
+    <div className="insights-panel">
+      <h3 className="insights-panel__title">
+        <i className="fa-solid fa-lightbulb" /> Phân tích chuyên sâu
       </h3>
-      <div className="history-insights-grid">
+      <div className="insights-grid">
         {insights.map((insight, idx) => {
           const iconMap = {
             repeated_disease: "fa-triangle-exclamation",
             symptom_group: "fa-chart-bar",
           };
-          const icon = iconMap[insight.loai_insight] || "fa-circle-info";
 
           return (
             <div
               key={idx}
-              className={`history-insight-card history-insight--${insight.loai_insight}`}
+              className={`insight-card insight-card--${insight.loai_insight}`}
             >
-              <div className="history-insight-header">
-                <i className={`fa-solid ${icon}`} />
+              <div className="insight-card__header">
+                <i
+                  className={`fa-solid ${
+                    iconMap[insight.loai_insight] || "fa-circle-info"
+                  }`}
+                />
                 <h4>{insight.tieu_de}</h4>
               </div>
-              <p className="history-insight-text">{insight.insight}</p>
+              <p className="insight-card__text">{insight.insight}</p>
               {insight.chi_tiet && (
-                <div className="history-insight-meta">
+                <div className="insight-card__meta">
                   {Object.entries(insight.chi_tiet).map(([key, value]) => (
-                    <span key={key} className="history-insight-detail">
+                    <span key={key} className="insight-card__detail">
                       <strong>{key}:</strong> {value}
                     </span>
                   ))}
@@ -8558,28 +8295,20 @@ function InsightsPanel({ insights }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// COMPONENT: Proactive Alerts
-// ═══════════════════════════════════════════════════════════════════════════
 function ProactiveAlertsSection({ alerts }) {
   if (!alerts || alerts.length === 0) {
     return (
-      <div className="history-empty">
+      <div className="empty-state">
         <i className="fa-regular fa-circle-check" />
         <h3>Không có cảnh báo</h3>
-        <p>
-          Tình trạng sức khỏe của bạn ổn định. Tiếp tục theo dõi thường xuyên.
-        </p>
+        <p>Tình trạng sức khỏe ổn định. Tiếp tục theo dõi thường xuyên.</p>
       </div>
     );
   }
 
   return (
-    <div className="history-alerts-section">
-      <h3 className="history-alerts-title">
-        <i className="fa-solid fa-bell" /> Cảnh báo chủ động
-      </h3>
-      <div className="history-alerts-list">
+    <div className="alerts-section">
+      <div className="alerts-list">
         {alerts.map((alert, idx) => {
           const isEmergency = alert.loaiCanhBao === "vuot_nguong";
           const isCritical = alert.loaiCanhBao === "tang_lien_tuc";
@@ -8587,40 +8316,44 @@ function ProactiveAlertsSection({ alerts }) {
           return (
             <div
               key={idx}
-              className={`history-alert-card ${isEmergency ? "history-alert-card--emergency" : isCritical ? "history-alert-card--critical" : "history-alert-card--warning"}`}
+              className={`alert-card alert-card--${
+                isEmergency ? "emergency" : isCritical ? "critical" : "warning"
+              }`}
             >
-              <div className="history-alert-header">
+              <div className="alert-card__header">
                 <div>
                   <h4>{alert.tieuDe}</h4>
-                  <p className="history-alert-disease">
-                    {diseaseLabel(alert.maBenh)}
+                  <p className="alert-card__disease">
+                    {FORMATTERS.disease(alert.maBenh)}
                   </p>
                 </div>
                 <span
-                  className={`history-alert-badge ${isEmergency ? "history-alert-badge--emergency" : isCritical ? "history-alert-badge--critical" : "history-alert-badge--warning"}`}
+                  className={`alert-badge alert-badge--${
+                    isEmergency
+                      ? "emergency"
+                      : isCritical
+                        ? "critical"
+                        : "warning"
+                  }`}
                 >
-                  {alert.loaiCanhBao === "tang_lien_tuc"
-                    ? "📈 Tăng liên tục"
-                    : "🚨 Vượt ngưỡng"}
+                  {isCritical ? "📈 Tăng liên tục" : "🚨 Vượt ngưỡng"}
                 </span>
               </div>
 
-              <p className="history-alert-content">{alert.noiDung}</p>
+              <p className="alert-card__content">{alert.noiDung}</p>
 
-              <div className="history-alert-advice">
-                <h5>💡 Lời khuyên:</h5>
+              <div className="alert-card__advice">
+                <h5>💡 Khuyến cáo:</h5>
                 <p>{alert.loiKhuyen}</p>
               </div>
 
               {alert.lichSuDiem && alert.lichSuDiem.length > 0 && (
-                <div className="history-alert-scores">
+                <div className="alert-card__scores">
                   <h5>📊 Lịch sử điểm số:</h5>
-                  <div className="history-score-timeline">
+                  <div className="score-timeline">
                     {alert.lichSuDiem.map((score, scoreIdx) => (
-                      <div key={scoreIdx} className="history-score-point">
-                        <span className="history-score-value">
-                          {formatNumber(score)}
-                        </span>
+                      <div key={scoreIdx} className="score-point">
+                        <span>{FORMATTERS.number(score)}</span>
                       </div>
                     ))}
                   </div>
@@ -8634,40 +8367,31 @@ function ProactiveAlertsSection({ alerts }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// COMPONENT: History Section Header
-// ═══════════════════════════════════════════════════════════════════════════
-function HistorySectionHeader({ title, description, count }) {
+function SectionHeader({ title, description, count }) {
   return (
-    <div className="history-section-header">
+    <div className="section-header">
       <div>
         <h3>{title}</h3>
         <p>{description}</p>
       </div>
-      <span className="history-count-badge">{count}</span>
+      <span className="count-badge">{count}</span>
     </div>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// MAIN COMPONENT: Lich Su Tra Cuu
-// ═══════════════════════════════════════════════════════════════════════════
 export default function LichSuTraCuu() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("tra-benh");
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState("");
 
-  // Symptom History State
   const [symptomHistory, setSymptomHistory] = useState([]);
   const [symptomError, setSymptomError] = useState("");
   const [insights, setInsights] = useState([]);
 
-  // Assessment History State
   const [assessmentHistory, setAssessmentHistory] = useState([]);
   const [assessmentError, setAssessmentError] = useState("");
 
-  // Alerts State
   const [proactiveAlerts, setProactiveAlerts] = useState([]);
   const [alertsError, setAlertsError] = useState("");
 
@@ -8693,7 +8417,7 @@ export default function LichSuTraCuu() {
       const requests = [
         axios
           .get(
-            `${API_BASE_URL}/symptom-checker/history/${encodedUser}?limit=20`,
+            `${API_BASE_URL}/symptom-checker/history/${encodedUser}?limit=20`
           )
           .catch((err) => ({ error: err })),
         axios
@@ -8708,13 +8432,12 @@ export default function LichSuTraCuu() {
 
       if (!active) return;
 
-      // Process Symptom History
       if (results[0].status === "fulfilled") {
         const data = results[0].value;
         if (data?.error) {
           setSymptomError(
             data.error?.response?.data?.detail ||
-              "Không thể tải lịch sử tra bệnh.",
+              "Không thể tải lịch sử tra bệnh."
           );
         } else {
           const historyList = Array.isArray(data?.data?.history)
@@ -8732,17 +8455,16 @@ export default function LichSuTraCuu() {
       } else {
         setSymptomError(
           results[0].reason?.response?.data?.detail ||
-            "Không thể tải lịch sử tra bệnh.",
+            "Không thể tải lịch sử tra bệnh."
         );
       }
 
-      // Process Assessment History
       if (results[1].status === "fulfilled") {
         const data = results[1].value;
         if (data?.error) {
           setAssessmentError(
             data.error?.response?.data?.detail ||
-              "Không thể tải lịch sử phân tích.",
+              "Không thể tải lịch sử phân tích."
           );
         } else {
           const historyList = Array.isArray(data?.data) ? data.data : [];
@@ -8751,16 +8473,15 @@ export default function LichSuTraCuu() {
       } else {
         setAssessmentError(
           results[1].reason?.response?.data?.detail ||
-            "Không thể tải lịch sử phân tích.",
+            "Không thể tải lịch sử phân tích."
         );
       }
 
-      // Process Proactive Alerts
       if (results[2].status === "fulfilled") {
         const data = results[2].value;
         if (data?.error) {
           setAlertsError(
-            data.error?.response?.data?.detail || "Không thể tải cảnh báo.",
+            data.error?.response?.data?.detail || "Không thể tải cảnh báo."
           );
         } else {
           const alertsList = Array.isArray(data?.data) ? data.data : [];
@@ -8769,7 +8490,7 @@ export default function LichSuTraCuu() {
       } else {
         setAlertsError(
           results[2].reason?.response?.data?.detail ||
-            "Không thể tải cảnh báo.",
+            "Không thể tải cảnh báo."
         );
       }
 
@@ -8787,117 +8508,101 @@ export default function LichSuTraCuu() {
     };
   }, []);
 
-  const symptomCount = symptomHistory.length;
-  const assessmentCount = assessmentHistory.length;
-  const alertsCount = proactiveAlerts.length;
-
   return (
-    <div className="history-page">
-      <section className="history-hero">
-        <div className="history-hero-copy">
-          <div className="history-kicker">
-            <i className="fa-solid fa-clock-rotate-left" aria-hidden="true" />
-            Lưu vết tra cứu cá nhân
+    <div className="page-history">
+      <header className="page-hero">
+        <div className="page-hero__content">
+          <div className="page-hero__kicker">
+            <i className="fa-solid fa-clock-rotate-left" />
+            Hồ sơ sức khỏe cá nhân
           </div>
-          <h1>Lịch Sử Tra Cứu & Phân Tích</h1>
-          <p>
+          <h1 className="page-hero__title">Lịch Sử Tra Cứu & Phân Tích</h1>
+          <p className="page-hero__subtitle">
             Theo dõi lại các lần tra bệnh từ triệu chứng, phân tích chuyên sâu,
             và nhận cảnh báo chủ động dựa trên lịch sử sức khỏe của bạn.
           </p>
         </div>
 
-        <div className="history-hero-stats">
-          <div className="history-stat-card">
+        <div className="page-hero__stats">
+          <div className="stat-card">
             <span>Tra bệnh</span>
-            <strong>{symptomCount}</strong>
+            <strong>{symptomHistory.length}</strong>
           </div>
-          <div className="history-stat-card">
-            <span>Phân tích chuyên sâu</span>
-            <strong>{assessmentCount}</strong>
+          <div className="stat-card">
+            <span>Phân tích</span>
+            <strong>{assessmentHistory.length}</strong>
           </div>
-          <div className="history-stat-card history-stat-card--accent">
+          <div className="stat-card stat-card--accent">
             <span>Cảnh báo</span>
-            <strong>{alertsCount}</strong>
+            <strong>{proactiveAlerts.length}</strong>
           </div>
         </div>
-      </section>
+      </header>
 
-      <section className="history-shell">
-        {/* Tabs */}
-        <div
-          className="history-tabs"
-          role="tablist"
-          aria-label="Lịch sử tra cứu"
-        >
+      <div className="page-content">
+        <nav className="tab-nav" role="tablist" aria-label="Lịch sử tra cứu">
           {HISTORY_TABS.map((tab) => (
             <button
               key={tab.key}
-              type="button"
-              className={`history-tab${activeTab === tab.key ? " history-tab--active" : ""}`}
+              className={`tab-nav__item ${
+                activeTab === tab.key ? "tab-nav__item--active" : ""
+              }`}
               onClick={() => setActiveTab(tab.key)}
               role="tab"
               aria-selected={activeTab === tab.key}
             >
-              <i className={tab.iconClass} aria-hidden="true" />
+              <i className={`fa-solid fa-${tab.icon}`} />
               <span>{tab.label}</span>
             </button>
           ))}
-        </div>
+        </nav>
 
-        {/* Loading State */}
         {loading && (
-          <div className="history-loading">
-            <div className="history-loading-card" />
-            <div className="history-loading-card" />
-            <div className="history-loading-card" />
+          <div className="loading-skeleton">
+            <div className="skeleton-card" />
+            <div className="skeleton-card" />
+            <div className="skeleton-card" />
           </div>
         )}
 
-        {/* Page Error */}
         {!loading && pageError && (
-          <div className="history-alert history-alert--error">
-            <i
-              className="fa-solid fa-triangle-exclamation"
-              aria-hidden="true"
-            />
+          <div className="error-banner">
+            <i className="fa-solid fa-triangle-exclamation" />
             <span>{pageError}</span>
           </div>
         )}
 
-        {/* TAB: Lịch sử tra bệnh */}
         {!loading && !pageError && activeTab === "tra-benh" && (
-          <div className="history-panel" role="tabpanel">
-            <HistorySectionHeader
+          <div className="tab-panel" role="tabpanel">
+            <SectionHeader
               title="Lịch sử tra bệnh"
-              description="Các lần tra cứu bệnh cơ bản từ triệu chứng đã nhập với gợi ý bệnh từ AI."
+              description="Các lần tra cứu bệnh từ triệu chứng với gợi ý từ AI"
               count={symptomHistory.length}
             />
 
-            {/* Insights Section */}
             {!symptomError &&
               symptomHistory.length > 0 &&
               insights.length > 0 && <InsightsPanel insights={insights} />}
 
-            {/* Symptom Error */}
             {symptomError ? (
-              <div className="history-alert history-alert--error">
-                <i
-                  className="fa-solid fa-triangle-exclamation"
-                  aria-hidden="true"
-                />
+              <div className="error-banner">
+                <i className="fa-solid fa-triangle-exclamation" />
                 <span>{symptomError}</span>
               </div>
             ) : symptomHistory.length === 0 ? (
-              <div className="history-empty">
-                <i className="fa-regular fa-folder-open" aria-hidden="true" />
+              <div className="empty-state">
+                <i className="fa-regular fa-folder-open" />
                 <h3>Chưa có lịch sử tra bệnh</h3>
-                <p>Hãy mở chức năng Tra Bệnh để tạo các kết quả đầu tiên.</p>
-                <button onClick={() => navigate("/tra-benh")}>
+                <p>Hãy mở chức năng Tra Bệnh để tạo kết quả đầu tiên.</p>
+                <button
+                  onClick={() => navigate("/tra-benh")}
+                  className="btn btn--primary"
+                >
                   Đi tới Tra Bệnh
                 </button>
               </div>
             ) : (
-              <div className="history-list">
+              <div className="card-list">
                 {symptomHistory.map((item) => (
                   <SymptomHistoryCard key={item.idTraCuu} item={item} />
                 ))}
@@ -8906,36 +8611,33 @@ export default function LichSuTraCuu() {
           </div>
         )}
 
-        {/* TAB: Lịch sử phân tích chuyên sâu */}
         {!loading && !pageError && activeTab === "phan-tich" && (
-          <div className="history-panel" role="tabpanel">
-            <HistorySectionHeader
+          <div className="tab-panel" role="tabpanel">
+            <SectionHeader
               title="Lịch sử phân tích chuyên sâu"
-              description="Các lần chấm điểm nguy cơ từ plugin phân tích, mô hình AI, và phân tích xu hướng."
+              description="Chấm điểm nguy cơ từ plugin phân tích, mô hình AI, và phân tích xu hướng"
               count={assessmentHistory.length}
             />
 
             {assessmentError ? (
-              <div className="history-alert history-alert--error">
-                <i
-                  className="fa-solid fa-triangle-exclamation"
-                  aria-hidden="true"
-                />
+              <div className="error-banner">
+                <i className="fa-solid fa-triangle-exclamation" />
                 <span>{assessmentError}</span>
               </div>
             ) : assessmentHistory.length === 0 ? (
-              <div className="history-empty">
-                <i className="fa-regular fa-folder-open" aria-hidden="true" />
+              <div className="empty-state">
+                <i className="fa-regular fa-folder-open" />
                 <h3>Chưa có lịch sử phân tích</h3>
-                <p>
-                  Hãy chạy chức năng Phân Tích Bệnh để lưu lại kết quả đầu tiên.
-                </p>
-                <button onClick={() => navigate("/phan-tich-benh")}>
+                <p>Hãy chạy chức năng Phân Tích Bệnh để lưu kết quả đầu tiên.</p>
+                <button
+                  onClick={() => navigate("/phan-tich-benh")}
+                  className="btn btn--primary"
+                >
                   Đi tới Phân Tích Bệnh
                 </button>
               </div>
             ) : (
-              <div className="history-list">
+              <div className="card-list">
                 {assessmentHistory.map((item) => (
                   <AssessmentHistoryCard key={item.idDanhGia} item={item} />
                 ))}
@@ -8944,21 +8646,17 @@ export default function LichSuTraCuu() {
           </div>
         )}
 
-        {/* TAB: Cảnh báo chủ động */}
         {!loading && !pageError && activeTab === "canh-bao" && (
-          <div className="history-panel" role="tabpanel">
-            <HistorySectionHeader
+          <div className="tab-panel" role="tabpanel">
+            <SectionHeader
               title="Cảnh báo chủ động"
-              description="Hệ thống tự động phát hiện các xu hướng nguy hiểm dựa trên lịch sử đánh giá của bạn."
+              description="Phát hiện tự động các xu hướng nguy hiểm từ lịch sử đánh giá"
               count={proactiveAlerts.length}
             />
 
             {alertsError ? (
-              <div className="history-alert history-alert--error">
-                <i
-                  className="fa-solid fa-triangle-exclamation"
-                  aria-hidden="true"
-                />
+              <div className="error-banner">
+                <i className="fa-solid fa-triangle-exclamation" />
                 <span>{alertsError}</span>
               </div>
             ) : (
@@ -8966,11 +8664,10 @@ export default function LichSuTraCuu() {
             )}
           </div>
         )}
-      </section>
+      </div>
     </div>
   );
 }
-
 ```
 
 ### frontend\web\src\main.jsx
@@ -9678,6 +9375,191 @@ export default function MainRiskPage() {
     </div>
   );
 }
+```
+
+### frontend\web\src\so-y-te.jsx
+```jsx
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import './css/so-y-te.css';
+
+const API_BASE_URL = "http://127.0.0.1:8000";
+
+const SoYTe = () => {
+    const [articles, setArticles] = useState([]);
+    const [selectedArticle, setSelectedArticle] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState("");
+
+    // 1. Tải danh sách bài viết từ API khi vừa vào trang
+    useEffect(() => {
+        const fetchArticles = async () => {
+            try {
+                setLoading(true);
+                const res = await axios.get(`${API_BASE_URL}/knowledge/`);
+                
+                if (res.data && res.data.articles && res.data.articles.length > 0) {
+                    setArticles(res.data.articles);
+                    // Lấy bài viết đầu tiên hiển thị mặc định
+                    fetchArticleDetail(res.data.articles[0].id);
+                } else {
+                    setError("Chưa có dữ liệu sổ y tế trên hệ thống.");
+                    setLoading(false);
+                }
+            } catch (err) {
+                console.error(err);
+                setError("Lỗi kết nối đến máy chủ khi tải danh sách sổ y tế.");
+                setLoading(false);
+            }
+        };
+
+        fetchArticles();
+    }, []);
+
+    // 2. Hàm gọi API lấy chi tiết 1 bài viết
+    const fetchArticleDetail = async (id) => {
+        try {
+            setLoading(true);
+            const res = await axios.get(`${API_BASE_URL}/knowledge/${id}`);
+            setSelectedArticle(res.data);
+        } catch (err) {
+            console.error(err);
+            setError("Lỗi khi tải chi tiết bài viết.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (error) {
+        return (
+            <div className="syt-container" style={{ padding: '40px', textAlign: 'center', color: 'red' }}>
+                <i className="fa-solid fa-triangle-exclamation"></i> {error}
+            </div>
+        );
+    }
+
+    return (
+        <div className="syt-container" style={{ display: 'flex', gap: '20px', minHeight: '80vh' }}>
+            {/* CỘT TRÁI: Danh sách các bài viết */}
+            <aside className="syt-sidebar" style={{ width: '300px', borderRight: '1px solid #ddd', paddingRight: '20px' }}>
+                <h2 className="syt-sidebar-title" style={{ fontSize: '18px', marginBottom: '20px', color: '#334155' }}>
+                    <i className="fa-solid fa-book-medical"></i> Danh mục kiến thức
+                </h2>
+                <ul className="syt-article-list" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                    {articles.map((item) => (
+                        <li 
+                            key={item.id} 
+                            style={{ 
+                                padding: '12px', 
+                                marginBottom: '8px', 
+                                cursor: 'pointer', 
+                                borderRadius: '8px',
+                                backgroundColor: selectedArticle?.id === item.id ? '#EFF6FF' : '#F8FAFC',
+                                border: selectedArticle?.id === item.id ? '1px solid #3B82F6' : '1px solid transparent'
+                            }}
+                            onClick={() => fetchArticleDetail(item.id)}
+                        >
+                            <div style={{ fontWeight: 'bold', color: '#1E293B' }}>{item.name}</div>
+                            <div style={{ fontSize: '12px', color: '#64748B', marginTop: '4px' }}>{item.category}</div>
+                        </li>
+                    ))}
+                </ul>
+            </aside>
+
+            {/* CỘT PHẢI: Nội dung chi tiết bài viết */}
+            <main className="syt-content" style={{ flex: 1, padding: '20px', backgroundColor: '#fff', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                {loading ? (
+                    <div className="syt-loading" style={{ textAlign: 'center', padding: '40px', color: '#64748B' }}>
+                        <i className="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu...
+                    </div>
+                ) : selectedArticle ? (
+                    <div className="syt-article-detail">
+                        {/* Tiêu đề & Tóm tắt */}
+                        <header className="syt-header" style={{ borderBottom: '2px solid #F1F5F9', paddingBottom: '20px', marginBottom: '20px' }}>
+                            <span className="syt-category" style={{ backgroundColor: '#DBEAFE', color: '#1D4ED8', padding: '4px 10px', borderRadius: '4px', fontSize: '13px', fontWeight: 'bold' }}>
+                                {selectedArticle.category}
+                            </span>
+                            <h1 className="syt-title" style={{ fontSize: '28px', color: '#0F172A', marginTop: '12px' }}>
+                                {selectedArticle.name}
+                            </h1>
+                            <p className="syt-summary" style={{ fontSize: '16px', color: '#475569', fontStyle: 'italic', marginTop: '10px' }}>
+                                {selectedArticle.summary}
+                            </p>
+                        </header>
+                        
+                        <div className="syt-body" style={{ lineHeight: '1.7', color: '#334155' }}>
+                            {/* Mô tả chi tiết */}
+                            <h3 style={{ color: '#0F172A', marginTop: '24px' }}>
+                                <i className="fa-solid fa-circle-info" style={{ color: '#3B82F6' }}></i> Mô tả chi tiết
+                            </h3>
+                            <p>{selectedArticle.description}</p>
+
+                            {/* Công thức tính toán (Nếu có) */}
+                            {selectedArticle.formula && (
+                                <div style={{ backgroundColor: '#F8FAFC', padding: '15px', borderRadius: '8px', marginTop: '15px', borderLeft: '4px solid #3B82F6' }}>
+                                    <strong><i className="fa-solid fa-calculator"></i> Công thức: </strong>
+                                    <code>{selectedArticle.formula}</code>
+                                </div>
+                            )}
+
+                            {/* Ngưỡng chỉ số bình thường (Nếu có) */}
+                            {selectedArticle.normal_ranges && selectedArticle.normal_ranges.length > 0 && (
+                                <>
+                                    <h3 style={{ color: '#0F172A', marginTop: '30px' }}>
+                                        <i className="fa-solid fa-chart-line" style={{ color: '#F59E0B' }}></i> Ngưỡng chỉ số bình thường
+                                    </h3>
+                                    <ul style={{ paddingLeft: '20px' }}>
+                                        {selectedArticle.normal_ranges.map((range, idx) => (
+                                            <li key={idx} style={{ marginBottom: '8px' }}>
+                                                <strong>{range.label}:</strong> {range.min !== null ? range.min : '...'} - {range.max !== null ? range.max : '...'}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </>
+                            )}
+                            
+                            {/* Khuyến nghị / Lời khuyên */}
+                            {selectedArticle.recommendations && selectedArticle.recommendations.length > 0 && (
+                                <>
+                                    <h3 style={{ color: '#0F172A', marginTop: '30px' }}>
+                                        <i className="fa-solid fa-star-of-life" style={{ color: '#10B981' }}></i> Lời khuyên & Khuyến nghị
+                                    </h3>
+                                    <ul style={{ paddingLeft: '20px' }}>
+                                        {selectedArticle.recommendations.map((rec, idx) => (
+                                            <li key={idx} style={{ marginBottom: '8px' }}>{rec}</li>
+                                        ))}
+                                    </ul>
+                                </>
+                            )}
+
+                            {/* Các bệnh lý liên quan */}
+                            {selectedArticle.related_diseases && selectedArticle.related_diseases.length > 0 && (
+                                <>
+                                    <h3 style={{ color: '#0F172A', marginTop: '30px' }}>
+                                        <i className="fa-solid fa-link" style={{ color: '#6366F1' }}></i> Bệnh lý liên quan
+                                    </h3>
+                                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                                        {selectedArticle.related_diseases.map((disease, idx) => (
+                                            <span key={idx} style={{ backgroundColor: '#F1F5F9', padding: '6px 12px', borderRadius: '20px', fontSize: '14px' }}>
+                                                {disease}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                ) : (
+                    <div className="syt-empty" style={{ textAlign: 'center', color: '#94A3B8', marginTop: '40px' }}>
+                        Chọn một chuyên mục bên trái để xem nội dung
+                    </div>
+                )}
+            </main>
+        </div>
+    );
+};
+
+export default SoYTe;
 ```
 
 ### frontend\web\src\thongtin-nd.jsx
@@ -11506,7 +11388,7 @@ export default function TrangChu({ setCurrentView, onGoToLogin }) {
         <section className="diseases-section">
           <div className="container">
             <div className="section-header text-center" style={{ marginBottom: "36px" }}>
-              <div className="section-badge section-badge--eyebrow">5 BỆNH ĐƯỢC HỖ TRỢ</div>
+              
               <h2 className="section-title">Sàng lọc toàn diện các bệnh mạn tính</h2>
               <p className="section-desc">
                 Mỗi bệnh lý vận hành như một plugin độc lập, tự động phân luồng xử lý qua Rule Engine hoặc Machine Learning để đảm bảo độ chính xác cao nhất.
@@ -11593,7 +11475,6 @@ export default function TrangChu({ setCurrentView, onGoToLogin }) {
         <section className="process-section">
           <div className="container">
             <div className="section-header text-center" style={{ marginBottom: "48px" }}>
-              <div className="section-badge section-badge--eyebrow">QUY TRÌNH HỆ THỐNG</div>
               <h2 className="section-title">Từ hồ sơ đến kết quả phân tích</h2>
               <p className="section-desc">
                 Hệ thống xử lý luồng dữ liệu y tế qua 6 bước khép kín, đảm bảo tính chuẩn xác, minh bạch và cá nhân hóa cho từng người dùng.
@@ -11698,7 +11579,6 @@ export default function TrangChu({ setCurrentView, onGoToLogin }) {
         <section className="features" id="features">
           <div className="container">
             <div className="section-header">
-              <div className="section-badge">Tính Năng</div>
               <h2 className="section-title">Thiết kế cho độ mở rộng và tin cậy</h2>
               <p className="section-desc">
                 Kiến trúc Plugin-Based với Metadata-Driven Design —
@@ -11948,7 +11828,7 @@ export default function Header({ currentView, setCurrentView, userName, userProf
     { key: "tu-van-ai", label: "Tư Vấn AI" },
     { key: "tra-thuoc", label: "Tra Thuốc" },
     { key: "thuc-don", label: "Thực Đơn" },
-    { key: "y-te", label: "Y Tế" },
+    { key: "so-y-te", label: "Sổ Y Tế" },
   ];
 
   const menuItems = [

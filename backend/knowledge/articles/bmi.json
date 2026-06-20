@@ -1,0 +1,55 @@
+{
+  "id": "bmi",
+  "name": "Chỉ số BMI",
+  "category": "body_measurement",
+
+  "summary": "BMI là chỉ số đánh giá tình trạng cân nặng dựa trên chiều cao và cân nặng của một người.",
+
+  "description": "BMI (Body Mass Index) là chỉ số khối cơ thể được sử dụng rộng rãi để đánh giá tình trạng gầy, bình thường, thừa cân hoặc béo phì.",
+
+  "formula": "BMI = CanNang(kg) / (ChieuCao(m) × ChieuCao(m))",
+
+  "images": [
+    "/static/knowledge/bmi/cover.png",
+    "/static/knowledge/bmi/classification.png"
+  ],
+
+  "normal_ranges": [
+    {
+      "label": "Thiếu cân",
+      "min": 0,
+      "max": 18.5
+    },
+    {
+      "label": "Bình thường",
+      "min": 18.5,
+      "max": 24.9
+    },
+    {
+      "label": "Thừa cân",
+      "min": 25,
+      "max": 29.9
+    },
+    {
+      "label": "Béo phì",
+      "min": 30,
+      "max": 100
+    }
+  ],
+
+  "importance": "BMI cao làm tăng nguy cơ mắc bệnh tim mạch, tăng huyết áp và đái tháo đường.",
+
+  "recommendations": [
+    "Duy trì chế độ ăn cân đối.",
+    "Tăng cường hoạt động thể chất.",
+    "Theo dõi cân nặng định kỳ."
+  ],
+
+  "related_diseases": [
+    "Tiểu Đường",
+    "Tăng huyết áp",
+    "Bệnh tim mạch"
+  ],
+
+  "source": "WHO"
+}
