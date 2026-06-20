@@ -1,6 +1,6 @@
 // frontend/src/App.jsx
 import { useState } from "react";
-import { BrowserRouter as Router, useNavigate, useLocation } from "react-router-dom"; // <-- IMPORT REACT ROUTER
+import { BrowserRouter as Router, useNavigate, useLocation } from "react-router-dom";
 import PhanTichBenh from "./phan-tich-benh"; 
 import DangNhap from "./dang-nhap";
 import DangKy from "./dang-ky";
@@ -12,9 +12,14 @@ import TraBenh from "./tra-benh";
 import LichSuTraCuu from "./lich-su-tra-cuu";
 import SoYTe from './so-y-te';
 import ThongTinND from "./thongtin-nd.jsx";
+import BSTongQuan from "./bs-tongquan.jsx";
+import BSChiSoYKhoa from "./bs-ql-csyk.jsx";
+
 
 import Header from "./components/header.jsx";
 import Footer from "./components/footer.jsx";
+import BSNav from "./components/bs-nav.jsx";
+
 
 function getStoredUserProfile() {
   try {
@@ -25,7 +30,7 @@ function getStoredUserProfile() {
   }
 
   const tenDangNhap = localStorage.getItem("userName");
-  return tenDangNhap ? { tenDangNhap, hoTen: "", anhDaiDien: "" } : null;
+  return tenDangNhap ? { tenDangNhap, hoTen: "", anhDaiDien: "", isDoctor: false } : null;
 }
 
 function getUserDisplayName(userProfile) {
@@ -58,11 +63,10 @@ function AppContent() {
   const [authMode, setAuthMode] = useState("login");
   const displayName = getUserDisplayName(userProfile);
 
-  // ĐỒNG BỘ STATE VỚI URL: Lấy currentView từ URL hiện tại để khi reload không bị mất dấu
+  // ĐỒNG BỘ STATE VỚI URL
   const currentView = location.pathname === "/" ? "trang-chu" : location.pathname.substring(1);
 
-  // MOCK FUNCTION: Bọc useNavigate lại bằng tên setCurrentView để tương thích ngược 
-  // 100% với các component Header, Footer, TrangChu cũ mà không cần sửa code của chúng.
+  // MOCK FUNCTION
   const setCurrentView = (view) => {
     if (view === "trang-chu") {
       navigate("/");
@@ -76,13 +80,21 @@ function AppContent() {
       tenDangNhap: profile?.tenDangNhap || profile,
       hoTen: profile?.hoTen || "",
       anhDaiDien: profile?.anhDaiDien || "",
+      isDoctor: profile?.isDoctor || false, // Lưu thêm trạng thái bác sĩ
     };
 
     setIsAuthenticated(true);
     setUserProfile(nextProfile);
     localStorage.setItem("userName", nextProfile.tenDangNhap);
     localStorage.setItem("currentUser", JSON.stringify(nextProfile));
-    setCurrentView("trang-chu");
+    
+    // --- CẬP NHẬT ĐIỀU HƯỚNG ---
+    // Kiểm tra nếu là bác sĩ thì chuyển sang trang quản lý, ngược lại về trang chủ
+    if (nextProfile.isDoctor) {
+      setCurrentView("bs-quan-ly-chung");
+    } else {
+      setCurrentView("trang-chu");
+    }
   };
 
   const handleProfileUpdate = (profile) => {
@@ -101,6 +113,7 @@ function AppContent() {
     localStorage.removeItem("token");
     localStorage.removeItem("userName");
     localStorage.removeItem("currentUser");
+    localStorage.removeItem("is_doctor"); // Xóa cờ bác sĩ nếu có
     setIsAuthenticated(false);
     setUserProfile(null);
     setAuthMode("login");
@@ -110,7 +123,6 @@ function AppContent() {
   // Hàm quản lý render các màn hình theo currentView từ URL
   const renderContent = () => {
     switch (currentView) {
-      // 1. Các component đã có sẵn
       case "phan-tich-benh":
       case "risk": 
         return <PhanTichBenh />;
@@ -137,6 +149,13 @@ function AppContent() {
         return <LichSuTraCuu />;
       case "so-y-te":
         return <SoYTe />;
+        
+      // --- THÊM ROUTE CHO TRANG BÁC SĨ ---
+      case "bs-quan-ly-chung":
+        return <BSTongQuan />;
+      case "bs-ql-csyk":
+        return <BSChiSoYKhoa />;
+
       // 2. Các đường dẫn từ Header đang chờ phát triển (Placeholder)
       case "tu-van-ai":
       case "thuc-don":
@@ -174,55 +193,19 @@ function AppContent() {
   };
 
   if (!isAuthenticated) {
-    // Khối hiển thị giao diện Khách xem trước
     if (authMode === "welcome") {
       return (
-        <div style={{ 
-          display: "flex", 
-          flexDirection: "column", 
-          minHeight: "100vh", 
-          width: "100vw", 
-          backgroundColor: "#F8FAFC", 
-          margin: 0, 
-          padding: 0 
-        }}>
-          <style>{`
-            body, html, #root {
-              margin: 0 !important;
-              padding: 0 !important;
-              width: 100% !important;
-              max-width: 100% !important;
-              overflow-x: hidden;
-              background-color: #F8FAFC;
-            }
-            * { box-sizing: border-box; }
-          `}</style>
-          
-          <Header 
-            currentView={currentView}
-            setCurrentView={() => setAuthMode("login")}
-            userName="Khách"
-            onLogout={() => setAuthMode("login")}
-          />
-          
-          <main style={{ 
-            flex: 1, 
-            display: "flex", 
-            flexDirection: "column",
-            padding: "0",
-            overflowY: "auto",
-            width: "100%",
-            margin: "0 auto"
-          }}>
+        <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", width: "100vw", backgroundColor: "#F8FAFC", margin: 0, padding: 0 }}>
+          {/* Style giữ nguyên như của bạn ... */}
+          <Header currentView={currentView} setCurrentView={() => setAuthMode("login")} userName="Khách" onLogout={() => setAuthMode("login")} />
+          <main style={{ flex: 1, display: "flex", flexDirection: "column", padding: "0", overflowY: "auto", width: "100%", margin: "0 auto" }}>
             <TrangChu onGoToLogin={() => setAuthMode("login")} />
           </main>
-
           <Footer setCurrentView={() => setAuthMode("login")} />
         </div>
       );
     }
 
-    // Mặc định render khối này trước khi chưa đăng nhập
     return (
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "100vh", backgroundColor: "#F8FAFC" }}>
         {authMode === "login" ? (
@@ -234,41 +217,16 @@ function AppContent() {
     );
   }
 
-  // Giao diện chính sau khi đã xác thực tài khoản thành công
   return (
-    <div style={{ 
-      display: "flex", 
-      flexDirection: "column", 
-      minHeight: "100vh", 
-      width: "100vw", 
-      backgroundColor: "#F8FAFC", 
-      fontFamily: "Segoe UI, sans-serif", 
-      margin: 0, 
-      padding: 0, 
-      boxSizing: "border-box" 
-    }}>
-      <style>{`
-        body, html, #root {
-          margin: 0 !important;
-          padding: 0 !important;
-          width: 100% !important;
-          max-width: 100% !important;
-          overflow-x: hidden;
-          background-color: #F8FAFC;
-        }
-        * { box-sizing: border-box; }
-      `}</style>
-
-      {/* Header hệ thống */}
+    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", width: "100vw", backgroundColor: "#F8FAFC", fontFamily: "Segoe UI, sans-serif", margin: 0, padding: 0, boxSizing: "border-box" }}>
+      {/* ... style giữ nguyên ... */}
       <Header 
         currentView={currentView}
-        setCurrentView={setCurrentView} // Truyền mock function xuống Header
+        setCurrentView={setCurrentView}
         userName={displayName}
         userProfile={userProfile}
         onLogout={handleLogout}
       />
-
-      {/* Nội dung tương ứng với các phân hệ điều hướng */}
       <main style={{ 
         flex: 1, 
         display: "flex", 
@@ -281,14 +239,11 @@ function AppContent() {
       }}>
         {renderContent()}
       </main>
-
       <Footer setCurrentView={setCurrentView} />
-
     </div>
   );
 }
 
-// Bọc Component bằng Router ở cấp cao nhất
 export default function App() {
   return (
     <Router>

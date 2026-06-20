@@ -1,0 +1,213 @@
+/* frontend/src/css/bs-tongquan.css */
+
+.tq-layout {
+  display: flex;
+  min-height: 100vh;
+  background-color: #F8FAFC;
+}
+
+.tq-main-content {
+  flex: 1;
+  padding: 32px;
+  overflow-y: auto;
+}
+
+.tq-dashboard {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* Header */
+.tq-header h1 {
+  font-size: 24px;
+  color: #1E293B;
+  margin: 0 0 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tq-header h1 i {
+  color: #0EA5E9;
+}
+
+.tq-header p {
+  color: #64748B;
+  font-size: 15px;
+  margin: 0;
+}
+
+.tq-divider {
+  border: 0;
+  height: 1px;
+  background-color: #E2E8F0;
+  margin: 24px 0;
+}
+
+/* Shortcuts Section */
+.tq-section-title {
+  font-size: 16px;
+  color: #334155;
+  margin: 0 0 16px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tq-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.tq-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tq-btn-primary {
+  background-color: #0EA5E9;
+  color: #fff;
+}
+
+.tq-btn-primary:hover {
+  background-color: #0284C7;
+}
+
+.tq-btn-secondary {
+  background-color: #fff;
+  color: #0EA5E9;
+  border-color: #bae6fd;
+}
+
+.tq-btn-secondary:hover {
+  background-color: #F0F9FF;
+}
+
+/* Grid Layout cho các khối thông tin */
+.tq-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: 24px;
+}
+
+/* Cards */
+.tq-card {
+  background-color: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.tq-card-title {
+  font-size: 16px;
+  color: #1E293B;
+  margin: 0 0 16px 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #F1F5F9;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tq-card-title i {
+  color: #64748B;
+}
+
+.tq-card-title.warning i {
+  color: #EF4444;
+}
+
+/* Lists in Cards */
+.tq-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tq-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  padding: 10px 12px;
+  background-color: #F8FAFC;
+  border-radius: 8px;
+  color: #475569;
+}
+
+.tq-list li strong {
+  color: #0F172A;
+  font-size: 15px;
+}
+
+/* Trạng thái */
+.tq-status {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  background-color: #E2E8F0;
+  color: #475569;
+}
+
+/* Text phụ */
+.tq-empty-text {
+  color: #94A3B8;
+  font-size: 14px;
+  font-style: italic;
+}
+
+.tq-alert-subtitle {
+  font-size: 13px;
+  color: #64748B;
+  margin-bottom: 12px;
+}
+
+.tq-success-text {
+  color: #16A34A;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Cảnh báo */
+.tq-alert-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tq-alert-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  background-color: #FEF2F2;
+  border-left: 4px solid #EF4444;
+  border-radius: 6px;
+  color: #991B1B;
+  font-size: 14px;
+}
+
+.tq-alert-list li i {
+  color: #EF4444;
+  margin-top: 2px;
+}

@@ -1,0 +1,47 @@
+{
+  "id": "creatinine",
+  "name": "Creatinine Huyết Thanh",
+  "category": "kidney_function",
+
+  "summary": "Creatinine là sản phẩm thải từ quá trình chuyển hóa cơ bắp và được thận lọc khỏi máu.",
+
+  "description": "Creatinine huyết thanh là một trong những chỉ số quan trọng để đánh giá chức năng thận. Khi thận hoạt động kém, nồng độ creatinine trong máu có xu hướng tăng lên do khả năng lọc và đào thải chất thải bị suy giảm.",
+
+  "formula": "Đo trực tiếp nồng độ Creatinine trong máu (mg/dL hoặc µmol/L).",
+
+  "images": [
+    "/static/knowledge/creatinine/cover.png",
+    "/static/knowledge/creatinine/kidney-function.png"
+  ],
+
+  "normal_ranges": [
+    {
+      "label": "Nam giới bình thường",
+      "min": 0.74,
+      "max": 1.35
+    },
+    {
+      "label": "Nữ giới bình thường",
+      "min": 0.59,
+      "max": 1.04
+    }
+  ],
+
+  "importance": "Creatinine là chỉ số nền tảng để đánh giá chức năng thận và được sử dụng để tính eGFR. Nồng độ creatinine tăng có thể là dấu hiệu của bệnh thận mạn, suy thận hoặc tổn thương thận.",
+
+  "recommendations": [
+    "Uống đủ nước theo khuyến nghị của bác sĩ.",
+    "Theo dõi chức năng thận định kỳ nếu creatinine tăng.",
+    "Kiểm soát tốt huyết áp và đường huyết.",
+    "Hạn chế sử dụng thuốc có nguy cơ ảnh hưởng đến thận khi chưa có chỉ định y tế."
+  ],
+
+  "related_diseases": [
+    "Bệnh thận mạn",
+    "Suy thận",
+    "Tăng huyết áp",
+    "Tiểu Đường"
+  ],
+
+  "source": "National Kidney Foundation (NKF)"
+}

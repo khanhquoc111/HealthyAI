@@ -7,11 +7,14 @@ from knowledge.knowledge_schema import KnowledgeArticle
 
 class KnowledgeLoader:
     def __init__(self, articles_dir: Path = None):
-        # Sửa lỗi: Cố định đường dẫn tuyệt đối đến thư mục 'articles' cùng cấp với file này
+        # Cố định đường dẫn tuyệt đối đến thư mục 'articles' cùng cấp với file này
         if articles_dir is None:
             self.articles_dir = Path(__file__).resolve().parent / "articles"
         else:
             self.articles_dir = Path(articles_dir)
+            
+        # Đảm bảo thư mục articles luôn tồn tại để tránh lỗi khi lưu file lần đầu
+        self.articles_dir.mkdir(parents=True, exist_ok=True)
             
         self._cache = {}
         self._last_modified = {}
@@ -58,6 +61,27 @@ class KnowledgeLoader:
                 continue
 
         return sorted(articles, key=lambda x: x["name"])
+        
+    def save_article(self, article_data: Dict) -> Dict:
+        """Lưu hoặc cập nhật bài viết dạng JSON."""
+        article_id = article_data.get("id")
+        if not article_id:
+            raise ValueError("Thiếu trường 'id' trong dữ liệu bài viết.")
+            
+        # Xác thực dữ liệu qua Pydantic schema trước khi lưu
+        validated_article = KnowledgeArticle(**article_data)
+        
+        # Tạo đường dẫn lưu file
+        article_path = self.articles_dir / f"{article_id}.json"
+        
+        # Ghi dữ liệu ra file
+        with open(article_path, "w", encoding="utf-8") as f:
+            json.dump(validated_article.model_dump(), f, ensure_ascii=False, indent=4)
+            
+        print(f"✅ Đã lưu file thành công: {article_path}")
+        
+        # Tải lại vào bộ nhớ cache để trả về
+        return self.load_article(article_id, force_reload=True)
 
     def reload_article(self, article_id: str):
         self.load_article(article_id, force_reload=True)

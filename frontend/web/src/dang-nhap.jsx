@@ -1,6 +1,7 @@
 // frontend/src/dang_nhap.jsx
 import { useState } from "react";
 import axios from "axios";
+import { useNavigate } from "react-router-dom"; // Import thêm useNavigate
 import "./css/auth.css";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
@@ -10,6 +11,8 @@ export default function DangNhap({ onLoginSuccess, onSwitchToRegister }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  
+  const navigate = useNavigate(); // Khởi tạo hook điều hướng
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -22,13 +25,29 @@ export default function DangNhap({ onLoginSuccess, onSwitchToRegister }) {
 
     try {
       const res = await axios.post(`${API_BASE_URL}/auth/login`, formData);
+      
+      // Lưu thông tin cơ bản vào LocalStorage
       localStorage.setItem("token", res.data.access_token);
       localStorage.setItem("userName", res.data.tenDangNhap);
+      
+      // (Tuỳ chọn) Lưu cờ bác sĩ vào storage để tái sử dụng ở các component khác nếu cần
+      if (res.data.is_doctor) {
+        localStorage.setItem("is_doctor", "true");
+      }
+
+      // Gọi callback báo cho parent component biết đã login thành công
       onLoginSuccess({
         tenDangNhap: res.data.tenDangNhap,
         hoTen: res.data.hoTen,
         anhDaiDien: res.data.anhDaiDien,
+        isDoctor: res.data.is_doctor, // Bổ sung trạng thái bác sĩ
       });
+
+      // --- LOGIC MỚI: CHUYỂN HƯỚNG DỰA TRÊN DỮ LIỆU TỪ BACKEND ---
+      if (res.data.redirect_to) {
+        navigate(res.data.redirect_to); // Chuyển tới "/bs-quan-ly-chung" hoặc "/"
+      }
+
     } catch (err) {
       setError(err.response?.data?.detail || "Đã xảy ra lỗi kết nối với máy chủ!");
     } finally {

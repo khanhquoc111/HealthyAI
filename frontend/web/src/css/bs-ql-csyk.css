@@ -1,0 +1,151 @@
+/* frontend/src/css/bs-ql-csyk.css */
+
+/* --- FORM & NHẬP LIỆU --- */
+.csyk-form-group {
+    margin-bottom: 16px;
+}
+
+.csyk-label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 500;
+    color: #475569;
+    font-size: 14px;
+}
+
+.csyk-input, 
+.csyk-select, 
+.csyk-textarea {
+    padding: 8px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    width: 100%;
+    outline: none;
+    font-size: 14px;
+    box-sizing: border-box;
+    transition: border-color 0.2s;
+}
+
+.csyk-input:focus, 
+.csyk-select:focus, 
+.csyk-textarea:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.csyk-textarea {
+    resize: vertical;
+}
+
+/* --- BỐ CỤC LƯỚI & FLEX --- */
+.csyk-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.csyk-flex-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 8px;
+    align-items: center;
+}
+
+.csyk-flex-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+/* --- KHỐI ĐẶC BIỆT --- */
+.csyk-nested-box {
+    padding: 15px;
+    background-color: #f8fafc;
+    border-radius: 8px;
+    border: 1px dashed #cbd5e1;
+    margin-top: 15px;
+}
+
+.csyk-range-box {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 8px;
+    align-items: center;
+    background-color: #f8fafc;
+    padding: 10px;
+    border-radius: 6px;
+}
+
+/* --- NÚT BẤM (BUTTONS) --- */
+.csyk-btn-icon {
+    padding: 8px 12px;
+    border: none;
+    background-color: #fee2e2;
+    color: #ef4444;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.csyk-btn-icon:hover {
+    background-color: #fca5a5;
+    color: #b91c1c;
+}
+
+.csyk-btn-add {
+    font-size: 13px;
+    padding: 6px 12px;
+    background-color: #f1f5f9;
+    color: #475569;
+    border: 1px dashed #cbd5e1;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-top: 4px;
+    transition: all 0.2s;
+    font-weight: 500;
+}
+
+.csyk-btn-add:hover {
+    background-color: #e2e8f0;
+    color: #1e293b;
+    border-color: #94a3b8;
+}
+
+.csyk-btn-export {
+    background-color: #10b981;
+    color: white;
+    margin-left: auto;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background-color 0.2s;
+}
+
+.csyk-btn-export:hover {
+    background-color: #059669;
+}
+
+/* --- CHECKBOX --- */
+.csyk-checkbox-list {
+    margin-top: 15px;
+    list-style: none;
+    padding: 0;
+}
+
+.csyk-checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    color: #475569;
+    font-weight: 500;
+    margin-bottom: 12px;
+}
+
+.csyk-checkbox-input {
+    width: 18px;
+    height: 18px;
+    accent-color: #3b82f6;
+}

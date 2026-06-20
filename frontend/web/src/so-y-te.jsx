@@ -21,6 +21,7 @@ const SoYTe = () => {
                 const res = await axios.get(`${API_BASE_URL}/knowledge/`);
                 
                 if (res.data && res.data.articles && res.data.articles.length > 0) {
+                    // Tùy chọn: Bạn có thể lọc bỏ những bài viết có is_active = false ở đây nếu cần
                     setArticles(res.data.articles);
                     await fetchArticleDetail(res.data.articles[0].id);
                 } else {
@@ -58,7 +59,7 @@ const SoYTe = () => {
 
     // Lấy danh sách danh mục
     const categories = useMemo(() => {
-        const cats = [...new Set(articles.map(a => a.category))];
+        const cats = [...new Set(articles.map(a => a.category).filter(Boolean))];
         return ['all', ...cats];
     }, [articles]);
 
@@ -66,7 +67,7 @@ const SoYTe = () => {
     const filteredArticles = useMemo(() => {
         return articles.filter(article => {
             const matchesSearch = article.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                                 article.category.toLowerCase().includes(searchQuery.toLowerCase());
+                                 (article.category && article.category.toLowerCase().includes(searchQuery.toLowerCase()));
             const matchesCategory = selectedCategory === 'all' || article.category === selectedCategory;
             return matchesSearch && matchesCategory;
         });
@@ -161,7 +162,7 @@ const SoYTe = () => {
                                     </div>
                                     <div className="syt-item-content">
                                         <div className="syt-item-name">{item.name}</div>
-                                        {!showHistory && <div className="syt-item-category">{item.category}</div>}
+                                        {!showHistory && item.category && <div className="syt-item-category">{item.category}</div>}
                                         {showHistory && <div className="syt-item-time">{new Date(item.timestamp).toLocaleDateString('vi-VN')}</div>}
                                     </div>
                                 </li>
@@ -190,29 +191,76 @@ const SoYTe = () => {
                         <article className="syt-article-detail">
                             {/* Header */}
                             <header className="syt-detail-header">
-                                <div className="syt-detail-badge">{selectedArticle.category}</div>
+                                {selectedArticle.category && <div className="syt-detail-badge">{selectedArticle.category}</div>}
                                 <h1 className="syt-detail-title">{selectedArticle.name}</h1>
-                                <p className="syt-detail-summary">{selectedArticle.summary}</p>
+                                
+                                {/* Siêu dữ liệu (Badges) */}
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '12px', marginBottom: '16px' }}>
+                                    {selectedArticle.unit && (
+                                        <span style={{ padding: '4px 10px', backgroundColor: '#e0f2fe', color: '#0369a1', borderRadius: '20px', fontSize: '12px', fontWeight: '500' }}>
+                                            <i className="fa-solid fa-ruler"></i> Đơn vị: {selectedArticle.unit}
+                                        </span>
+                                    )}
+                                    {selectedArticle.indicator_type === 'calculated' && (
+                                        <span style={{ padding: '4px 10px', backgroundColor: '#fef08a', color: '#854d0e', borderRadius: '20px', fontSize: '12px', fontWeight: '500' }}>
+                                            <i className="fa-solid fa-calculator"></i> Công thức tính
+                                        </span>
+                                    )}
+                                    {selectedArticle.usable_for_assessment && (
+                                        <span style={{ padding: '4px 10px', backgroundColor: '#dcfce7', color: '#166534', borderRadius: '20px', fontSize: '12px', fontWeight: '500' }}>
+                                            <i className="fa-solid fa-robot"></i> Hỗ trợ AI đánh giá
+                                        </span>
+                                    )}
+                                </div>
+
+                                <p className="syt-detail-summary" style={{ fontSize: '16px', color: '#475569', lineHeight: '1.6' }}>{selectedArticle.summary}</p>
                             </header>
 
                             {/* Content Sections */}
                             <div className="syt-detail-body">
-                                {/* Description */}
+                                
+                                {/* Tầm quan trọng */}
+                                {selectedArticle.importance && (
+                                    <section className="syt-section">
+                                        <h2 className="syt-section-title" style={{ color: '#0f172a' }}>
+                                            <i className="fa-solid fa-lightbulb" style={{ color: '#eab308' }}></i> Ý Nghĩa & Tầm Quan Trọng
+                                        </h2>
+                                        <p className="syt-section-content" style={{ fontWeight: '500', color: '#334155' }}>
+                                            {selectedArticle.importance}
+                                        </p>
+                                    </section>
+                                )}
+
+                                {/* Mô tả */}
                                 <section className="syt-section">
                                     <h2 className="syt-section-title">
                                         <i className="fa-solid fa-circle-info"></i> Mô Tả Chi Tiết
                                     </h2>
-                                    <p className="syt-section-content">{selectedArticle.description}</p>
+                                    <p className="syt-section-content" style={{ whiteSpace: 'pre-line' }}>{selectedArticle.description}</p>
                                 </section>
 
-                                {/* Formula */}
-                                {selectedArticle.formula && (
+                                {/* Công thức & Biến số */}
+                                {selectedArticle.indicator_type === 'calculated' && selectedArticle.formula && (
                                     <section className="syt-section">
-                                        <div className="syt-formula-box">
-                                            <div className="syt-formula-label">
-                                                <i className="fa-solid fa-calculator"></i> Công Thức Tính
+                                        <div className="syt-formula-box" style={{ backgroundColor: '#f8fafc', border: '1px dashed #cbd5e1', padding: '20px', borderRadius: '8px' }}>
+                                            <div className="syt-formula-label" style={{ fontWeight: 'bold', marginBottom: '10px', color: '#0f172a' }}>
+                                                <i className="fa-solid fa-square-root-variable"></i> Công Thức Tính Toán
                                             </div>
-                                            <code className="syt-formula-code">{selectedArticle.formula}</code>
+                                            
+                                            {selectedArticle.required_inputs && selectedArticle.required_inputs.length > 0 && (
+                                                <div style={{ marginBottom: '12px', fontSize: '14px', color: '#475569' }}>
+                                                    <strong>Tham số đầu vào: </strong>
+                                                    {selectedArticle.required_inputs.map((inp, i) => (
+                                                        <span key={i} style={{ display: 'inline-block', backgroundColor: '#e2e8f0', padding: '2px 8px', borderRadius: '4px', marginRight: '6px', fontSize: '12px', fontFamily: 'monospace' }}>
+                                                            {inp}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            
+                                            <code className="syt-formula-code" style={{ display: 'block', backgroundColor: '#1e293b', color: '#38bdf8', padding: '15px', borderRadius: '6px', fontSize: '16px', overflowX: 'auto' }}>
+                                                {selectedArticle.formula}
+                                            </code>
                                         </div>
                                     </section>
                                 )}
@@ -221,14 +269,14 @@ const SoYTe = () => {
                                 {selectedArticle.normal_ranges && selectedArticle.normal_ranges.length > 0 && (
                                     <section className="syt-section">
                                         <h2 className="syt-section-title">
-                                            <i className="fa-solid fa-chart-line"></i> Ngưỡng Chỉ Số Bình Thường
+                                            <i className="fa-solid fa-chart-line"></i> Ngưỡng Chỉ Số Phân Loại
                                         </h2>
                                         <div className="syt-ranges-grid">
                                             {selectedArticle.normal_ranges.map((range, idx) => (
                                                 <div key={idx} className="syt-range-card">
                                                     <div className="syt-range-label">{range.label}</div>
                                                     <div className="syt-range-value">
-                                                        {range.min !== null ? range.min : '∞'} – {range.max !== null ? range.max : '∞'}
+                                                        {range.min !== null ? range.min : '∞'} – {range.max !== null ? range.max : '∞'} {selectedArticle.unit}
                                                     </div>
                                                 </div>
                                             ))}
@@ -266,6 +314,36 @@ const SoYTe = () => {
                                         </div>
                                     </section>
                                 )}
+
+                                {/* Hình ảnh minh họa */}
+                                {selectedArticle.images && selectedArticle.images.length > 0 && (
+                                    <section className="syt-section">
+                                        <h2 className="syt-section-title">
+                                            <i className="fa-solid fa-images"></i> Hình Ảnh Minh Họa
+                                        </h2>
+                                        <div style={{ display: 'flex', gap: '15px', overflowX: 'auto', paddingBottom: '10px' }}>
+                                            {selectedArticle.images.map((img, idx) => (
+                                                <img 
+                                                    key={idx} 
+                                                    src={img} 
+                                                    alt={`Minh họa ${idx + 1}`} 
+                                                    style={{ height: '200px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }} 
+                                                />
+                                            ))}
+                                        </div>
+                                    </section>
+                                )}
+
+                                {/* Nguồn tham khảo */}
+                                {selectedArticle.source && (
+                                    <section className="syt-section" style={{ marginTop: '40px', paddingTop: '20px', borderTop: '1px solid #e2e8f0' }}>
+                                        <div style={{ padding: '15px', backgroundColor: '#f1f5f9', borderRadius: '8px', borderLeft: '4px solid #94a3b8', fontSize: '14px', color: '#475569' }}>
+                                            <strong><i className="fa-solid fa-book-open"></i> Nguồn tài liệu tham khảo: </strong> 
+                                            {selectedArticle.source}
+                                        </div>
+                                    </section>
+                                )}
+
                             </div>
                         </article>
                     ) : (

@@ -19,7 +19,6 @@ def get_db():
     finally:
         db.close()
 
-# Đổi email thành tenDangNhap
 class UserLoginSchema(BaseModel):
     tenDangNhap: str
     password: str
@@ -36,15 +35,27 @@ def login(user: UserLoginSchema, db: Session = Depends(get_db)):
             detail="Tên đăng nhập hoặc mật khẩu không chính xác."
         )
     
-    # 3. Trả về thông tin (kèm tenDangNhap thay vì email)
+    # 3. Trả về thông tin bổ sung
     extra = db.query(ThongTinNguoiDung).filter(
         ThongTinNguoiDung.idNguoiDung == db_user.idNguoiDung
     ).first()
 
+    # --- LOGIC MỚI: KIỂM TRA TÀI KHOẢN BÁC SĨ ---
+    danh_sach_bac_si = ["bacsi01bv", "bacsi02bv", "bacsi03bv"]
+    
+    # Xác định đường dẫn điều hướng dựa trên tên đăng nhập
+    if db_user.tenDangNhap in danh_sach_bac_si:
+        redirect_url = "/bs-quan-ly-chung"
+    else:
+        redirect_url = "/" # Đường dẫn mặc định cho user thường
+
+    # Trả về thông tin (kèm tenDangNhap thay vì email)
     return {
         "access_token": f"fake-token-for-{db_user.tenDangNhap}",
         "token_type": "bearer",
         "tenDangNhap": db_user.tenDangNhap,
         "hoTen": db_user.hoTen,
         "anhDaiDien": extra.anhDaiDien if extra else None,
+        "is_doctor": db_user.tenDangNhap in danh_sach_bac_si, # Cờ đánh dấu tài khoản bác sĩ
+        "redirect_to": redirect_url # Đường dẫn frontend cần chuyển tới
     }

@@ -1,0 +1,97 @@
+/* frontend/src/css/bs-nav.css */
+
+:root {
+  --nav-primary: #0EA5E9;
+  --nav-primary-hover: #0284C7;
+  --nav-bg-hover: #F0F9FF;
+  --nav-text-main: #1E293B;
+  --nav-text-muted: #64748B;
+  --nav-border: #E2E8F0;
+  --sidebar-width: 260px; /* Độ rộng cố định của thanh điều hướng */
+}
+
+/* Container Sidebar */
+.bs-nav-container {
+  display: flex;
+  flex-direction: column; /* Đổi hướng flex thành cột dọc */
+  width: var(--sidebar-width);
+  min-height: 100vh; /* Trải dài toàn bộ chiều cao màn hình */
+  background-color: #FFFFFF;
+  border-right: 1px solid var(--nav-border);
+  padding: 24px 16px;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.02);
+  flex-shrink: 0; /* Tránh bị bóp méo khi màn hình nhỏ */
+}
+
+/* Khu vực Logo / Tiêu đề của Sidebar */
+.bs-nav-header {
+  padding: 0 12px 24px 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--nav-border);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--nav-text-main);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bs-nav-header i {
+  color: var(--nav-primary);
+  font-size: 24px;
+}
+
+/* Danh sách các tab dọc */
+.bs-nav-list {
+  display: flex;
+  flex-direction: column; /* Danh sách xếp dọc */
+  list-style-type: none;
+  margin: 0;
+  padding: 0;
+  gap: 8px; /* Khoảng cách giữa các nút */
+}
+
+/* Từng mục tab (Item) */
+.bs-nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start; /* Căn trái text và icon */
+  gap: 12px;
+  padding: 14px 16px;
+  color: var(--nav-text-muted);
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  user-select: none;
+  width: 100%;
+}
+
+.bs-nav-item i {
+  font-size: 18px;
+  width: 24px; /* Fix chiều rộng icon để chữ thẳng hàng */
+  text-align: center;
+  transition: transform 0.2s ease;
+}
+
+/* Hiệu ứng khi hover */
+.bs-nav-item:hover {
+  background-color: var(--nav-bg-hover);
+  color: var(--nav-primary);
+}
+
+.bs-nav-item:hover i {
+  transform: translateX(3px); /* Đẩy icon nhẹ sang phải thay vì phóng to */
+}
+
+/* Trạng thái Tab đang được chọn (Active) */
+.bs-nav-item.active {
+  background-color: var(--nav-primary);
+  color: #FFFFFF;
+  box-shadow: 0 4px 10px rgba(14, 165, 233, 0.25);
+}
+
+.bs-nav-item.active i {
+  color: #FFFFFF;
+}
