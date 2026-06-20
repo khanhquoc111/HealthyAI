@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import "./css/hs-suckhoe.css";
 
-
 const API_BASE_URL = "http://127.0.0.1:8000";
 
 export default function ChiSoSucKhoe() {
@@ -20,10 +19,8 @@ export default function ChiSoSucKhoe() {
   const [completionRate, setCompletionRate] = useState(0);
   const [missingFields, setMissingFields] = useState([]);
   const [activeAccordion, setActiveAccordion] = useState(1);
-
   const [healthScore, setHealthScore] = useState(null);
   const [loadingScore, setLoadingScore] = useState(false);
-
   const [trendData, setTrendData] = useState(null);
   const [loadingTrend, setLoadingTrend] = useState(false);
 
@@ -34,8 +31,8 @@ export default function ChiSoSucKhoe() {
       bmi: "Thể chất",
       huyetApTamThu: "Huyết áp",
       duongHuyet: "Đường huyết",
-      cholesterol: "Cholesterol toàn phần",
-      ldl: "Chỉ số LDL",
+      cholesterol: "Cholesterol",
+      ldl: "LDL",
       creatinine: "Creatinine"
     };
     let filled = 0;
@@ -134,7 +131,6 @@ export default function ChiSoSucKhoe() {
       await axios.post(`${API_BASE_URL}/health-profile/`, payload);
       setMessage("Lưu dữ liệu chỉ số thành công!");
       setTimeout(() => setMessage(""), 3000);
-
       setTimeout(() => {
         fetchHealthScore();
         fetchTrendData();
@@ -149,36 +145,37 @@ export default function ChiSoSucKhoe() {
 
   const renderTrendChart = (metric, records) => {
     if (!records || records.length === 0) return null;
-
     const maxValue = Math.max(...records.map(r => r.value));
     const minValue = Math.min(...records.map(r => r.value));
     const range = maxValue - minValue || 1;
     const chartHeight = 120;
-
     const points = records.map((record, idx) => {
       const x = (idx / (records.length - 1 || 1)) * 300;
       const normalizedValue = (record.value - minValue) / range;
       const y = chartHeight - normalizedValue * 100;
       return { x, y, ...record };
     });
-
     const pathData = points.map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 
     return (
-      <div style={{ marginBottom: "20px" }}>
-        <p style={{ fontSize: "14px", fontWeight: "600", color: "#475569", marginBottom: "8px" }}>
-          Biểu đồ xu hướng {metric}
-        </p>
-        <svg width="100%" height={chartHeight + 30} viewBox={`0 0 320 ${chartHeight + 30}`} style={{ border: "1px solid #E2E8F0", borderRadius: "8px", padding: "10px" }}>
-          <polyline points={pathData} fill="none" stroke="#2563EB" strokeWidth="2" />
+      <div className="hsk-trend-chart-container">
+        <h4 className="hsk-trend-chart-title">Biểu đồ xu hướng {metric}</h4>
+        <svg width="100%" height={chartHeight + 30} viewBox={`0 0 320 ${chartHeight + 30}`} className="hsk-trend-svg">
+          <polyline points={pathData} fill="none" stroke="url(#trendGradient)" strokeWidth="2" />
+          <defs>
+            <linearGradient id="trendGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#2563eb" />
+              <stop offset="100%" stopColor="#0f172a" />
+            </linearGradient>
+          </defs>
           {points.map((p, idx) => (
-            <circle key={idx} cx={p.x} cy={p.y} r="3" fill="#2563EB" />
+            <circle key={idx} cx={p.x} cy={p.y} r="3" fill="#2563eb" className="hsk-trend-point" />
           ))}
         </svg>
-        <div style={{ marginTop: "8px", fontSize: "12px", color: "#64748B" }}>
+        <div className="hsk-trend-values">
           {points.map((p, idx) => (
-            <span key={idx} style={{ marginRight: "16px" }}>
-              {p.date}: {p.value.toFixed(1)}
+            <span key={idx} className="hsk-trend-value">
+              {p.date}: <strong>{p.value.toFixed(1)}</strong>
             </span>
           ))}
         </div>
@@ -187,562 +184,356 @@ export default function ChiSoSucKhoe() {
   };
 
   return (
-    <div style={{ width: "100%", maxWidth: "1000px", margin: "0 auto", padding: "0 20px" }}>
-      <style>{`
-        .custom-input { 
-          background-color: #FFFFFF !important; 
-          color: #1E293B !important; 
-          border: 1px solid #D1D5DB; 
-          border-radius: 8px; 
-          padding: 12px; 
-          width: 100%; 
-          box-sizing: border-box; 
-          transition: all 0.2s; 
-          font-size: 15px;
-        }
-        .custom-input:focus { outline: none; border-color: #2563EB; box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
-        select.custom-input option { color: #1E293B !important; background-color: #FFFFFF !important; }
-        
-        .acc-header { 
-          padding: 20px 24px; background: white; border: 1px solid #E2E8F0; 
-          border-radius: 12px; cursor: pointer; display: flex; justify-content: space-between; 
-          align-items: center; font-weight: 700; font-size: 16px; margin-bottom: 12px; 
-          transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); 
-        }
-        .acc-header:hover { border-color: #2563EB; background-color: #F8FAFC; }
-        .acc-header.active { border-color: #2563EB; border-bottom-left-radius: 0; border-bottom-right-radius: 0; margin-bottom: 0; }
-        
-        .acc-wrapper {
-          max-height: 0;
-          opacity: 0;
-          overflow: hidden;
-          transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease-in-out, padding 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-          padding: 0 24px;
-          border: 1px solid transparent;
-          margin-bottom: 12px;
-          border-radius: 0 0 12px 12px;
-        }
-        .acc-wrapper.open {
-          max-height: 1200px;
-          opacity: 1;
-          padding: 24px;
-          border-color: #E2E8F0;
-          border-top: none;
-        }
-
-        .tag-btn { 
-          padding: 10px 20px; border-radius: 20px; cursor: pointer; font-size: 14px; 
-          font-weight: 600; transition: all 0.2s; user-select: none; border: 1px solid #D1D5DB; 
-          background: white; color: #475569; display: inline-flex; align-items: center; gap: 8px; 
-        }
-        .tag-btn:hover { border-color: #2563EB; color: #2563EB; }
-        .tag-btn.active { background: #DBEAFE; border-color: #2563EB; color: #1E3A8A; box-shadow: 0 2px 4px rgba(37,99,235,0.1); }
-
-        .score-card {
-          background: linear-gradient(135deg, #2563EB 0%, #1E40AF 100%);
-          color: white;
-          padding: 28px;
-          border-radius: 16px;
-          margin-bottom: 24px;
-          box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
-        }
-
-        .score-display {
-          display: flex;
-          align-items: center;
-          gap: 20px;
-          margin-bottom: 16px;
-        }
-
-        .score-number {
-          font-size: 56px;
-          font-weight: 800;
-          line-height: 1;
-        }
-
-        .score-info {
-          flex: 1;
-        }
-
-        .trend-up { color: #10B981; font-weight: 600; }
-        .trend-down { color: #EF4444; font-weight: 600; }
-        .trend-stable { color: #F59E0B; font-weight: 600; }
-      `}</style>
-
+    <div className="hsk-wrapper">
       {message && (
-        <div style={{
-          padding: "16px",
-          marginBottom: "24px",
-          borderRadius: "8px",
-          backgroundColor: message.includes("thành công") ? "#DCFCE7" : "#FEF2F2",
-          color: message.includes("thành công") ? "#166534" : "#991B1B",
-          fontWeight: "600"
-        }}>
-          {message}
+        <div className={`hsk-message ${message.includes("thành công") ? "hsk-message--success" : "hsk-message--error"}`}>
+          <i className={`fa-solid ${message.includes("thành công") ? "fa-check-circle" : "fa-exclamation-circle"}`}></i>
+          <span>{message}</span>
         </div>
       )}
 
-      {/* ĐIỂM SỨC KHỎE CÁ NHÂN */}
       {healthScore && (
-        <div className="hsk-score-card">
-          <div className="hsk-score-card-content">
-            <h2 className="hsk-score-header">
-              <i className="fa-solid fa-heart-circle-check"></i>
-              Điểm Sức Khỏe Cá Nhân
-            </h2>
-            
-            <div className="hsk-score-display">
-              <div className="hsk-score-number">
-                {healthScore.current_score}<span className="hsk-score-max">/{healthScore.max_score}</span>
+        <div className="hsk-score-section">
+          <div className="hsk-score-card">
+            <div className="hsk-score-card-bg"></div>
+            <div className="hsk-score-content">
+              <div className="hsk-score-header">
+                <i className="fa-solid fa-heart-pulse"></i>
+                <span>Điểm Sức Khỏe Cá Nhân</span>
               </div>
               
-              <div className="hsk-score-info">
-                <div className={`hsk-score-status ${healthScore.current_score >= 70 ? 'status-good' : healthScore.current_score >= 50 ? 'status-warn' : 'status-alert'}`}>
-                  {healthScore.current_score >= 70 ? (
-                    <><i className="fa-solid fa-circle-check"></i> Sức khỏe tốt</>
-                  ) : healthScore.current_score >= 50 ? (
-                    <><i className="fa-solid fa-triangle-exclamation"></i> Cần cải thiện</>
-                  ) : (
-                    <><i className="fa-solid fa-circle-xmark"></i> Cần kiểm tra ngay</>
-                  )}
+              <div className="hsk-score-body">
+                <div className="hsk-score-display">
+                  <div className="hsk-score-number">
+                    {healthScore.current_score}
+                    <span className="hsk-score-denominator">/{healthScore.max_score}</span>
+                  </div>
+                  
+                  <div className="hsk-score-detail">
+                    <div className={`hsk-status-badge hsk-status-${healthScore.current_score >= 70 ? "good" : healthScore.current_score >= 50 ? "warn" : "alert"}`}>
+                      <i className={`fa-solid ${healthScore.current_score >= 70 ? "fa-circle-check" : healthScore.current_score >= 50 ? "fa-triangle-exclamation" : "fa-circle-xmark"}`}></i>
+                      <span>{healthScore.current_score >= 70 ? "Sức khỏe tốt" : healthScore.current_score >= 50 ? "Cần cải thiện" : "Cần kiểm tra ngay"}</span>
+                    </div>
+                    
+                    <p className="hsk-score-previous">
+                      Lần đánh giá trước: <strong>{healthScore.previous_score ?? "--"}/{healthScore.max_score}</strong>
+                    </p>
+                    
+                    {healthScore?.trend?.percentage !== undefined && (
+                      <div className={`hsk-trend-indicator hsk-trend-${healthScore.trend.percentage > 0 ? "up" : healthScore.trend.percentage < 0 ? "down" : "stable"}`}>
+                        <i className={`fa-solid fa-arrow-${healthScore.trend.percentage > 0 ? "up" : healthScore.trend.percentage < 0 ? "down" : "right"}`}></i>
+                        <span>{Math.abs(healthScore.trend.percentage)}% so với tháng trước</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 
-                <p className="hsk-score-previous">
-                  Lần đánh giá trước: <strong>{healthScore.previous_score ?? "--"}/{healthScore.max_score}</strong>
-                </p>
-                
-                {/* Kiểm tra nếu có dữ liệu trend mới hiển thị phần % */}
-                {healthScore?.trend?.percentage !== undefined && (
-                  <div className={`hsk-score-trend ${healthScore.trend.percentage > 0 ? "trend-up" : healthScore.trend.percentage < 0 ? "trend-down" : "trend-stable"}`}>
-                    <span className="trend-icon">
-                      {healthScore.trend.percentage > 0 ? "↑" : healthScore.trend.percentage < 0 ? "↓" : "→"}
-                    </span>
-                    {Math.abs(healthScore.trend.percentage)}% so với tháng trước
+                {healthScore?.trend?.insight && (
+                  <div className="hsk-score-insight">
+                    <i className="fa-solid fa-lightbulb"></i>
+                    <p>{healthScore.trend.insight}</p>
                   </div>
                 )}
               </div>
             </div>
-            
-            {/* Kiểm tra nếu có insight thì mới hiển thị */}
-            {healthScore?.trend?.insight && (
-              <div className="hsk-score-insight">
-                <i className="fa-solid fa-lightbulb"></i>
-                <p>{healthScore.trend.insight}</p>
-              </div>
-            )}
           </div>
         </div>
       )}
 
-      {/* HỒ SƠ HOÀN THIỆN */}
-      <div style={{
-        background: "white",
-        padding: "24px",
-        borderRadius: "16px",
-        border: "1px solid #E2E8F0",
-        marginBottom: "32px"
-      }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "12px" }}>
-          <span style={{ fontWeight: "700", color: "#334155" }}>Độ hoàn thiện dữ liệu lâm sàng</span>
-          <span style={{
-            fontWeight: "bold",
-            color: completionRate === 100 ? "#22C55E" : "#2563EB"
-          }}>
+      <div className="hsk-completion-section">
+        <div className="hsk-completion-header">
+          <span className="hsk-completion-title">Độ hoàn thiện dữ liệu lâm sàng</span>
+          <span className={`hsk-completion-percentage ${completionRate === 100 ? "hsk-complete" : ""}`}>
             {completionRate}%
           </span>
         </div>
-        <div style={{
-          width: "100%",
-          height: "10px",
-          backgroundColor: "#F1F5F9",
-          borderRadius: "5px",
-          overflow: "hidden"
-        }}>
-          <div style={{
-            height: "100%",
-            width: `${completionRate}%`,
-            backgroundColor: completionRate === 100 ? "#22C55E" : "#2563EB",
-            transition: "width 0.5s ease"
-          }} />
+        <div className="hsk-completion-track">
+          <div className="hsk-completion-bar" style={{ width: `${completionRate}%` }}></div>
         </div>
         {missingFields.length > 0 && (
-          <div style={{ marginTop: "12px", fontSize: "14px", color: "#64748B" }}>
-            Trường AI đề xuất thêm: <span style={{ color: "#F59E0B", fontWeight: "600" }}>
-              {missingFields.join(", ")}
-            </span>
-          </div>
+          <p className="hsk-completion-hint">
+            <span className="hsk-hint-label">Đề xuất:</span>
+            <span className="hsk-hint-fields">{missingFields.join(", ")}</span>
+          </p>
         )}
       </div>
 
-      <form onSubmit={handleSubmit}>
-        {/* KHỐI 1: THỂ CHẤT & SINH TỒN */}
-        <div
-          className={`acc-header ${activeAccordion === 1 ? "active" : ""}`}
-          onClick={() => setActiveAccordion(activeAccordion === 1 ? 0 : 1)}
-        >
-          <span>
-            <i className="fa-solid fa-heart-pulse" style={{ marginRight: "8px" }}></i>
-            1. Thể chất & Sinh tồn
-          </span>
-          <span>
-            <i className={`fa-solid ${activeAccordion === 1 ? "fa-chevron-down" : "fa-chevron-right"}`}></i>
-          </span>
-        </div>
-        <div className={`acc-wrapper ${activeAccordion === 1 ? "open" : ""}`} style={{ background: "#EFF6FF" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Tuổi</label>
-              <input type="number" name="tuoi" value={formData.tuoi} onChange={handleChange} className="custom-input" />
+      <form onSubmit={handleSubmit} className="hsk-form">
+        {/* SECTION 1 */}
+        <div className={`hsk-section ${activeAccordion === 1 ? "hsk-active" : ""}`}>
+          <button
+            type="button"
+            className={`hsk-section-header ${activeAccordion === 1 ? "hsk-open" : ""}`}
+            onClick={() => setActiveAccordion(activeAccordion === 1 ? 0 : 1)}
+          >
+            <div className="hsk-section-title">
+              <i className="fa-solid fa-heart-pulse"></i>
+              <span>1. Thể chất & Sinh tồn</span>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Giới tính</label>
-              <select name="gioiTinh" value={formData.gioiTinh} onChange={handleChange} className="custom-input">
-                <option value="Nam">Nam</option>
-                <option value="Nữ">Nữ</option>
-              </select>
+            <i className={`fa-solid fa-chevron-down ${activeAccordion === 1 ? "hsk-rotate" : ""}`}></i>
+          </button>
+          <div className={`hsk-section-body hsk-section-vitals ${activeAccordion === 1 ? "hsk-open" : ""}`}>
+            <div className="hsk-grid-2">
+              <div className="hsk-input-group">
+                <label>Tuổi</label>
+                <input type="number" name="tuoi" value={formData.tuoi} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>Giới tính</label>
+                <select name="gioiTinh" value={formData.gioiTinh} onChange={handleChange} className="hsk-input">
+                  <option value="Nam">Nam</option>
+                  <option value="Nữ">Nữ</option>
+                </select>
+              </div>
+              <div className="hsk-input-group">
+                <label>Chiều cao (cm)</label>
+                <input type="number" name="chieuCao" value={formData.chieuCao} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>Cân nặng (kg)</label>
+                <input type="number" name="canNang" value={formData.canNang} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>BMI chỉ số</label>
+                <input type="number" name="bmi" value={formData.bmi} readOnly className="hsk-input hsk-input--readonly" />
+              </div>
+              <div className="hsk-input-group">
+                <label>Vòng eo (cm)</label>
+                <input type="number" name="vongEo" value={formData.vongEo} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>HA Tâm thu (mmHg)</label>
+                <input type="number" name="huyetApTamThu" value={formData.huyetApTamThu} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>HA Tâm trương (mmHg)</label>
+                <input type="number" name="huyetApTamTruong" value={formData.huyetApTamTruong} onChange={handleChange} className="hsk-input" />
+              </div>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Chiều cao (cm)</label>
-              <input type="number" name="chieuCao" value={formData.chieuCao} onChange={handleChange} className="custom-input" />
+            <div className="hsk-section-nav">
+              <button type="button" onClick={() => setActiveAccordion(2)} className="hsk-next-btn">
+                Tiếp theo
+                <i className="fa-solid fa-arrow-right"></i>
+              </button>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Cân nặng (kg)</label>
-              <input type="number" name="canNang" value={formData.canNang} onChange={handleChange} className="custom-input" />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>BMI chỉ số</label>
-              <input type="number" name="bmi" value={formData.bmi} readOnly className="custom-input" style={{ background: "#E2E8F0" }} />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Vòng eo (cm)</label>
-              <input type="number" name="vongEo" value={formData.vongEo} onChange={handleChange} className="custom-input" />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>HA Tâm thu (mmHg)</label>
-              <input type="number" name="huyetApTamThu" value={formData.huyetApTamThu} onChange={handleChange} className="custom-input" />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>HA Tâm trương (mmHg)</label>
-              <input type="number" name="huyetApTamTruong" value={formData.huyetApTamTruong} onChange={handleChange} className="custom-input" />
-            </div>
-          </div>
-          <div style={{ textAlign: "right", marginTop: "20px" }}>
-            <button
-              type="button"
-              onClick={() => setActiveAccordion(2)}
-              style={{
-                padding: "8px 16px",
-                background: "#FFFFFF",
-                border: "1px solid #CBD5E1",
-                borderRadius: "8px",
-                color: "#475569",
-                fontWeight: "600",
-                cursor: "pointer",
-                transition: "all 0.2s"
-              }}
-            >
-              Tiếp theo ▶
-            </button>
           </div>
         </div>
 
-        {/* KHỐI 2: CHỈ SỐ SINH HÓA CHUYÊN SÂU */}
-        <div
-          className={`acc-header ${activeAccordion === 2 ? "active" : ""}`}
-          onClick={() => setActiveAccordion(activeAccordion === 2 ? 0 : 2)}
-        >
-          <span>
-            <i className="fa-solid fa-flask-vial" style={{ marginRight: "8px" }}></i>
-            2. Chỉ số Sinh hóa chuyên sâu
-          </span>
-          <span>
-            <i className={`fa-solid ${activeAccordion === 2 ? "fa-chevron-down" : "fa-chevron-right"}`}></i>
-          </span>
-        </div>
-        <div className={`acc-wrapper ${activeAccordion === 2 ? "open" : ""}`} style={{ background: "#F0FDF4" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Đường huyết đói (mg/dL)</label>
-              <input type="number" name="duongHuyet" value={formData.duongHuyet} onChange={handleChange} className="custom-input" />
+        {/* SECTION 2 */}
+        <div className={`hsk-section ${activeAccordion === 2 ? "hsk-active" : ""}`}>
+          <button
+            type="button"
+            className={`hsk-section-header ${activeAccordion === 2 ? "hsk-open" : ""}`}
+            onClick={() => setActiveAccordion(activeAccordion === 2 ? 0 : 2)}
+          >
+            <div className="hsk-section-title">
+              <i className="fa-solid fa-flask-vial"></i>
+              <span>2. Chỉ số Sinh hóa chuyên sâu</span>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>HbA1c (%)</label>
-              <input type="number" step="0.1" name="hba1c" value={formData.hba1c} onChange={handleChange} className="custom-input" />
+            <i className={`fa-solid fa-chevron-down ${activeAccordion === 2 ? "hsk-rotate" : ""}`}></i>
+          </button>
+          <div className={`hsk-section-body hsk-section-biochem ${activeAccordion === 2 ? "hsk-open" : ""}`}>
+            <div className="hsk-grid-2">
+              <div className="hsk-input-group">
+                <label>Đường huyết đói (mg/dL)</label>
+                <input type="number" name="duongHuyet" value={formData.duongHuyet} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>HbA1c (%)</label>
+                <input type="number" step="0.1" name="hba1c" value={formData.hba1c} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>Cholesterol toàn phần (mg/dL)</label>
+                <input type="number" name="cholesterol" value={formData.cholesterol} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>LDL-Cholesterol (mg/dL)</label>
+                <input type="number" name="ldl" value={formData.ldl} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>HDL-Cholesterol (mg/dL)</label>
+                <input type="number" name="hdl" value={formData.hdl} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>Triglyceride (mg/dL)</label>
+                <input type="number" name="triglyceride" value={formData.triglyceride} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>Creatinine máu (mg/dL)</label>
+                <input type="number" step="0.01" name="creatinine" value={formData.creatinine} onChange={handleChange} className="hsk-input" />
+              </div>
+              <div className="hsk-input-group">
+                <label>Acid Uric (mg/dL)</label>
+                <input type="number" step="0.1" name="acidUric" value={formData.acidUric} onChange={handleChange} className="hsk-input" />
+              </div>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Cholesterol toàn phần</label>
-              <input type="number" name="cholesterol" value={formData.cholesterol} onChange={handleChange} className="custom-input" />
+            <div className="hsk-section-nav">
+              <button type="button" onClick={() => setActiveAccordion(3)} className="hsk-next-btn">
+                Tiếp theo
+                <i className="fa-solid fa-arrow-right"></i>
+              </button>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>LDL-Cholesterol</label>
-              <input type="number" name="ldl" value={formData.ldl} onChange={handleChange} className="custom-input" />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>HDL-Cholesterol</label>
-              <input type="number" name="hdl" value={formData.hdl} onChange={handleChange} className="custom-input" />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Triglyceride</label>
-              <input type="number" name="triglyceride" value={formData.triglyceride} onChange={handleChange} className="custom-input" />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Creatinine máu</label>
-              <input type="number" step="0.01" name="creatinine" value={formData.creatinine} onChange={handleChange} className="custom-input" />
-            </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Acid Uric</label>
-              <input type="number" step="0.1" name="acidUric" value={formData.acidUric} onChange={handleChange} className="custom-input" />
-            </div>
-          </div>
-          <div style={{ textAlign: "right", marginTop: "20px" }}>
-            <button
-              type="button"
-              onClick={() => setActiveAccordion(3)}
-              style={{
-                padding: "8px 16px",
-                background: "#FFFFFF",
-                border: "1px solid #CBD5E1",
-                borderRadius: "8px",
-                color: "#475569",
-                fontWeight: "600",
-                cursor: "pointer",
-                transition: "all 0.2s"
-              }}
-            >
-              Tiếp theo ▶
-            </button>
           </div>
         </div>
 
-        {/* KHỐI 3: LỐI SỐNG CÁ NHÂN */}
-        <div
-          className={`acc-header ${activeAccordion === 3 ? "active" : ""}`}
-          onClick={() => setActiveAccordion(activeAccordion === 3 ? 0 : 3)}
-        >
-          <span>
-            <i className="fa-solid fa-person-running" style={{ marginRight: "8px" }}></i>
-            3. Lối sống cá nhân
-          </span>
-          <span>
-            <i className={`fa-solid ${activeAccordion === 3 ? "fa-chevron-down" : "fa-chevron-right"}`}></i>
-          </span>
-        </div>
-        <div className={`acc-wrapper ${activeAccordion === 3 ? "open" : ""}`} style={{ background: "#FFF7ED" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Tần suất hút thuốc</label>
-              <select name="hutThuoc" value={formData.hutThuoc} onChange={handleChange} className="custom-input">
-                <option value="Không">Không</option>
-                <option value="Đã bỏ">Đã bỏ</option>
-                <option value="Đang hút">Đang hút</option>
-              </select>
+        {/* SECTION 3 */}
+        <div className={`hsk-section ${activeAccordion === 3 ? "hsk-active" : ""}`}>
+          <button
+            type="button"
+            className={`hsk-section-header ${activeAccordion === 3 ? "hsk-open" : ""}`}
+            onClick={() => setActiveAccordion(activeAccordion === 3 ? 0 : 3)}
+          >
+            <div className="hsk-section-title">
+              <i className="fa-solid fa-person-running"></i>
+              <span>3. Lối sống cá nhân</span>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Sử dụng rượu bia</label>
-              <select name="uongRuouBia" value={formData.uongRuouBia} onChange={handleChange} className="custom-input">
-                <option value="Không">Không</option>
-                <option value="Thỉnh thoảng">Thỉnh thoảng</option>
-                <option value="Thường xuyên">Thường xuyên</option>
-              </select>
+            <i className={`fa-solid fa-chevron-down ${activeAccordion === 3 ? "hsk-rotate" : ""}`}></i>
+          </button>
+          <div className={`hsk-section-body hsk-section-lifestyle ${activeAccordion === 3 ? "hsk-open" : ""}`}>
+            <div className="hsk-grid-2">
+              <div className="hsk-input-group">
+                <label>Tần suất hút thuốc</label>
+                <select name="hutThuoc" value={formData.hutThuoc} onChange={handleChange} className="hsk-input">
+                  <option value="Không">Không</option>
+                  <option value="Đã bỏ">Đã bỏ</option>
+                  <option value="Đang hút">Đang hút</option>
+                </select>
+              </div>
+              <div className="hsk-input-group">
+                <label>Sử dụng rượu bia</label>
+                <select name="uongRuouBia" value={formData.uongRuouBia} onChange={handleChange} className="hsk-input">
+                  <option value="Không">Không</option>
+                  <option value="Thỉnh thoảng">Thỉnh thoảng</option>
+                  <option value="Thường xuyên">Thường xuyên</option>
+                </select>
+              </div>
+              <div className="hsk-input-group">
+                <label>Khẩu vị ăn mặn</label>
+                <select name="anMan" value={formData.anMan} onChange={handleChange} className="hsk-input">
+                  <option value="Nhạt">Nhạt</option>
+                  <option value="Vừa">Vừa</option>
+                  <option value="Mặn">Mặn</option>
+                </select>
+              </div>
+              <div className="hsk-input-group">
+                <label>Vận động thể chất (phút/tuần)</label>
+                <input type="number" name="soPhutVanDongMoiTuan" value={formData.soPhutVanDongMoiTuan} onChange={handleChange} className="hsk-input" />
+              </div>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Khẩu vị ăn mặn</label>
-              <select name="anMan" value={formData.anMan} onChange={handleChange} className="custom-input">
-                <option value="Nhạt">Nhạt</option>
-                <option value="Vừa">Vừa</option>
-                <option value="Mặn">Mặn</option>
-              </select>
+            <div className="hsk-section-nav">
+              <button type="button" onClick={() => setActiveAccordion(4)} className="hsk-next-btn">
+                Tiếp theo
+                <i className="fa-solid fa-arrow-right"></i>
+              </button>
             </div>
-            <div>
-              <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "8px", fontSize: "14px" }}>Vận động thể chất (phút/tuần)</label>
-              <input type="number" name="soPhutVanDongMoiTuan" value={formData.soPhutVanDongMoiTuan} onChange={handleChange} className="custom-input" />
-            </div>
-          </div>
-          <div style={{ textAlign: "right", marginTop: "20px" }}>
-            <button
-              type="button"
-              onClick={() => setActiveAccordion(4)}
-              style={{
-                padding: "8px 16px",
-                background: "#FFFFFF",
-                border: "1px solid #CBD5E1",
-                borderRadius: "8px",
-                color: "#475569",
-                fontWeight: "600",
-                cursor: "pointer",
-                transition: "all 0.2s"
-              }}
-            >
-              Tiếp theo ▶
-            </button>
           </div>
         </div>
 
-        {/* KHỐI 4: TIỀN SỬ BỆNH LÝ */}
-        <div
-          className={`acc-header ${activeAccordion === 4 ? "active" : ""}`}
-          onClick={() => setActiveAccordion(activeAccordion === 4 ? 0 : 4)}
-        >
-          <span>
-            <i className="fa-solid fa-triangle-exclamation" style={{ marginRight: "8px" }}></i>
-            4. Tiền sử bệnh lý (Cá nhân & Gia đình)
-          </span>
-          <span>
-            <i className={`fa-solid ${activeAccordion === 4 ? "fa-chevron-down" : "fa-chevron-right"}`}></i>
-          </span>
-        </div>
-        <div className={`acc-wrapper ${activeAccordion === 4 ? "open" : ""}`} style={{ background: "#FEF2F2" }}>
-          <div style={{ marginBottom: "28px" }}>
-            <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "12px", fontSize: "14px" }}>
-              Tiền sử lâm sàng bản thân:
-            </label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
-              <div
-                className={`tag-btn ${formData.caoHuyetAp ? "active" : ""}`}
-                onClick={() => toggleCheckbox("caoHuyetAp")}
-              >
-                <i className={`fa-solid ${formData.caoHuyetAp ? "fa-check" : "fa-plus"}`}></i>
-                Cao huyết áp
-              </div>
-              <div
-                className={`tag-btn ${formData.tieuDuong ? "active" : ""}`}
-                onClick={() => toggleCheckbox("tieuDuong")}
-              >
-                <i className={`fa-solid ${formData.tieuDuong ? "fa-check" : "fa-plus"}`}></i>
-                Tiểu đường
-              </div>
-              <div
-                className={`tag-btn ${formData.benhTimMach ? "active" : ""}`}
-                onClick={() => toggleCheckbox("benhTimMach")}
-              >
-                <i className={`fa-solid ${formData.benhTimMach ? "fa-check" : "fa-plus"}`}></i>
-                Tim mạch
-              </div>
-              <div
-                className={`tag-btn ${formData.gout ? "active" : ""}`}
-                onClick={() => toggleCheckbox("gout")}
-              >
-                <i className={`fa-solid ${formData.gout ? "fa-check" : "fa-plus"}`}></i>
-                Bệnh Gout
+        {/* SECTION 4 */}
+        <div className={`hsk-section ${activeAccordion === 4 ? "hsk-active" : ""}`}>
+          <button
+            type="button"
+            className={`hsk-section-header ${activeAccordion === 4 ? "hsk-open" : ""}`}
+            onClick={() => setActiveAccordion(activeAccordion === 4 ? 0 : 4)}
+          >
+            <div className="hsk-section-title">
+              <i className="fa-solid fa-triangle-exclamation"></i>
+              <span>4. Tiền sử bệnh lý (Cá nhân & Gia đình)</span>
+            </div>
+            <i className={`fa-solid fa-chevron-down ${activeAccordion === 4 ? "hsk-rotate" : ""}`}></i>
+          </button>
+          <div className={`hsk-section-body hsk-section-history ${activeAccordion === 4 ? "hsk-open" : ""}`}>
+            <div className="hsk-tags-section">
+              <h4 className="hsk-tags-title">Tiền sử lâm sàng bản thân:</h4>
+              <div className="hsk-tags-group">
+                {[
+                  { name: "caoHuyetAp", label: "Cao huyết áp" },
+                  { name: "tieuDuong", label: "Tiểu đường" },
+                  { name: "benhTimMach", label: "Tim mạch" },
+                  { name: "gout", label: "Bệnh Gout" }
+                ].map(item => (
+                  <button
+                    key={item.name}
+                    type="button"
+                    className={`hsk-tag ${formData[item.name] ? "hsk-tag--active" : ""}`}
+                    onClick={() => toggleCheckbox(item.name)}
+                  >
+                    <i className={`fa-solid ${formData[item.name] ? "fa-check" : "fa-plus"}`}></i>
+                    {item.label}
+                  </button>
+                ))}
               </div>
             </div>
-          </div>
 
-          <div>
-            <label style={{ display: "block", fontWeight: "600", color: "#475569", marginBottom: "12px", fontSize: "14px" }}>
-              Tiền sử di truyền gia đình cận huyết:
-            </label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
-              <div
-                className={`tag-btn ${formData.giaDinhCaoHuyetAp ? "active" : ""}`}
-                onClick={() => toggleCheckbox("giaDinhCaoHuyetAp")}
-              >
-                <i className={`fa-solid ${formData.giaDinhCaoHuyetAp ? "fa-check" : "fa-plus"}`}></i>
-                Cao huyết áp GD
-              </div>
-              <div
-                className={`tag-btn ${formData.giaDinhTieuDuong ? "active" : ""}`}
-                onClick={() => toggleCheckbox("giaDinhTieuDuong")}
-              >
-                <i className={`fa-solid ${formData.giaDinhTieuDuong ? "fa-check" : "fa-plus"}`}></i>
-                Tiểu đường GD
-              </div>
-              <div
-                className={`tag-btn ${formData.giaDinhTimMach ? "active" : ""}`}
-                onClick={() => toggleCheckbox("giaDinhTimMach")}
-              >
-                <i className={`fa-solid ${formData.giaDinhTimMach ? "fa-check" : "fa-plus"}`}></i>
-                Tim mạch GD
-              </div>
-              <div
-                className={`tag-btn ${formData.giaDinhGout ? "active" : ""}`}
-                onClick={() => toggleCheckbox("giaDinhGout")}
-              >
-                <i className={`fa-solid ${formData.giaDinhGout ? "fa-check" : "fa-plus"}`}></i>
-                Gout GD
+            <div className="hsk-tags-section">
+              <h4 className="hsk-tags-title">Tiền sử di truyền gia đình:</h4>
+              <div className="hsk-tags-group">
+                {[
+                  { name: "giaDinhCaoHuyetAp", label: "Cao huyết áp" },
+                  { name: "giaDinhTieuDuong", label: "Tiểu đường" },
+                  { name: "giaDinhTimMach", label: "Tim mạch" },
+                  { name: "giaDinhGout", label: "Gout" }
+                ].map(item => (
+                  <button
+                    key={item.name}
+                    type="button"
+                    className={`hsk-tag ${formData[item.name] ? "hsk-tag--active" : ""}`}
+                    onClick={() => toggleCheckbox(item.name)}
+                  >
+                    <i className={`fa-solid ${formData[item.name] ? "fa-check" : "fa-plus"}`}></i>
+                    {item.label}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
         </div>
 
-        {/* NÚT SUBMIT */}
-        <button
-          type="submit"
-          disabled={saving}
-          style={{
-            width: "100%",
-            padding: "16px",
-            backgroundColor: saving ? "#94A3B8" : "#2563EB",
-            color: "white",
-            fontSize: "16px",
-            fontWeight: "700",
-            border: "none",
-            borderRadius: "12px",
-            cursor: saving ? "not-allowed" : "pointer",
-            marginTop: "24px",
-            transition: "all 0.2s",
-            boxShadow: "0 4px 6px -1px rgba(37, 99, 235, 0.2)"
-          }}
-        >
+        <button type="submit" disabled={saving} className="hsk-submit-btn">
           {saving ? (
             <>
-              <i className="fa-solid fa-spinner fa-spin" style={{ marginRight: "8px" }}></i>
-              Đang kết nối dữ liệu đám mây...
+              <i className="fa-solid fa-spinner fa-spin"></i>
+              <span>Đang kết nối dữ liệu đám mây...</span>
             </>
           ) : (
             <>
-              <i className="fa-solid fa-floppy-disk" style={{ marginRight: "8px" }}></i>
-              LƯU HỒ SƠ SỨC KHỎE CAN THIỆP
+              <i className="fa-solid fa-floppy-disk"></i>
+              <span>LƯU HỒ SƠ SỨC KHỎE CAN THIỆP</span>
             </>
           )}
         </button>
       </form>
 
-      {/* XU HƯỚNG CHỈ SỐ */}
       {trendData && Object.keys(trendData).length > 0 && (
-        <div style={{
-          marginTop: "40px",
-          padding: "24px",
-          backgroundColor: "white",
-          borderRadius: "16px",
-          border: "1px solid #E2E8F0"
-        }}>
-          <h2 style={{ fontSize: "20px", fontWeight: "700", color: "#1E293B", marginBottom: "24px" }}>
-            Phân tích Xu hướng Chỉ số
-          </h2>
-
+        <div className="hsk-trends-section">
+          <h2 className="hsk-trends-title">Phân tích Xu hướng Chỉ số</h2>
+          
           {trendData.bmi && (
-            <div style={{ marginBottom: "32px", padding: "16px", backgroundColor: "#F8FAFC", borderRadius: "12px" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: "600", color: "#334155", marginBottom: "12px" }}>BMI</h3>
+            <div className="hsk-trend-item">
+              <h3 className="hsk-trend-metric">BMI</h3>
               {renderTrendChart("BMI", trendData.bmi.chart_data)}
               {trendData.bmi.has_insight && (
-                <p style={{ fontSize: "14px", color: "#64748B", margin: "12px 0 0 0" }}>
-                  <strong>Insight:</strong> {trendData.bmi.insight}
-                </p>
+                <p className="hsk-trend-description"><strong>Insight:</strong> {trendData.bmi.insight}</p>
               )}
             </div>
           )}
 
           {trendData.duongHuyet && (
-            <div style={{ marginBottom: "32px", padding: "16px", backgroundColor: "#F8FAFC", borderRadius: "12px" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: "600", color: "#334155", marginBottom: "12px" }}>Đường Huyết</h3>
+            <div className="hsk-trend-item">
+              <h3 className="hsk-trend-metric">Đường Huyết</h3>
               {renderTrendChart("Đường Huyết", trendData.duongHuyet.chart_data)}
               {trendData.duongHuyet.has_insight && (
-                <p style={{ fontSize: "14px", color: "#64748B", margin: "12px 0 0 0" }}>
-                  <strong>Insight:</strong> {trendData.duongHuyet.insight}
-                </p>
+                <p className="hsk-trend-description"><strong>Insight:</strong> {trendData.duongHuyet.insight}</p>
               )}
             </div>
           )}
 
           {trendData.huyetApTamThu && (
-            <div style={{ marginBottom: "32px", padding: "16px", backgroundColor: "#F8FAFC", borderRadius: "12px" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: "600", color: "#334155", marginBottom: "12px" }}>Huyết Áp Tâm Thu</h3>
+            <div className="hsk-trend-item">
+              <h3 className="hsk-trend-metric">Huyết Áp Tâm Thu</h3>
               {renderTrendChart("Huyết Áp Tâm Thu", trendData.huyetApTamThu.chart_data)}
               {trendData.huyetApTamThu.has_insight && (
-                <p style={{ fontSize: "14px", color: "#64748B", margin: "12px 0 0 0" }}>
-                  <strong>Insight:</strong> {trendData.huyetApTamThu.insight}
-                </p>
+                <p className="hsk-trend-description"><strong>Insight:</strong> {trendData.huyetApTamThu.insight}</p>
               )}
             </div>
           )}

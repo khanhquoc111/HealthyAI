@@ -208,7 +208,7 @@ export default function TrangChu({ setCurrentView, onGoToLogin }) {
         <section className="diseases-section">
           <div className="container">
             <div className="section-header text-center" style={{ marginBottom: "36px" }}>
-              <div className="section-badge section-badge--eyebrow">5 BỆNH ĐƯỢC HỖ TRỢ</div>
+              
               <h2 className="section-title">Sàng lọc toàn diện các bệnh mạn tính</h2>
               <p className="section-desc">
                 Mỗi bệnh lý vận hành như một plugin độc lập, tự động phân luồng xử lý qua Rule Engine hoặc Machine Learning để đảm bảo độ chính xác cao nhất.
@@ -295,7 +295,6 @@ export default function TrangChu({ setCurrentView, onGoToLogin }) {
         <section className="process-section">
           <div className="container">
             <div className="section-header text-center" style={{ marginBottom: "48px" }}>
-              <div className="section-badge section-badge--eyebrow">QUY TRÌNH HỆ THỐNG</div>
               <h2 className="section-title">Từ hồ sơ đến kết quả phân tích</h2>
               <p className="section-desc">
                 Hệ thống xử lý luồng dữ liệu y tế qua 6 bước khép kín, đảm bảo tính chuẩn xác, minh bạch và cá nhân hóa cho từng người dùng.
@@ -400,7 +399,6 @@ export default function TrangChu({ setCurrentView, onGoToLogin }) {
         <section className="features" id="features">
           <div className="container">
             <div className="section-header">
-              <div className="section-badge">Tính Năng</div>
               <h2 className="section-title">Thiết kế cho độ mở rộng và tin cậy</h2>
               <p className="section-desc">
                 Kiến trúc Plugin-Based với Metadata-Driven Design —
