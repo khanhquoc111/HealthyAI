@@ -65,3 +65,16 @@ def reload_knowledge_article(article_id: str):
             status_code=500,
             detail=str(e)
         )
+
+@router.delete("/{article_id}")
+def delete_knowledge_article(article_id: str):
+    try:
+        knowledge_loader.delete_article(article_id)
+        return {
+            "status": "success",
+            "message": f"Đã xóa thành công chỉ số '{article_id}'"
+        }
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

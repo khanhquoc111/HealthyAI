@@ -89,3 +89,21 @@ class KnowledgeLoader:
     def clear_cache(self):
         self._cache.clear()
         self._last_modified.clear()
+    
+    def delete_article(self, article_id: str) -> bool:
+        """Xóa bài viết JSON khỏi hệ thống."""
+        article_path = self.articles_dir / f"{article_id}.json"
+        
+        if article_path.exists():
+            article_path.unlink() # Xóa file vật lý
+            
+            # Xóa khỏi cache nếu đang tồn tại
+            if article_id in self._cache:
+                del self._cache[article_id]
+            if article_id in self._last_modified:
+                del self._last_modified[article_id]
+                
+            print(f"🗑️ Đã xóa file: {article_path}")
+            return True
+        else:
+            raise FileNotFoundError(f"Không tìm thấy bài viết '{article_id}' để xóa.")

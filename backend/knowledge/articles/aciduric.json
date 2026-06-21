@@ -1,0 +1,61 @@
+{
+    "id": "acidUric",
+    "name": "Chỉ số Acid Uric",
+    "category": "chiSoChuyenHoa",
+    "summary": "Acid uric là sản phẩm phân hủy tự nhiên của purine trong cơ thể, được đào thải chủ yếu qua thận.",
+    "description": "Acid uric được tạo ra khi cơ thể phân hủy các chất purine có trong một số loại thực phẩm và trong chính các tế bào của cơ thể. Nồng độ acid uric cao trong máu (tăng acid uric máu) có thể dẫn đến sự hình thành các tinh thể urat tích tụ tại khớp hoặc thận.",
+    "importance": "Nồng độ acid uric cao kéo dài là nguyên nhân chính gây ra bệnh Gout (gút) và sỏi thận, đồng thời có thể liên quan đến các bệnh lý chuyển hóa khác.",
+    "unit": "mg/dL",
+    "indicator_type": "measured",
+    "required_inputs": [
+        {
+            "code": "acidUricMau",
+            "name": "Nồng độ Acid Uric trong máu"
+        },
+        {
+            "code": "gioiTinh",
+            "name": "Giới tính"
+        }
+    ],
+    "formula": "Xét nghiệm máu",
+    "normal_ranges": [
+        {
+            "code": "namGioi",
+            "name": "Nam giới",
+            "min": 3.4,
+            "max": 7.0
+        },
+        {
+            "code": "nuGioi",
+            "name": "Nữ giới",
+            "min": 2.4,
+            "max": 6.0
+        }
+    ],
+    "recommendations": [
+        "Hạn chế thực phẩm giàu purine: nội tạng động vật, thịt đỏ, hải sản.",
+        "Tránh uống rượu bia, đặc biệt là bia.",
+        "Uống nhiều nước (khoảng 2-2.5 lít/ngày) để tăng cường đào thải acid uric qua thận.",
+        "Duy trì cân nặng hợp lý và vận động thể chất đều đặn."
+    ],
+    "related_diseases": [
+        {
+            "code": "benhGout",
+            "name": "Bệnh Gout"
+        },
+        {
+            "code": "soiThan",
+            "name": "Sỏi Thận"
+        },
+        {
+            "code": "viemKhop",
+            "name": "Viêm Khớp"
+        }
+    ],
+    "images": [
+        "https://www.niams.nih.gov/sites/default/files/inline-images/gout_crystal_joint.jpg"
+    ],
+    "source": "https://nhathuocphuongchinh.com/static/Benh/nguyen-nhan-tang-acid-uric.jpg",
+    "usable_for_assessment": true,
+    "is_active": true
+}

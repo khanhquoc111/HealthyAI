@@ -1,37 +1,47 @@
 {
     "id": "bmi",
     "name": "Chỉ số BMI",
-    "category": "ChiSoCoThe",
+    "category": "chiSoCoThe",
     "summary": "BMI là chỉ số đánh giá tình trạng cân nặng dựa trên chiều cao và cân nặng.",
     "description": "BMI (Body Mass Index) là chỉ số khối cơ thể được sử dụng để đánh giá tình trạng gầy, bình thường, thừa cân hoặc béo phì của một người.",
     "importance": "BMI cao làm tăng nguy cơ mắc bệnh tim mạch, tăng huyết áp, đái tháo đường và nhiều bệnh mạn tính khác.",
     "unit": "kg/m²",
     "indicator_type": "calculated",
     "required_inputs": [
-        "chieuCao",
-        "canNang"
-    ],
-    "formula": "canNang / chieuCao * chieuCao",
-    "normal_ranges": [
         {
-            "label": "Thiếu Cân",
-            "min": 0.0,
-            "max": 18.5
+            "code": "chieuCao",
+            "name": "Chiều Cao"
         },
         {
-            "label": "Bình Thường",
+            "code": "canNang",
+            "name": "Cân Nặng"
+        }
+    ],
+    "formula": "Cận Nặng / Chiều Cao * Chiều Cao",
+    "normal_ranges": [
+        {
+            "code": "thieuCan",
+            "name": "Thiếu Cân",
+            "min": 0.0,
+            "max": 18.4
+        },
+        {
+            "code": "binhThuong",
+            "name": "Bình Thường",
             "min": 18.5,
             "max": 24.9
         },
         {
-            "label": "Thừa Cân",
+            "code": "thuaCan",
+            "name": "Thừa Cân",
             "min": 25.0,
-            "max": 29.9
+            "max": 28.0
         },
         {
-            "label": "Béo Phì",
+            "code": "beoPhi",
+            "name": "Béo Phì",
             "min": 30.0,
-            "max": 100.0
+            "max": 99.0
         }
     ],
     "recommendations": [
@@ -40,15 +50,28 @@
         "Theo dõi cân nặng định kỳ."
     ],
     "related_diseases": [
-        "Tiểu Đường",
-        "Tăng Huyết Áp",
-        "Tim Mạch",
-        "Gan Nhiễm Mỡ"
+        {
+            "code": "tieuDuong",
+            "name": "Tiểu Đường"
+        },
+        {
+            "code": "caoHuyetAp",
+            "name": "Cao Huyết Áp"
+        },
+        {
+            "code": "timMach",
+            "name": "Tim Mạch"
+        },
+        {
+            "code": "ganNhiemMo",
+            "name": "Gan Nhiễm Mỡ"
+        }
     ],
     "images": [
-        "https://media.istockphoto.com/id/2021355527/vi/vec-to/ch%E1%BB%89-s%E1%BB%91-b%C3%A9o-ph%C3%AC-bmi-ch%E1%BB%89-s%E1%BB%91-kh%E1%BB%91i-c%C6%A1-th%E1%BB%83-b%E1%BB%8B-c%C3%B4-l%E1%BA%ADp-tr%C3%AAn-n%E1%BB%81n-tr%E1%BA%AFng-ki%E1%BB%83m-so%C3%A1t-c%C3%A2n-n%E1%BA%B7ng-vector.jpg?s=612x612&w=0&k=20&c=2K4db4vIFpVQLxeLDyoRO0dxcE8w-hAVUzuVuDuebaw="
+        "https://media.istockphoto.com/id/2021355527/vi/vec-to/ch%E1%BB%89-s%E1%BB%91-b%C3%A9o-ph%C3%AC-bmi-ch%E1%BB%89-s%E1%BB%91-kh%E1%BB%91i-c%C6%A1-th%E1%BB%83-b%E1%BB%8B-c%C3%B4-l%E1%BA%ADp-tr%C3%AAn-n%E1%BB%81n-tr%E1%BA%AFng-ki%E1%BB%83m-so%C3%A1t-c%C3%A2n-n%E1%BA%B7ng-vector.jpg?s=612x612&w=0&k=20&c=2K4db4vIFpVQLxeLDyoRO0dxcE8w-hAVUzuVuDuebaw=",
+        "https://file.hstatic.net/1000185761/file/chi-so-bmi_21bd7ab74df24f77bcc1101a701f4011.jpg"
     ],
-    "source": "WHO",
+    "source": "https://www.who.int/news-room/fact-sheets/detail/obesity-and-overweight",
     "usable_for_assessment": true,
     "is_active": true
 }

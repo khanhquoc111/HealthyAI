@@ -11,7 +11,12 @@ export default function BSNav({ currentTab, setCurrentTab }) {
         <span>
           HealthyAI
           <br />
-          <small style={{ fontSize: "12px", color: "#64748B", fontWeight: "500" }}> Quản lý Y tế </small>
+          <small
+            style={{ fontSize: "12px", color: "#64748B", fontWeight: "500" }}
+          >
+            {" "}
+            Quản lý Y tế{" "}
+          </small>
         </span>
       </div>
 
@@ -31,17 +36,26 @@ export default function BSNav({ currentTab, setCurrentTab }) {
         </li>
 
         <li
-          className={`bs-nav-item ${currentTab === "them-benh" ? "active" : ""}`}
-          onClick={() => setCurrentTab("them-benh")}
-        >
-          <i className="fa-solid fa-file-circle-plus"></i> Thêm bệnh mới
-        </li>
-
-        <li
           className={`bs-nav-item ${currentTab === "them-chi-so" ? "active" : ""}`}
           onClick={() => setCurrentTab("them-chi-so")}
         >
           <i className="fa-solid fa-vial-virus"></i> Thêm chỉ số mới
+        </li>
+
+        <li
+          className={`bs-nav-item ${currentTab === "them-luat-benh" ? "active" : ""}`}
+          onClick={() => setCurrentTab("them-luat-benh")}
+        >
+          <i className="fa-solid fa-file-medical"></i> Thêm luật bệnh
+        </li>
+
+        
+
+        <li
+          className={`bs-nav-item ${currentTab === "them-benh" ? "active" : ""}`}
+          onClick={() => setCurrentTab("them-benh")}
+        >
+          <i className="fa-solid fa-file-circle-plus"></i> Thêm bệnh mới
         </li>
 
         <li
@@ -57,6 +71,13 @@ export default function BSNav({ currentTab, setCurrentTab }) {
           onClick={() => setCurrentTab("thong-ke")}
         >
           <i className="fa-solid fa-chart-column"></i> Thống kê nguy cơ
+        </li>
+
+        <li
+          className={`bs-nav-item ${currentTab === "dang-xuat" ? "active" : ""}`}
+          onClick={() => setCurrentTab("dang-xuat")}
+        >
+          <i className="fa-solid fa-right-from-bracket"></i> Đăng xuất
         </li>
       </ul>
     </aside>

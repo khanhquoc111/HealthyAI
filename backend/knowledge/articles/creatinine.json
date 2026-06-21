@@ -1,47 +1,65 @@
 {
-  "id": "creatinine",
-  "name": "Creatinine Huyết Thanh",
-  "category": "kidney_function",
-
-  "summary": "Creatinine là sản phẩm thải từ quá trình chuyển hóa cơ bắp và được thận lọc khỏi máu.",
-
-  "description": "Creatinine huyết thanh là một trong những chỉ số quan trọng để đánh giá chức năng thận. Khi thận hoạt động kém, nồng độ creatinine trong máu có xu hướng tăng lên do khả năng lọc và đào thải chất thải bị suy giảm.",
-
-  "formula": "Đo trực tiếp nồng độ Creatinine trong máu (mg/dL hoặc µmol/L).",
-
-  "images": [
-    "/static/knowledge/creatinine/cover.png",
-    "/static/knowledge/creatinine/kidney-function.png"
-  ],
-
-  "normal_ranges": [
-    {
-      "label": "Nam giới bình thường",
-      "min": 0.74,
-      "max": 1.35
-    },
-    {
-      "label": "Nữ giới bình thường",
-      "min": 0.59,
-      "max": 1.04
-    }
-  ],
-
-  "importance": "Creatinine là chỉ số nền tảng để đánh giá chức năng thận và được sử dụng để tính eGFR. Nồng độ creatinine tăng có thể là dấu hiệu của bệnh thận mạn, suy thận hoặc tổn thương thận.",
-
-  "recommendations": [
-    "Uống đủ nước theo khuyến nghị của bác sĩ.",
-    "Theo dõi chức năng thận định kỳ nếu creatinine tăng.",
-    "Kiểm soát tốt huyết áp và đường huyết.",
-    "Hạn chế sử dụng thuốc có nguy cơ ảnh hưởng đến thận khi chưa có chỉ định y tế."
-  ],
-
-  "related_diseases": [
-    "Bệnh thận mạn",
-    "Suy thận",
-    "Tăng huyết áp",
-    "Tiểu Đường"
-  ],
-
-  "source": "National Kidney Foundation (NKF)"
+    "id": "creatinine",
+    "name": "Chỉ số Creatinine",
+    "category": "chiSoThan",
+    "summary": "Creatinine là sản phẩm phụ của quá trình chuyển hóa cơ bắp, được lọc qua thận và đào thải qua nước tiểu. Đây là chỉ số quan trọng để đánh giá chức năng thận.",
+    "description": "Creatinine là chất thải được tạo ra từ sự phân hủy của creatine (một hợp chất tạo năng lượng cho cơ bắp). Khi thận khỏe mạnh, chúng sẽ lọc creatinine ra khỏi máu hiệu quả. Nồng độ creatinine trong máu cao thường là dấu hiệu cho thấy chức năng lọc của thận bị suy giảm.",
+    "importance": "Theo dõi creatinine giúp phát hiện sớm các bệnh lý về thận, đánh giá mức độ suy thận và theo dõi hiệu quả điều trị các bệnh có ảnh hưởng đến thận như cao huyết áp hoặc tiểu đường.",
+    "unit": "mg/dL",
+    "indicator_type": "measured",
+    "required_inputs": [
+        {
+            "code": "creatinineMau",
+            "name": "Nồng độ Creatinine trong máu"
+        },
+        {
+            "code": "gioiTinh",
+            "name": "Giới tính"
+        },
+        {
+            "code": "tuoi",
+            "name": "Tuổi"
+        }
+    ],
+    "formula": "Xét nghiệm máu (Có thể kết hợp tính eGFR - độ lọc cầu thận)",
+    "normal_ranges": [
+        {
+            "code": "namGioi",
+            "name": "Nam giới",
+            "min": 0.7,
+            "max": 1.3
+        },
+        {
+            "code": "nuGioi",
+            "name": "Nữ giới",
+            "min": 0.6,
+            "max": 1.1
+        }
+    ],
+    "recommendations": [
+        "Uống đủ nước hàng ngày để hỗ trợ thận làm việc hiệu quả.",
+        "Kiểm soát huyết áp và đường huyết nếu có bệnh lý nền.",
+        "Hạn chế sử dụng các loại thuốc giảm đau không kê đơn kéo dài (như NSAIDs) vì có thể hại thận.",
+        "Thực hiện chế độ ăn giảm muối và protein phù hợp theo tư vấn của bác sĩ."
+    ],
+    "related_diseases": [
+        {
+            "code": "suyThan",
+            "name": "Suy Thận"
+        },
+        {
+            "code": "caoHuyetAp",
+            "name": "Cao Huyết Áp"
+        },
+        {
+            "code": "tieuDuong",
+            "name": "Tiểu Đường"
+        }
+    ],
+    "images": [
+        "https://www.osmosis.org/_next/image?url=https%3A%2F%2Fd16qt3wv6xm098.cloudfront.net%2FRrja6sz3QVGx12DN1xcZ--_aRveTY2qU%2F_.png&w=1920&q=75"
+    ],
+    "source": "https://www.kidney.org/atoz/content/creatinine",
+    "usable_for_assessment": true,
+    "is_active": true
 }
