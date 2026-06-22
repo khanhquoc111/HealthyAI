@@ -1,23 +1,27 @@
-// src/screens/DangNhapScreen.jsx
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
-  View,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView as ScrollViewType,
+  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
+  View,
 } from "react-native";
-import { login } from "../api/authApi";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { COLORS, FONTS, RADIUS, SHADOW, SPACING } from "../../constants/appTheme";
+import { login } from "../api/authApi";
+import { AppCard } from "../components/ui/AppCard";
+import { PrimaryButton } from "../components/ui/PrimaryButton";
+import { StatusMessage } from "../components/ui/StatusMessage";
 import { useAuth } from "../context/AuthContext";
-import { COLORS, FONTS, RADIUS } from "../../constants/appTheme";
 
 export default function DangNhapScreen() {
   const { setUser } = useAuth();
+  const scrollRef = useRef<ScrollViewType>(null);
   const [form, setForm] = useState({ tenDangNhap: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -33,13 +37,10 @@ export default function DangNhapScreen() {
       const data = await login(form.tenDangNhap, form.password);
       setUser(data.tenDangNhap);
     } catch (err: any) {
-      console.log("LOGIN ERROR:", JSON.stringify(err?.response?.data));
-      console.log("LOGIN MESSAGE:", err?.message);
-      console.log("LOGIN CODE:", err?.code);
       setError(
         err?.response?.data?.detail ||
           err?.message ||
-          "Đã xảy ra lỗi kết nối với máy chủ!",
+          "Đã xảy ra lỗi kết nối với máy chủ.",
       );
     } finally {
       setLoading(false);
@@ -48,137 +49,143 @@ export default function DangNhapScreen() {
 
   return (
     <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 0}
       style={styles.flex}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
+        automaticallyAdjustKeyboardInsets
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
+        ref={scrollRef}
+        showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.logo}>🏥 HealthyAI</Text>
-          <Text style={styles.subtitle}>
-            Hệ thống đánh giá nguy cơ bệnh mạn tính
-          </Text>
+          <View style={styles.logoMark}>
+            <MaterialCommunityIcons color="#fff" name="heart-pulse" size={34} />
+          </View>
+          <Text style={styles.logo}>HealthyAI</Text>
+          <Text style={styles.subtitle}>Theo dõi hồ sơ và đánh giá nguy cơ bệnh mạn tính.</Text>
         </View>
 
-        {/* Card */}
-        <View style={styles.card}>
-          <Text style={styles.title}>Đăng Nhập</Text>
+        <AppCard style={styles.card}>
+          <Text style={styles.title}>Đăng nhập</Text>
 
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? <StatusMessage type="error">{error}</StatusMessage> : null}
 
           <Text style={styles.label}>Tên đăng nhập</Text>
           <TextInput
-            style={styles.input}
+            autoCapitalize="none"
+            onChangeText={(value) => setForm({ ...form, tenDangNhap: value })}
             placeholder="Nhập tên đăng nhập"
             placeholderTextColor={COLORS.textLight}
-            autoCapitalize="none"
+            style={styles.input}
+            textContentType="username"
             value={form.tenDangNhap}
-            onChangeText={(v) => setForm({ ...form, tenDangNhap: v })}
           />
 
           <Text style={styles.label}>Mật khẩu</Text>
           <TextInput
-            style={styles.input}
+            onChangeText={(value) => setForm({ ...form, password: value })}
+            onFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 120)}
             placeholder="Nhập mật khẩu"
             placeholderTextColor={COLORS.textLight}
             secureTextEntry
+            style={styles.input}
+            textContentType="password"
             value={form.password}
-            onChangeText={(v) => setForm({ ...form, password: v })}
           />
 
-          <TouchableOpacity
-            style={[styles.btn, loading && styles.btnDisabled]}
-            onPress={handleLogin}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.btnText}>Đăng Nhập</Text>
-            )}
-          </TouchableOpacity>
+          <PrimaryButton loading={loading} onPress={handleLogin} style={styles.button}>
+            Đăng nhập
+          </PrimaryButton>
 
           <TouchableOpacity onPress={() => router.push("/(auth)/dang-ky")}>
             <Text style={styles.switchText}>
-              Chưa có tài khoản?{" "}
-              <Text style={styles.switchLink}>Đăng ký ngay</Text>
+              Chưa có tài khoản? <Text style={styles.switchLink}>Đăng ký ngay</Text>
             </Text>
           </TouchableOpacity>
-        </View>
+        </AppCard>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: COLORS.background },
-  container: { flexGrow: 1, justifyContent: "center", padding: 24 },
-  header: { alignItems: "center", marginBottom: 32 },
-  logo: { fontSize: FONTS.xxl, fontWeight: "800", color: COLORS.primary },
-  subtitle: {
-    fontSize: FONTS.sm,
-    color: COLORS.textSub,
-    marginTop: 6,
-    textAlign: "center",
+  button: {
+    marginTop: SPACING.xl,
   },
   card: {
-    backgroundColor: COLORS.card,
-    borderRadius: RADIUS.lg,
-    padding: 24,
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    padding: SPACING.xxl,
+    ...SHADOW.lift,
   },
-  title: {
-    fontSize: FONTS.xl,
-    fontWeight: "700",
-    color: COLORS.secondary,
-    marginBottom: 20,
-    textAlign: "center",
+  container: {
+    flexGrow: 1,
+    justifyContent: "center",
+    padding: SPACING.xxl,
+    paddingBottom: 120,
+    paddingTop: 48,
   },
-  error: {
-    backgroundColor: "#fef2f2",
-    color: "#b91c1c",
-    padding: 10,
-    borderRadius: RADIUS.sm,
-    marginBottom: 14,
-    textAlign: "center",
-    fontSize: FONTS.sm,
+  flex: {
+    backgroundColor: COLORS.background,
+    flex: 1,
   },
-  label: {
-    fontSize: FONTS.sm,
-    fontWeight: "600",
-    color: COLORS.secondary,
-    marginBottom: 6,
-    marginTop: 12,
+  header: {
+    alignItems: "center",
+    marginBottom: 32,
   },
   input: {
-    borderWidth: 1,
     borderColor: COLORS.border,
     borderRadius: RADIUS.sm,
-    padding: 12,
-    fontSize: FONTS.base,
+    borderWidth: 1,
     color: COLORS.textMain,
+    fontSize: FONTS.base,
+    minHeight: 48,
+    padding: SPACING.md,
   },
-  btn: {
-    backgroundColor: COLORS.primary,
-    borderRadius: RADIUS.sm,
-    padding: 14,
+  label: {
+    color: COLORS.secondary,
+    fontSize: FONTS.sm,
+    fontWeight: "700",
+    marginBottom: 6,
+    marginTop: SPACING.md,
+  },
+  logo: {
+    color: COLORS.primary,
+    fontSize: FONTS.xxl,
+    fontWeight: "900",
+    marginTop: SPACING.md,
+  },
+  logoMark: {
     alignItems: "center",
-    marginTop: 20,
+    backgroundColor: COLORS.primary,
+    borderRadius: RADIUS.xl,
+    height: 64,
+    justifyContent: "center",
+    width: 64,
   },
-  btnDisabled: { opacity: 0.6 },
-  btnText: { color: "#fff", fontSize: FONTS.md, fontWeight: "700" },
-  switchText: {
-    textAlign: "center",
-    marginTop: 18,
+  subtitle: {
     color: COLORS.textSub,
     fontSize: FONTS.sm,
+    lineHeight: 20,
+    marginTop: SPACING.sm,
+    textAlign: "center",
   },
-  switchLink: { color: COLORS.primary, fontWeight: "600" },
+  switchLink: {
+    color: COLORS.primary,
+    fontWeight: "800",
+  },
+  switchText: {
+    color: COLORS.textSub,
+    fontSize: FONTS.sm,
+    marginTop: SPACING.lg,
+    textAlign: "center",
+  },
+  title: {
+    color: COLORS.secondary,
+    fontSize: FONTS.xl,
+    fontWeight: "800",
+    marginBottom: SPACING.lg,
+    textAlign: "center",
+  },
 });

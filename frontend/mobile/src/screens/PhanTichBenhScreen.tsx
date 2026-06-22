@@ -1,31 +1,23 @@
-// src/screens/PhanTichBenhScreen.jsx
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  StyleSheet,
   ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
   TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import {
-  getPlugins,
-  getPluginMetadata,
-  getHealthProfile,
-  scorePlugin,
-} from "../api/healthApi";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { COLORS, FONTS, RADIUS, SPACING, riskColor, riskColorByLevel } from "../../constants/appTheme";
+import { getHealthProfile, getPluginMetadata, getPlugins, scorePlugin } from "../api/healthApi";
+import { AppCard } from "../components/ui/AppCard";
+import { PillGroup } from "../components/ui/PillGroup";
+import { PrimaryButton } from "../components/ui/PrimaryButton";
+import { StatusMessage } from "../components/ui/StatusMessage";
 import { useAuth } from "../context/AuthContext";
-import {
-  COLORS,
-  FONTS,
-  RADIUS,
-  riskColor,
-  riskColorByLevel,
-} from "../../constants/appTheme";
 
-// EAV fallback — giống hệt web
-const EAV_FALLBACK = {
+const EAV_FALLBACK: Record<string, string> = {
   age: "tuoi",
   systolic: "huyetApTamThu",
   diastolic: "huyetApTamTruong",
@@ -45,219 +37,199 @@ const EAV_FALLBACK = {
   family_history_cardiovascular: "giaDinhTimMach",
 };
 
+const PLUGIN_LABELS: Record<string, string> = {
+  cardiovascular: "Tim mạch",
+  diabetes: "Tiểu đường",
+  hypertension: "Tăng huyết áp",
+  kidney: "Thận mạn",
+  stroke: "Đột quỵ",
+};
+
+const FIELD_LABELS: Record<string, string> = {
+  age: "Tuổi",
+  alcohol: "Tình trạng uống rượu bia",
+  bmi: "Chỉ số khối cơ thể",
+  creatinine: "Creatinine",
+  diastolic: "Huyết áp tâm trương",
+  exercise_minutes_per_week: "Số phút vận động mỗi tuần",
+  family_history_cardiovascular: "Tiền sử gia đình bệnh tim mạch",
+  family_history_diabetes: "Tiền sử gia đình tiểu đường",
+  family_history_hypertension: "Tiền sử gia đình cao huyết áp",
+  fasting_glucose: "Đường huyết đói",
+  hba1c: "HbA1c",
+  hdl: "Cholesterol HDL",
+  ldl: "Cholesterol LDL",
+  smoking_status: "Tình trạng hút thuốc",
+  systolic: "Huyết áp tâm thu",
+  total_cholesterol: "Cholesterol toàn phần",
+  waist: "Vòng eo",
+};
+
 function resolveFieldValue(field: any, healthProfile: any) {
   const direct = healthProfile?.[field.key];
-  const fallbackKey =
-    EAV_FALLBACK[
-      (field.health_profile_key || field.key) as keyof typeof EAV_FALLBACK
-    ];
+  const fallbackKey = EAV_FALLBACK[field.health_profile_key || field.key];
   const fallback = healthProfile?.[fallbackKey];
+  const value = direct !== undefined && direct !== null && direct !== "" ? direct : fallback;
 
-  // Ưu tiên lấy key trực tiếp, nếu không có thì lấy qua fallback
-  let v =
-    direct !== undefined && direct !== null && direct !== ""
-      ? direct
-      : fallback;
+  if (value === undefined || value === null || value === "") return "";
 
-  if (v === undefined || v === null || v === "") return "";
-
-  // 1. Ép kiểu chuẩn xác cho mục Boolean (Tiền sử gia đình, Bệnh lý)
   if (field.type === "boolean") {
-    // Bất kể DB lưu 1, true (boolean) hay "true", đều quy về chuỗi "true" cho giao diện
-    if (
-      v === true ||
-      v === 1 ||
-      v === "1" ||
-      String(v).toLowerCase() === "true"
-    )
+    if (value === true || value === 1 || value === "1" || String(value).toLowerCase() === "true") {
       return "true";
+    }
     return "false";
   }
 
-  // 2. Ép kiểu cho mục Select (Lối sống) - Phiên dịch Tiếng Việt sang Value Plugin
   if (field.type === "select" && field.options) {
-    const strV = String(v).toLowerCase();
-    // Tự động map vào option đầu tiên (thường là Không/Nhạt/Never)
-    if (strV === "không" || strV === "nhạt")
-      return String(field.options[0]?.value ?? v);
-    // Tự động map vào option mức trung bình (Đã bỏ/Thỉnh thoảng/Former)
-    if (strV === "đã bỏ" || strV === "vừa" || strV === "thỉnh thoảng")
-      return String(field.options[1]?.value ?? v);
-    // Tự động map vào option mức cao nhất (Đang hút/Nhiều/Current)
-    if (
-      strV === "đang hút" ||
-      strV === "mặn" ||
-      strV === "thường xuyên" ||
-      strV === "nhiều"
-    ) {
-      return String(field.options[field.options.length - 1]?.value ?? v);
+    const normalized = String(value).toLowerCase();
+    if (normalized === "không" || normalized === "nhạt") return String(field.options[0]?.value ?? value);
+    if (normalized === "đã bỏ" || normalized === "vừa" || normalized === "thỉnh thoảng") {
+      return String(field.options[1]?.value ?? value);
+    }
+    if (normalized === "đang hút" || normalized === "mặn" || normalized === "thường xuyên" || normalized === "nhiều") {
+      return String(field.options[field.options.length - 1]?.value ?? value);
     }
   }
 
-  return String(v);
+  return String(value);
 }
-// ── Sub-components ──────────────────────────────────────────────────────────
-function ScoreBar({ score, color }: any) {
+
+function getFieldLabel(field: any) {
+  return FIELD_LABELS[field.key] || field.label || field.key;
+}
+
+function getOptionLabel(option: any) {
+  const value = String(option.value);
+  const lower = value.toLowerCase();
+  if (lower === "true") return "Có";
+  if (lower === "false") return "Không";
+  if (lower === "never" || value === "0") return "Không";
+  if (lower === "former") return "Đã bỏ";
+  if (lower === "current" || value === "1") return "Có";
+  return option.label || value;
+}
+
+function ScoreBar({ color, score }: { color: string; score: number }) {
   return (
     <View style={styles.barTrack}>
-      <View
-        style={[
-          styles.barFill,
-          { width: `${Math.min(score, 100)}%`, backgroundColor: color },
-        ]}
-      />
+      <View style={[styles.barFill, { width: `${Math.min(score, 100)}%`, backgroundColor: color }]} />
+    </View>
+  );
+}
+
+function RiskPill({ color, label }: { color: string; label: string }) {
+  return (
+    <View style={[styles.riskPill, { backgroundColor: color + "22", borderColor: color }]}>
+      <Text style={[styles.riskPillText, { color }]}>{label || "N/A"}</Text>
     </View>
   );
 }
 
 function RuleCard({ data }: any) {
   if (!data) return null;
-  const color = riskColor(data.score ?? 0);
-  const lvlColor = riskColorByLevel(data.risk_level ?? "");
+  const score = data.score ?? 0;
+  const color = riskColor(score);
+  const levelColor = riskColorByLevel(data.risk_level ?? "");
+
   return (
-    <View style={styles.resultCard}>
+    <AppCard style={styles.resultCard}>
       <View style={styles.cardHeader}>
-        <Text style={styles.cardEngine}>📋 Rule-based Engine</Text>
-        <Text style={[styles.cardScore, { color }]}>
-          {(data.score ?? 0).toFixed(1)} điểm
-        </Text>
+        <View style={styles.resultTitleWrap}>
+          <MaterialCommunityIcons color={COLORS.primary} name="clipboard-check" size={22} />
+          <Text style={styles.cardEngine}>Luật đánh giá</Text>
+        </View>
+        <Text style={[styles.cardScore, { color }]}>{score.toFixed(1)} điểm</Text>
       </View>
-      <ScoreBar score={data.score ?? 0} color={color} />
+      <ScoreBar color={color} score={score} />
       <View style={styles.levelRow}>
         <Text style={styles.levelLabel}>Phân tầng nguy cơ</Text>
-        <View
-          style={[
-            styles.pill,
-            { backgroundColor: lvlColor + "22", borderColor: lvlColor },
-          ]}
-        >
-          <Text style={[styles.pillText, { color: lvlColor }]}>
-            {String(data.risk_level ?? "").toUpperCase()}
-          </Text>
-        </View>
+        <RiskPill color={levelColor} label={String(data.risk_level ?? "").toUpperCase()} />
       </View>
-      {data.matched_rules?.length > 0 && (
+      {data.matched_rules?.length > 0 ? (
         <View style={styles.rulesBox}>
           <Text style={styles.rulesHeading}>Yếu tố kích hoạt</Text>
-          {data.matched_rules.map((r: any, i: any) => (
-            <Text key={i} style={styles.ruleItem}>
-              • {r.description || r.id}
+          {data.matched_rules.map((rule: any, index: number) => (
+            <Text key={index} style={styles.ruleItem}>
+              {rule.description || rule.id}
             </Text>
           ))}
         </View>
-      )}
-    </View>
+      ) : null}
+    </AppCard>
   );
 }
 
 function AICard({ data }: any) {
   if (!data) return null;
-  const isReady = data.status === "READY";
+  const ready = data.status === "READY";
   const pct = (data.probability ?? 0) * 100;
   const color = riskColor(pct);
-  const lvlColor = riskColorByLevel(data.risk_level ?? "");
+  const levelColor = riskColorByLevel(data.risk_level ?? "");
+
   return (
-    <View style={styles.resultCard}>
+    <AppCard style={styles.resultCard}>
       <View style={styles.cardHeader}>
-        <Text style={styles.cardEngine}>🧠 AI Model</Text>
-        {isReady ? (
-          <Text style={[styles.cardScore, { color }]}>{pct.toFixed(1)}%</Text>
-        ) : (
-          <View
-            style={[
-              styles.pill,
-              {
-                backgroundColor: COLORS.warning + "22",
-                borderColor: COLORS.warning,
-              },
-            ]}
-          >
-            <Text style={[styles.pillText, { color: COLORS.warning }]}>
-              PARTIAL
-            </Text>
-          </View>
-        )}
+        <View style={styles.resultTitleWrap}>
+          <MaterialCommunityIcons color={COLORS.accent} name="brain" size={22} />
+          <Text style={styles.cardEngine}>Mô hình AI</Text>
+        </View>
+        {ready ? <Text style={[styles.cardScore, { color }]}>{pct.toFixed(1)}%</Text> : <RiskPill color={COLORS.warning} label="Thiếu dữ liệu" />}
       </View>
-      {isReady ? (
+      {ready ? (
         <>
-          <ScoreBar score={pct} color={color} />
+          <ScoreBar color={color} score={pct} />
           <View style={styles.levelRow}>
             <Text style={styles.levelLabel}>Phân tầng</Text>
-            <View
-              style={[
-                styles.pill,
-                { backgroundColor: lvlColor + "22", borderColor: lvlColor },
-              ]}
-            >
-              <Text style={[styles.pillText, { color: lvlColor }]}>
-                {String(data.risk_level ?? "").toUpperCase()}
-              </Text>
-            </View>
+            <RiskPill color={levelColor} label={String(data.risk_level ?? "").toUpperCase()} />
           </View>
-          <Text style={styles.confidence}>
-            Độ tin cậy: {data.confidence ?? 0}%
-          </Text>
+          <Text style={styles.confidence}>Độ tin cậy: {data.confidence ?? 0}%</Text>
         </>
       ) : (
-        <View style={styles.partialBox}>
-          <Text style={styles.partialText}>
-            ⚠️ Cần điền đầy đủ chỉ số sinh hóa trong Hồ sơ sức khỏe để kích hoạt
-            AI.
-          </Text>
-          {data.missing_features?.length > 0 && (
-            <Text style={styles.missingText}>
-              Thiếu: {data.missing_features.join(", ")}
-            </Text>
-          )}
-        </View>
+        <StatusMessage type="warning">
+          Cần điền thêm chỉ số sinh hóa trong hồ sơ sức khỏe để kích hoạt AI.
+        </StatusMessage>
       )}
-    </View>
+    </AppCard>
   );
 }
 
 function RecsCard({ recs }: any) {
   if (!recs?.length) return null;
+
   return (
-    <View
-      style={[
-        styles.resultCard,
-        { borderLeftWidth: 4, borderLeftColor: COLORS.primary },
-      ]}
-    >
-      <Text style={styles.recsTitle}>💡 Khuyến nghị cá nhân hóa</Text>
-      {recs.map((rec: any, i: any) => {
+    <AppCard style={styles.resultCard}>
+      <View style={styles.resultTitleWrap}>
+        <MaterialCommunityIcons color={COLORS.warning} name="lightbulb-on" size={22} />
+        <Text style={styles.recsTitle}>Khuyến nghị cá nhân hóa</Text>
+      </View>
+      {recs.map((rec: any, index: number) => {
         const text = typeof rec === "string" ? rec : rec.text;
         return (
-          <View key={i} style={styles.recItem}>
+          <View key={index} style={styles.recItem}>
             <View style={styles.recNum}>
-              <Text style={styles.recNumText}>{i + 1}</Text>
+              <Text style={styles.recNumText}>{index + 1}</Text>
             </View>
             <Text style={styles.recText}>{text}</Text>
           </View>
         );
       })}
-    </View>
+    </AppCard>
   );
 }
 
-// ── Main screen ─────────────────────────────────────────────────────────────
 export default function PhanTichBenhScreen() {
   const { user } = useAuth();
-  const [plugins, setPlugins] = useState<any[]>([]);
+  const [plugins, setPlugins] = useState<string[]>([]);
   const [selectedPlugin, setSelected] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<any>(null);
   const [healthProfile, setProfile] = useState<any>({});
-  const [formValues, setFormValues] = useState<any>({});
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [loadingPlugins, setLoadingPlugins] = useState(true);
 
-  // Load plugins + health profile
   useEffect(() => {
-    Promise.all([
-      getPlugins(),
-      user ? getHealthProfile(user) : Promise.resolve({ data: {} }),
-    ])
+    Promise.all([getPlugins(), user ? getHealthProfile(user) : Promise.resolve({ data: {} })])
       .then(([pluginsRes, profileRes]) => {
         setPlugins(pluginsRes.plugins || []);
         setProfile(profileRes.data || {});
@@ -265,7 +237,6 @@ export default function PhanTichBenhScreen() {
       .finally(() => setLoadingPlugins(false));
   }, [user]);
 
-  // Load plugin metadata when selected
   const selectPlugin = useCallback(
     async (id: string) => {
       setSelected(id);
@@ -273,59 +244,50 @@ export default function PhanTichBenhScreen() {
       try {
         const meta = await getPluginMetadata(id);
         setMetadata(meta);
-        // Pre-fill form from health profile
-        const prefilled: any = {};
-        (meta.fields || []).forEach((f: any) => {
-          prefilled[f.key] = resolveFieldValue(f, healthProfile);
+        const prefilled: Record<string, string> = {};
+        (meta.fields || []).forEach((field: any) => {
+          prefilled[field.key] = resolveFieldValue(field, healthProfile);
         });
         setFormValues(prefilled);
-      } catch {}
+      } catch {
+        setMetadata(null);
+        setResult({ error: "Không thể tải cấu hình phân tích." });
+      }
     },
     [healthProfile],
   );
 
+  const requiredFilled = useMemo(() => {
+    const required = metadata?.fields?.filter((field: any) => field.required) || [];
+    if (!required.length) return true;
+    return required.every((field: any) => formValues[field.key] !== undefined && formValues[field.key] !== "");
+  }, [formValues, metadata]);
+
   const handleAnalyze = async () => {
-    if (!selectedPlugin || !user) return;
+    if (!selectedPlugin || !user || !metadata) return;
     setLoading(true);
     setResult(null);
 
     try {
-      // --- BƯỚC QUAN TRỌNG: PARSE DỮ LIỆU ---
       const payload: Record<string, any> = {};
-
-      (metadata?.fields || []).forEach((f: any) => {
-        const val = formValues[f.key];
-        if (val === undefined || val === "") return; // Bỏ qua trường rỗng
-
-        if (f.type === "boolean") {
-          // Trả về kiểu boolean nguyên thủy (không có dấu nháy kép)
-          payload[f.key] = val === "true";
-        } else if (f.type === "number") {
-          // Chuyển chuỗi thành số thực
-          payload[f.key] = Number(val);
-        } else {
-          // Các dạng select hoặc chuỗi văn bản giữ nguyên
-          payload[f.key] = val;
-        }
+      (metadata.fields || []).forEach((field: any) => {
+        const value = formValues[field.key];
+        if (value === undefined || value === "") return;
+        if (field.type === "boolean") payload[field.key] = value === "true";
+        else if (field.type === "number") payload[field.key] = Number(value);
+        else payload[field.key] = value;
       });
 
-      // Gửi 'payload' đã xử lý lên backend thay vì 'formValues' thô
       const res = await scorePlugin(selectedPlugin, user, payload);
       setResult(res);
-    } catch (e: any) {
-      const detail = e.response?.data?.detail;
-
+    } catch (error: any) {
+      const detail = error.response?.data?.detail;
       if (typeof detail === "object" && detail !== null) {
         const errorMsg = detail.message || "Dữ liệu không hợp lệ";
         const validationErrors = detail.errors
           ? detail.errors.map((err: any) => `- ${err.message}`).join("\n")
           : "";
-
-        setResult({
-          error: validationErrors
-            ? `${errorMsg}:\n${validationErrors}`
-            : errorMsg,
-        });
+        setResult({ error: validationErrors ? `${errorMsg}:\n${validationErrors}` : errorMsg });
       } else {
         setResult({ error: detail || "Lỗi khi phân tích" });
       }
@@ -335,83 +297,55 @@ export default function PhanTichBenhScreen() {
   };
 
   const renderField = (field: any) => {
-    const val = formValues[field.key] ?? "";
+    const value = formValues[field.key] ?? "";
+    const label = getFieldLabel(field);
+
     if (field.type === "boolean") {
       return (
         <View key={field.key} style={styles.fieldRow}>
-          <Text style={styles.fieldLabel}>{field.label}</Text>
-          <View style={styles.pillRow}>
-            {["true", "false"].map((opt) => (
-              <TouchableOpacity
-                key={opt}
-                style={[styles.optPill, val === opt && styles.optPillActive]}
-                onPress={() =>
-                  setFormValues((p: any) => ({ ...p, [field.key]: opt }))
-                }
-              >
-                <Text
-                  style={[
-                    styles.optPillText,
-                    val === opt && styles.optPillTextActive,
-                  ]}
-                >
-                  {opt === "true" ? "Có" : "Không"}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          <Text style={styles.fieldLabel}>{label}</Text>
+          <PillGroup
+            onChange={(nextValue) => setFormValues((previous) => ({ ...previous, [field.key]: nextValue }))}
+            options={[
+              { label: "Có", value: "true" },
+              { label: "Không", value: "false" },
+            ]}
+            value={value}
+          />
         </View>
       );
     }
+
     if (field.type === "select") {
       return (
         <View key={field.key} style={styles.fieldRow}>
-          <Text style={styles.fieldLabel}>{field.label}</Text>
-          <View style={styles.pillRow}>
-            {field.options?.map((opt: any) => (
-              <TouchableOpacity
-                key={opt.value}
-                style={[
-                  styles.optPill,
-                  val === opt.value && styles.optPillActive,
-                ]}
-                onPress={() =>
-                  setFormValues((p: any) => ({ ...p, [field.key]: opt.value }))
-                }
-              >
-                <Text
-                  style={[
-                    styles.optPillText,
-                    val === opt.value && styles.optPillTextActive,
-                  ]}
-                >
-                  {opt.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          <Text style={styles.fieldLabel}>{label}</Text>
+          <PillGroup
+            onChange={(nextValue) => setFormValues((previous) => ({ ...previous, [field.key]: nextValue }))}
+            options={(field.options || []).map((option: any) => ({
+              label: getOptionLabel(option),
+              value: String(option.value),
+            }))}
+            value={value}
+          />
         </View>
       );
     }
-    // number / text
+
     return (
       <View key={field.key} style={styles.fieldRow}>
         <Text style={styles.fieldLabel}>
-          {field.label}
+          {label}
           {field.required ? " *" : ""}
-          {field.unit ? (
-            <Text style={styles.unitInline}> ({field.unit})</Text>
-          ) : null}
+          {field.unit ? <Text style={styles.unitInline}> ({field.unit})</Text> : null}
         </Text>
         <TextInput
-          style={styles.input}
           keyboardType="decimal-pad"
-          value={String(val)}
-          onChangeText={(v) =>
-            setFormValues((p: any) => ({ ...p, [field.key]: v }))
-          }
+          onChangeText={(nextValue) => setFormValues((previous) => ({ ...previous, [field.key]: nextValue }))}
           placeholder={field.unit || "-"}
           placeholderTextColor={COLORS.textLight}
+          style={styles.input}
+          value={String(value)}
         />
       </View>
     );
@@ -420,276 +354,317 @@ export default function PhanTichBenhScreen() {
   if (loadingPlugins) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>Đang tải plugin...</Text>
+        <ActivityIndicator color={COLORS.primary} size="large" />
+        <Text style={styles.loadingText}>Đang tải dữ liệu phân tích...</Text>
       </View>
     );
   }
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
-      <Text style={styles.pageTitle}>Phân Tích Nguy Cơ</Text>
+      <Text style={styles.pageTitle}>Phân tích nguy cơ</Text>
+      <Text style={styles.pageSub}>Chọn bệnh, kiểm tra dữ liệu được lấy từ hồ sơ và chạy đánh giá.</Text>
 
-      {/* Plugin selector */}
       <Text style={styles.sectionTitle}>Chọn bệnh cần phân tích</Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.pluginRow}
-      >
-        {plugins.map((p) => (
-          <TouchableOpacity
-            key={p} // <-- Dùng trực tiếp chuỗi 'p' làm key
-            style={[
-              styles.pluginChip,
-              selectedPlugin === p && styles.pluginChipActive,
-            ]} // <-- So sánh trực tiếp với 'p'
-            onPress={() => selectPlugin(p)} // <-- Truyền trực tiếp 'p' vào hàm
-          >
-            <Text
-              style={[
-                styles.pluginChipText,
-                selectedPlugin === p && styles.pluginChipTextActive,
-              ]}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pluginRow}>
+        {plugins.map((plugin) => {
+          const active = selectedPlugin === plugin;
+          return (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              key={plugin}
+              onPress={() => selectPlugin(plugin)}
+              style={[styles.pluginChip, active && styles.pluginChipActive]}
             >
-              {p.toUpperCase()}{" "}
-              {/* <-- In hoa tên plugin để giao diện đẹp hơn (VD: DIABETES) */}
-            </Text>
-          </TouchableOpacity>
-        ))}
+              <MaterialCommunityIcons color={active ? "#fff" : COLORS.primary} name="chart-box" size={18} />
+              <Text style={[styles.pluginChipText, active && styles.pluginChipTextActive]}>
+                {PLUGIN_LABELS[plugin] || plugin}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
 
-      {/* Dynamic form */}
-      {metadata && (
-        <View style={styles.formCard}>
-          <Text style={styles.formTitle}>{metadata.disease_info?.name}</Text>
+      {metadata ? (
+        <AppCard style={styles.formCard}>
+          <View style={styles.formHeader}>
+            <View>
+              <Text style={styles.formTitle}>{PLUGIN_LABELS[selectedPlugin || ""] || "Đánh giá nguy cơ"}</Text>
+              <Text style={styles.formHint}>Các trường có dấu * là bắt buộc.</Text>
+            </View>
+            <View style={styles.prefillBadge}>
+              <MaterialCommunityIcons color={COLORS.accent} name="database-check" size={16} />
+              <Text style={styles.prefillText}>Từ hồ sơ</Text>
+            </View>
+          </View>
+
           {(metadata.fields || []).map(renderField)}
 
-          <TouchableOpacity
-            style={[styles.analyzeBtn, loading && styles.analyzeBtnDisabled]}
-            onPress={handleAnalyze}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.analyzeBtnText}>🔍 Phân tích nguy cơ</Text>
-            )}
-          </TouchableOpacity>
-        </View>
+          {!requiredFilled ? (
+            <StatusMessage type="warning">Vui lòng điền đủ trường bắt buộc trước khi phân tích.</StatusMessage>
+          ) : null}
+
+          <PrimaryButton disabled={!requiredFilled} loading={loading} onPress={handleAnalyze} style={styles.analyzeBtn}>
+            Phân tích nguy cơ
+          </PrimaryButton>
+        </AppCard>
+      ) : (
+        <AppCard style={styles.emptyCard}>
+          <MaterialCommunityIcons color={COLORS.primary} name="gesture-tap" size={34} />
+          <Text style={styles.emptyText}>Chọn một bệnh để bắt đầu phân tích.</Text>
+        </AppCard>
       )}
 
-      {/* Results */}
-      {result?.error && (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{result.error}</Text>
-        </View>
-      )}
-      {result && !result.error && (
+      {result?.error ? <StatusMessage type="error">{result.error}</StatusMessage> : null}
+
+      {result && !result.error ? (
         <View>
           <Text style={styles.sectionTitle}>Kết quả phân tích</Text>
           <RuleCard data={result.rule_based} />
           <AICard data={result.ai_based} />
           <RecsCard recs={result.recommendations} />
         </View>
-      )}
+      ) : null}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: COLORS.background },
-  container: { padding: 16, paddingBottom: 40 },
-  center: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12 },
-  loadingText: { color: COLORS.textSub, fontSize: FONTS.base },
-  pageTitle: {
-    fontSize: FONTS.xl,
-    fontWeight: "800",
-    color: COLORS.secondary,
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: FONTS.md,
-    fontWeight: "700",
-    color: COLORS.secondary,
-    marginBottom: 10,
-    marginTop: 4,
-  },
-  pluginRow: { marginBottom: 16 },
-  pluginChip: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: RADIUS.xl,
-    borderWidth: 1.5,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.card,
-    marginRight: 8,
-  },
-  pluginChipActive: {
-    borderColor: COLORS.primary,
-    backgroundColor: COLORS.primary,
-  },
-  pluginChipText: {
-    fontSize: FONTS.sm,
-    color: COLORS.textSub,
-    fontWeight: "600",
-  },
-  pluginChipTextActive: { color: "#fff" },
-  formCard: {
-    backgroundColor: COLORS.card,
-    borderRadius: RADIUS.md,
-    padding: 16,
-    marginBottom: 16,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-  },
-  formTitle: {
-    fontSize: FONTS.md,
-    fontWeight: "700",
-    color: COLORS.secondary,
-    marginBottom: 12,
-  },
-  fieldRow: { marginBottom: 14 },
-  fieldLabel: {
-    fontSize: FONTS.sm,
-    fontWeight: "600",
-    color: COLORS.secondary,
-    marginBottom: 6,
-  },
-  unitInline: { color: COLORS.textSub, fontWeight: "400" },
-  input: {
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: RADIUS.sm,
-    padding: 10,
-    fontSize: FONTS.base,
-    color: COLORS.textMain,
-  },
-  pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  optPill: {
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: RADIUS.xl,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: "#f8fafc",
-  },
-  optPillActive: {
-    borderColor: COLORS.primary,
-    backgroundColor: COLORS.primary,
-  },
-  optPillText: { fontSize: FONTS.sm, color: COLORS.textSub },
-  optPillTextActive: { color: "#fff", fontWeight: "600" },
   analyzeBtn: {
-    backgroundColor: COLORS.primary,
-    borderRadius: RADIUS.sm,
-    padding: 14,
-    alignItems: "center",
-    marginTop: 16,
+    marginTop: SPACING.lg,
   },
-  analyzeBtnDisabled: { opacity: 0.6 },
-  analyzeBtnText: { color: "#fff", fontSize: FONTS.md, fontWeight: "700" },
-  resultCard: {
-    backgroundColor: COLORS.card,
-    borderRadius: RADIUS.md,
-    padding: 16,
-    marginBottom: 12,
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
+  barFill: {
+    borderRadius: 4,
+    height: "100%",
   },
-  cardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  cardEngine: {
-    fontSize: FONTS.base,
-    fontWeight: "700",
-    color: COLORS.secondary,
-  },
-  cardScore: { fontSize: FONTS.lg, fontWeight: "800" },
   barTrack: {
-    height: 8,
     backgroundColor: COLORS.border,
     borderRadius: 4,
-    marginBottom: 12,
+    height: 8,
+    marginBottom: SPACING.md,
     overflow: "hidden",
   },
-  barFill: { height: "100%", borderRadius: 4 },
-  levelRow: {
+  cardEngine: {
+    color: COLORS.secondary,
+    fontSize: FONTS.base,
+    fontWeight: "800",
+  },
+  cardHeader: {
+    alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
+    marginBottom: SPACING.md,
+  },
+  cardScore: {
+    fontSize: FONTS.lg,
+    fontWeight: "900",
+  },
+  center: {
     alignItems: "center",
+    flex: 1,
+    gap: SPACING.md,
+    justifyContent: "center",
   },
-  levelLabel: { fontSize: FONTS.sm, color: COLORS.textSub },
-  pill: {
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: RADIUS.xl,
-    borderWidth: 1,
-  },
-  pillText: { fontSize: FONTS.sm, fontWeight: "700" },
-  confidence: { fontSize: FONTS.sm, color: COLORS.textSub, marginTop: 8 },
-  rulesBox: {
-    marginTop: 12,
-    backgroundColor: "#f8fafc",
-    borderRadius: RADIUS.sm,
-    padding: 10,
-  },
-  rulesHeading: {
+  confidence: {
+    color: COLORS.textSub,
     fontSize: FONTS.sm,
-    fontWeight: "700",
+    marginTop: SPACING.sm,
+  },
+  container: {
+    padding: SPACING.lg,
+    paddingBottom: 44,
+  },
+  emptyCard: {
+    alignItems: "center",
+    gap: SPACING.md,
+    marginBottom: SPACING.lg,
+  },
+  emptyText: {
+    color: COLORS.textSub,
+    fontSize: FONTS.base,
+    textAlign: "center",
+  },
+  fieldLabel: {
     color: COLORS.secondary,
+    fontSize: FONTS.sm,
+    fontWeight: "800",
     marginBottom: 6,
   },
-  ruleItem: { fontSize: FONTS.sm, color: COLORS.textSub, marginBottom: 3 },
-  partialBox: {
-    backgroundColor: "#fffbeb",
-    borderRadius: RADIUS.sm,
-    padding: 12,
-    marginTop: 8,
+  fieldRow: {
+    marginTop: SPACING.md,
   },
-  partialText: { fontSize: FONTS.sm, color: "#92400e" },
-  missingText: { fontSize: FONTS.sm, color: COLORS.textSub, marginTop: 4 },
-  recsTitle: {
-    fontSize: FONTS.base,
-    fontWeight: "700",
+  formCard: {
+    marginBottom: SPACING.lg,
+  },
+  formHeader: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: SPACING.md,
+    justifyContent: "space-between",
+    marginBottom: SPACING.xs,
+  },
+  formHint: {
+    color: COLORS.textSub,
+    fontSize: FONTS.sm,
+    marginTop: 2,
+  },
+  formTitle: {
     color: COLORS.secondary,
-    marginBottom: 12,
+    fontSize: FONTS.md,
+    fontWeight: "900",
+  },
+  input: {
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
+    color: COLORS.textMain,
+    fontSize: FONTS.base,
+    minHeight: 46,
+    padding: SPACING.md,
+  },
+  levelLabel: {
+    color: COLORS.textSub,
+    fontSize: FONTS.sm,
+  },
+  levelRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  loadingText: {
+    color: COLORS.textSub,
+    fontSize: FONTS.base,
+  },
+  pageSub: {
+    color: COLORS.textSub,
+    fontSize: FONTS.sm,
+    lineHeight: 20,
+    marginBottom: SPACING.lg,
+    marginTop: 4,
+  },
+  pageTitle: {
+    color: COLORS.secondary,
+    fontSize: FONTS.xl,
+    fontWeight: "900",
+  },
+  pluginChip: {
+    alignItems: "center",
+    backgroundColor: COLORS.card,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.xl,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: SPACING.xs,
+    marginRight: SPACING.sm,
+    minHeight: 42,
+    paddingHorizontal: SPACING.lg,
+  },
+  pluginChipActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  pluginChipText: {
+    color: COLORS.textSub,
+    fontSize: FONTS.sm,
+    fontWeight: "800",
+  },
+  pluginChipTextActive: {
+    color: "#fff",
+  },
+  pluginRow: {
+    marginBottom: SPACING.lg,
+  },
+  prefillBadge: {
+    alignItems: "center",
+    backgroundColor: COLORS.accentSoft,
+    borderRadius: RADIUS.xl,
+    flexDirection: "row",
+    gap: 4,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 6,
+  },
+  prefillText: {
+    color: COLORS.accent,
+    fontSize: 11,
+    fontWeight: "800",
   },
   recItem: {
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 8,
     alignItems: "flex-start",
+    flexDirection: "row",
+    gap: SPACING.sm,
+    marginTop: SPACING.md,
   },
   recNum: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: COLORS.primary,
-    justifyContent: "center",
     alignItems: "center",
+    backgroundColor: COLORS.primary,
+    borderRadius: 11,
+    height: 22,
+    justifyContent: "center",
+    width: 22,
   },
-  recNumText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  recNumText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "800",
+  },
   recText: {
+    color: COLORS.textSub,
     flex: 1,
     fontSize: FONTS.sm,
-    color: COLORS.textSub,
     lineHeight: 20,
   },
-  errorBox: {
-    backgroundColor: "#fef2f2",
-    borderRadius: RADIUS.sm,
-    padding: 14,
-    marginBottom: 12,
+  recsTitle: {
+    color: COLORS.secondary,
+    fontSize: FONTS.base,
+    fontWeight: "800",
   },
-  errorText: { color: "#b91c1c", fontSize: FONTS.sm },
+  resultCard: {
+    marginBottom: SPACING.md,
+  },
+  resultTitleWrap: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: SPACING.sm,
+  },
+  riskPill: {
+    borderRadius: RADIUS.xl,
+    borderWidth: 1,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 5,
+  },
+  riskPillText: {
+    fontSize: FONTS.sm,
+    fontWeight: "900",
+  },
+  ruleItem: {
+    color: COLORS.textSub,
+    fontSize: FONTS.sm,
+    lineHeight: 20,
+    marginTop: 4,
+  },
+  rulesBox: {
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.sm,
+    marginTop: SPACING.md,
+    padding: SPACING.md,
+  },
+  rulesHeading: {
+    color: COLORS.secondary,
+    fontSize: FONTS.sm,
+    fontWeight: "800",
+  },
+  scroll: {
+    backgroundColor: COLORS.background,
+    flex: 1,
+  },
+  sectionTitle: {
+    color: COLORS.secondary,
+    fontSize: FONTS.md,
+    fontWeight: "900",
+    marginBottom: SPACING.md,
+  },
+  unitInline: {
+    color: COLORS.textSub,
+    fontWeight: "400",
+  },
 });

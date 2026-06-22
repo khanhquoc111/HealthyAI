@@ -1,100 +1,259 @@
-// src/screens/TrangChuScreen.jsx
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
-import { router } from 'expo-router';
-import { useAuth } from '../context/AuthContext';
-import { COLORS, FONTS, RADIUS } from "../../constants/appTheme";
+import { useEffect, useMemo, useState } from "react";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useState, useEffect } from "react";
+import { router } from "expo-router";
+import { COLORS, FONTS, RADIUS, SPACING } from "../../constants/appTheme";
+import { AppCard } from "../components/ui/AppCard";
+import { PrimaryButton } from "../components/ui/PrimaryButton";
+import { useAuth } from "../context/AuthContext";
 
-const FEATURES = [
-  { icon: "🩺", title: "Phân tích Nguy cơ",  desc: "Đánh giá nguy cơ 5 bệnh mạn tính bằng AI",  screen: "PhanTichBenh" },
-  { icon: "📋", title: "Hồ sơ Sức khỏe",     desc: "Cập nhật chỉ số sinh hóa và thông tin cá nhân", screen: "HoSoSucKhoe" },
-  { icon: "💊", title: "Tra cứu Thuốc",       desc: "Tìm kiếm thông tin thuốc và tác dụng phụ",  screen: "TraThuoc" },
+type Feature = {
+  color: string;
+  desc: string;
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  route: string;
+  title: string;
+};
+
+const FEATURES: Feature[] = [
+  {
+    icon: "chart-box",
+    title: "Phân tích nguy cơ",
+    desc: "Đánh giá nguy cơ bệnh mạn tính từ hồ sơ sức khỏe.",
+    route: "/(tabs)/phan-tich-benh",
+    color: COLORS.primary,
+  },
+  {
+    icon: "clipboard-pulse",
+    title: "Hồ sơ sức khỏe",
+    desc: "Cập nhật chỉ số cá nhân, xét nghiệm và thói quen sống.",
+    route: "/(tabs)/ho-so-suc-khoe",
+    color: COLORS.accent,
+  },
+  {
+    icon: "pill",
+    title: "Tra cứu thuốc",
+    desc: "Tìm công dụng, liều dùng và tác dụng phụ thường gặp.",
+    route: "/(tabs)/tra-thuoc",
+    color: COLORS.warning,
+  },
 ];
 
 const DISEASES = [
-  { icon: "🩸", name: "Tiểu đường Type 2",  color: "#dbeafe" },
-  { icon: "❤️", name: "Tim mạch",           color: "#fee2e2" },
-  { icon: "🫀", name: "Tăng huyết áp",      color: "#fef3c7" },
-  { icon: "🫘", name: "Thận mạn tính",       color: "#d1fae5" },
-  { icon: "🧠", name: "Đột quỵ",            color: "#ede9fe" },
-];
+  { icon: "diabetes", name: "Tiểu đường type 2", color: "#dbeafe" },
+  { icon: "heart-pulse", name: "Tim mạch", color: "#fee2e2" },
+  { icon: "water-percent", name: "Tăng huyết áp", color: "#fef3c7" },
+  { icon: "water", name: "Thận mạn tính", color: "#d1fae5" },
+  { icon: "brain", name: "Đột quỵ", color: "#ede9fe" },
+] as const;
 
 export default function TrangChuScreen() {
   const { user, logout } = useAuth();
   const [hoTen, setHoTen] = useState<string | null>(null);
 
   useEffect(() => {
-    AsyncStorage.getItem("hoTen").then((name) => {
-      // Nếu API có trả về họ tên thì dùng, nếu không thì hiện tên đăng nhập
-      setHoTen(name || user); 
-    });
+    AsyncStorage.getItem("hoTen").then((name) => setHoTen(name || user));
   }, [user]);
+
+  const displayName = useMemo(() => hoTen || "bạn", [hoTen]);
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
-      {/* Greeting */}
-      <View style={styles.greetCard}>
-        <Text style={styles.greetHi}>Xin chào, 👋</Text>
-        <Text style={styles.greetName}>{hoTen}</Text>
-        <Text style={styles.greetSub}>Hãy theo dõi sức khỏe của bạn mỗi ngày</Text>
+      <View style={styles.hero}>
+        <View>
+          <Text style={styles.greetHi}>Xin chào,</Text>
+          <Text style={styles.greetName}>{displayName}</Text>
+          <Text style={styles.greetSub}>
+            Theo dõi hồ sơ và phân tích nguy cơ sức khỏe của bạn mỗi ngày.
+          </Text>
+        </View>
+        <View style={styles.heroIcon}>
+          <MaterialCommunityIcons color="#fff" name="heart-pulse" size={32} />
+        </View>
       </View>
 
-      {/* Feature cards */}
-      <Text style={styles.sectionTitle}>Chức năng chính</Text>
-      {FEATURES.map((f) => (
-        <TouchableOpacity
-          key={f.screen}
-          style={styles.featureCard}
-          onPress={() => router.push(`/(tabs)/${f.screen.replace(/([A-Z])/g, '-$1').toLowerCase().slice(1)}` as any)}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.featureIcon}>{f.icon}</Text>
-          <View style={styles.featureText}>
-            <Text style={styles.featureTitle}>{f.title}</Text>
-            <Text style={styles.featureDesc}>{f.desc}</Text>
+      <AppCard style={styles.actionCard}>
+        <View style={styles.actionHeader}>
+          <View style={styles.actionIcon}>
+            <MaterialCommunityIcons color={COLORS.primary} name="clipboard-check" size={24} />
           </View>
-          <Text style={styles.featureArrow}>›</Text>
+          <View style={styles.actionText}>
+            <Text style={styles.actionTitle}>Bước tiếp theo</Text>
+            <Text style={styles.actionSub}>
+              Cập nhật hồ sơ trước khi phân tích để kết quả chính xác hơn.
+            </Text>
+          </View>
+        </View>
+        <PrimaryButton onPress={() => router.push("/(tabs)/ho-so-suc-khoe")}>
+          Cập nhật hồ sơ
+        </PrimaryButton>
+      </AppCard>
+
+      <Text style={styles.sectionTitle}>Chức năng chính</Text>
+      {FEATURES.map((feature) => (
+        <TouchableOpacity
+          activeOpacity={0.85}
+          key={feature.route}
+          onPress={() => router.push(feature.route as never)}
+          style={styles.featureCard}
+        >
+          <View style={[styles.featureIcon, { backgroundColor: feature.color + "1f" }]}>
+            <MaterialCommunityIcons color={feature.color} name={feature.icon} size={26} />
+          </View>
+          <View style={styles.featureText}>
+            <Text style={styles.featureTitle}>{feature.title}</Text>
+            <Text style={styles.featureDesc}>{feature.desc}</Text>
+          </View>
+          <MaterialCommunityIcons color={COLORS.textLight} name="chevron-right" size={24} />
         </TouchableOpacity>
       ))}
 
-      {/* Disease chips */}
       <Text style={styles.sectionTitle}>Bệnh được hỗ trợ</Text>
       <View style={styles.diseaseRow}>
-        {DISEASES.map((d) => (
-          <View key={d.name} style={[styles.diseaseChip, { backgroundColor: d.color }]}>
-            <Text style={styles.diseaseIcon}>{d.icon}</Text>
-            <Text style={styles.diseaseName}>{d.name}</Text>
+        {DISEASES.map((disease) => (
+          <View key={disease.name} style={[styles.diseaseChip, { backgroundColor: disease.color }]}>
+            <MaterialCommunityIcons color={COLORS.secondary} name={disease.icon} size={16} />
+            <Text style={styles.diseaseName}>{disease.name}</Text>
           </View>
         ))}
       </View>
 
-      {/* Logout */}
-      <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
-        <Text style={styles.logoutText}>Đăng xuất</Text>
-      </TouchableOpacity>
+      <PrimaryButton variant="danger" onPress={logout}>
+        Đăng xuất
+      </PrimaryButton>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll:        { flex: 1, backgroundColor: COLORS.background },
-  container:     { padding: 16, paddingBottom: 32 },
-  greetCard:     { backgroundColor: COLORS.primary, borderRadius: RADIUS.lg, padding: 20, marginBottom: 20 },
-  greetHi:       { color: "rgba(255,255,255,0.8)", fontSize: FONTS.base },
-  greetName:     { color: "#fff", fontSize: FONTS.xl, fontWeight: "800", marginTop: 2 },
-  greetSub:      { color: "rgba(255,255,255,0.75)", fontSize: FONTS.sm, marginTop: 6 },
-  sectionTitle:  { fontSize: FONTS.md, fontWeight: "700", color: COLORS.secondary, marginBottom: 10, marginTop: 4 },
-  featureCard:   { backgroundColor: COLORS.card, borderRadius: RADIUS.md, padding: 16, marginBottom: 10, flexDirection: "row", alignItems: "center", elevation: 2, shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
-  featureIcon:   { fontSize: 28, marginRight: 14 },
-  featureText:   { flex: 1 },
-  featureTitle:  { fontSize: FONTS.base, fontWeight: "700", color: COLORS.secondary },
-  featureDesc:   { fontSize: FONTS.sm, color: COLORS.textSub, marginTop: 2 },
-  featureArrow:  { fontSize: 24, color: COLORS.textLight },
-  diseaseRow:    { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 24 },
-  diseaseChip:   { flexDirection: "row", alignItems: "center", borderRadius: RADIUS.xl, paddingVertical: 6, paddingHorizontal: 12, gap: 4 },
-  diseaseIcon:   { fontSize: 14 },
-  diseaseName:   { fontSize: FONTS.sm, fontWeight: "600", color: COLORS.secondary },
-  logoutBtn:     { borderWidth: 1, borderColor: COLORS.danger, borderRadius: RADIUS.sm, padding: 13, alignItems: "center" },
-  logoutText:    { color: COLORS.danger, fontWeight: "600", fontSize: FONTS.base },
+  actionCard: {
+    gap: SPACING.lg,
+    marginBottom: SPACING.xl,
+  },
+  actionHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: SPACING.md,
+  },
+  actionIcon: {
+    alignItems: "center",
+    backgroundColor: COLORS.primarySoft,
+    borderRadius: RADIUS.md,
+    height: 48,
+    justifyContent: "center",
+    width: 48,
+  },
+  actionSub: {
+    color: COLORS.textSub,
+    fontSize: FONTS.sm,
+    lineHeight: 20,
+    marginTop: 2,
+  },
+  actionText: {
+    flex: 1,
+  },
+  actionTitle: {
+    color: COLORS.secondary,
+    fontSize: FONTS.base,
+    fontWeight: "800",
+  },
+  container: {
+    padding: SPACING.lg,
+    paddingBottom: 36,
+  },
+  diseaseChip: {
+    alignItems: "center",
+    borderRadius: RADIUS.xl,
+    flexDirection: "row",
+    gap: SPACING.xs,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+  },
+  diseaseName: {
+    color: COLORS.secondary,
+    fontSize: FONTS.sm,
+    fontWeight: "700",
+  },
+  diseaseRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: SPACING.sm,
+    marginBottom: SPACING.xl,
+  },
+  featureCard: {
+    alignItems: "center",
+    backgroundColor: COLORS.card,
+    borderRadius: RADIUS.md,
+    flexDirection: "row",
+    gap: SPACING.md,
+    marginBottom: SPACING.md,
+    padding: SPACING.lg,
+  },
+  featureDesc: {
+    color: COLORS.textSub,
+    fontSize: FONTS.sm,
+    lineHeight: 20,
+    marginTop: 2,
+  },
+  featureIcon: {
+    alignItems: "center",
+    borderRadius: RADIUS.md,
+    height: 48,
+    justifyContent: "center",
+    width: 48,
+  },
+  featureText: {
+    flex: 1,
+  },
+  featureTitle: {
+    color: COLORS.secondary,
+    fontSize: FONTS.base,
+    fontWeight: "800",
+  },
+  greetHi: {
+    color: "rgba(255,255,255,0.82)",
+    fontSize: FONTS.base,
+  },
+  greetName: {
+    color: "#fff",
+    fontSize: FONTS.xl,
+    fontWeight: "800",
+    marginTop: 2,
+  },
+  greetSub: {
+    color: "rgba(255,255,255,0.82)",
+    fontSize: FONTS.sm,
+    lineHeight: 20,
+    marginTop: SPACING.sm,
+    maxWidth: 260,
+  },
+  hero: {
+    alignItems: "flex-start",
+    backgroundColor: COLORS.primary,
+    borderRadius: RADIUS.lg,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: SPACING.lg,
+    padding: SPACING.xl,
+  },
+  heroIcon: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderRadius: RADIUS.xl,
+    height: 56,
+    justifyContent: "center",
+    width: 56,
+  },
+  scroll: {
+    backgroundColor: COLORS.background,
+    flex: 1,
+  },
+  sectionTitle: {
+    color: COLORS.secondary,
+    fontSize: FONTS.md,
+    fontWeight: "800",
+    marginBottom: SPACING.md,
+    marginTop: SPACING.xs,
+  },
 });
